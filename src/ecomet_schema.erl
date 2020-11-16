@@ -18,8 +18,17 @@
 -module(ecomet_schema).
 
 -include("ecomet.hrl").
+-include("ecomet_schema.hrl").
 
 -behaviour(gen_server).
+
+%%=================================================================
+%%	SERVICE API
+%%=================================================================
+-export([
+  add_mount_point/2,
+  remove_mount_point/1
+]).
 
 %%=================================================================
 %%	OTP
@@ -39,10 +48,48 @@
 
 -define(INCREMENT,list_to_atom("ecomet_"++atom_to_list(node()))).
 -define(SCHEMA,ecomet_schema).
+-define(ROOT,root).
+
+% Mount point indexing
+-record(mntId,{k}).
+-record(mntOID,{k}).
+-record(mntPath,{k}).
+-record(mntName,{k}).
+
 
 -record(state,{
   cycle
 }).
+
+%%=================================================================
+%%	SERVICE API
+%%=================================================================
+add_mount_point(FolderID,DB)->
+  case mnesia:transaction(fun()->
+    % Adding a new mount point requires lock on the schema
+    mnesia:lock({table,?SCHEMA},write),
+
+    Id = new_mount_id(),
+
+    { ok, Path } = ecomet:oid2path( FolderID ),
+
+    % Index on id
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntId{k=Id}, value = DB }, write ),
+    % Index on OID
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntOID{k=FolderID}, value = DB }, write ),
+    % Index on PATH
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntPath{k=Path}, value = DB }, write ),
+    % name 2 id
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntName{k=DB}, value = Id }, write )
+
+  end) of
+    { atomic, ok }-> ok;
+    { aborted, Reason }->{error,Reason}
+  end.
+
+remove_mount_point(FolderID)->
+  ok.
+
 
 %%=================================================================
 %%	OTP
@@ -137,6 +184,29 @@ init_schema()->
   end.
 
 create_schema()->
+  % Create the table itself
+  case mnesia:create_table(?SCHEMA,[
+    {attributes, record_info(fields, kv)},
+    {record_name, kv},
+    {type,ordered_set},
+    {disc_copies,[node()]},
+    {ram_copies,[]}
+  ]) of
+    {atomic,ok} ->
+      % Initialize the minimum required environment
+      prepare_schema();
+    {aborted,Reason} ->
+      ?LOGERROR("unable to create the schema table for the node ~p",[Reason]),
+      ?ERROR(Reason)
+  end.
+
+prepare_schema()->
+  ecomet_backend:remove_db(?ROOT),
+  ecomet_backend:create_db(?ROOT),
+
+  add_mount_point({?FOLDER_PATTERN,?ROOT_FOLDER},?ROOT),
+
+
   ok.
 
 init_environment()->
@@ -150,3 +220,14 @@ table_exists(Table)->
 table_has_copy(Table,Type)->
   Copies=mnesia:table_info(?SCHEMA,Type),
   lists:member(Table,Copies).
+
+new_mount_id()->
+  new_mount_id(mnesia:dirty_next(?SCHEMA, #mntId{k=-1}), -1).
+new_mount_id(#mntId{k=NextID}=Mnt,Id)->
+  if
+    (NextID - Id) > 1 -> Id + 1 ;
+    true -> new_mount_id( mnesia:dirty_next(?SCHEMA,Mnt), NextID )
+  end;
+new_mount_id(_Other,Id)->
+  % '$end_of_table' or other keys range
+  Id + 1.

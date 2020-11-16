@@ -16,10 +16,13 @@
 %% under the License.
 %%----------------------------------------------------------------
 
--ifndef(DLSS_STRUCT).
--define(DLSS_STRUCT,1).
+-ifndef(ECOMET_STRUCT).
+-define(ECOMET_STRUCT,1).
 
--define(DEFAULT_SEGMENT_LIMIT,4096). % MB
+-define(RAMLOCAL,ramlocal).
+-define(RAM,ram).
+-define(RAMDISC,ramdisc).
+-define(DISC,disc).
 
 -record(kv,{key,value}).
 
