@@ -15,22 +15,7 @@
 %% specific language governing permissions and limitations
 %% under the License.
 %%----------------------------------------------------------------
--module(ecomet_object).
+-module(ecomet_field).
 
-
--callback on_create(Object::tuple())->{ok,none}|{ok,Object::tuple()}|{error,term()}.
--callback on_edit(Object::tuple())->{ok,none}|{ok,Object::tuple()}|{error,term()}.
--callback on_delete(Object::tuple())->{ok,none}|{ok,Object::tuple()}|{error,term()}.
-
-%%=================================================================
-%%	API
-%%=================================================================
--export([
-  read_field/2
-]).
-
-%%=================================================================
-%%	API
-%%=================================================================
-read_field(Object,Field)->
-  ok.
+%% API
+-export([]).

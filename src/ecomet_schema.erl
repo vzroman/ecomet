@@ -88,7 +88,26 @@ add_mount_point(FolderID,DB)->
   end.
 
 remove_mount_point(FolderID)->
-  ok.
+  case mnesia:transaction(fun()->
+
+    mnesia:lock({table,?SCHEMA},write),
+
+    { ok, Path } = ecomet:oid2path( FolderID ),
+    [ #kv{ value = DB } ] = mnesia:read( ?SCHEMA, #mntOID{k=FolderID} ),
+    [ #kv{ value = Id } ] = mnesia:read( ?SCHEMA, #mntName{k=DB} ),
+
+    ok = mnesia:delete( ?SCHEMA, #mntId{k=Id}, write ),
+
+    ok = mnesia:delete( ?SCHEMA, #mntOID{k=FolderID}, write ),
+
+    ok = mnesia:delete( ?SCHEMA, #mntPath{k=Path}, write ),
+
+    ok = mnesia:delete( ?SCHEMA, #mntName{k=DB}, write )
+
+  end) of
+    { atomic, ok }-> ok;
+    { aborted, Reason }->{error,Reason}
+  end.
 
 
 %%=================================================================
@@ -205,6 +224,8 @@ prepare_schema()->
   ecomet_backend:create_db(?ROOT),
 
   add_mount_point({?FOLDER_PATTERN,?ROOT_FOLDER},?ROOT),
+
+
 
 
   ok.
