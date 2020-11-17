@@ -17,59 +17,82 @@
 %%----------------------------------------------------------------
 -module(ecomet_field).
 
+-include("ecomet.hrl").
 %% ====================================================================
 %% API for object fields (alphabetical order)
 %% ====================================================================
 -export([
-  build_new/2,
-  get_value/3, get_value/4,
+  +build_new/2,
   copy_to_pattern/2,
   delete_object/2,
   field_changes/4,
-  field_names/1,
+  +field_names/1,
   fields_storages/1,
   get_default/2,
   get_index/2,
-  get_storage/1, get_storage/2,
-  get_type/2,
-  index_storages/1,
-  is_required/2,
-  lookup_storage/3,
+  +get_storage/1, get_storage/2,
+  +get_type/2,
+  +get_value/3, get_value/4,
+  +index_storages/1,
+  +is_required/2,
+  +lookup_storage/3,
   merge/3,
   save_changes/4
 ]).
 
-% @todo describe
+-ifdef(TEST).
+-export([
+	test_build_map/1,
+	test_build_description/1,
+	map_add/3,
+	map_delete/2,
+	+get_changes/3,
+	+merge_storages/4,
+	+dump_storages/2
+	]).
+-endif.
+
+% @edoc metadata describing object in a format of map where
+% each key is field_key() and corresponding value is #field{} or
+% key is service_key() and corresponding value is any service info
 -type description() :: map().
 
-% @todo describe
+% @edoc ecomet object denotes map where earch key is field_key()
+% and corresponding value is field_value() of any() type
 -type object() :: map().
 
-% @doc Object identifier
+% @edoc object identifier
 -type oid() :: {non_neg_integer(), non_neg_integer()}.
 
-% @doc Value of field is valid erlang term
+% @edoc value of field is valid erlang term
 -type field_value() :: term().
 
-% @doc Internal key is atom
--type internal_key() :: atom().
+% @edoc service key is sort of internal key and is atom
+-type service_key() :: atom().
 
-% @doc External key is binary
--type external_key() :: binary().
+% @edoc field key of any field in DB is binary
+-type field_key() :: binary().
 
-% @doc Field specification
--type field() :: { internal_key() | external_key(), field_value()}.
+% @edoc storage type of particular field for certain ecomet object 
+-type storage_type() :: ramdisc | disc | ram. 
 
-% @todo describe
+% @edoc field description
+-type field() :: {service_key() | field_key(), field_value()}.
+
+% @edoc field type
+-type field_type() :: string | {list, string}.
+
+% @edoc internal presentation of field specification:
+% list of #field{} defines ecomet object
 -record(field, {type, subtype, index, required, storage, default, autoincrement}).
 
 %%===========================================================================
 %% API for object fields
 %%===========================================================================
-% @doc Build fields structure on object creation
--spec build_new(Map :: description(), FieldList :: [field()]) -> object().
+% @edoc Build fields structure on object creation
+-spec build_new(DescMap :: description(), FieldList :: [field()]) -> object().
 
-build_new(Map, FieldList)->
+build_new(DescMap, FieldList)->
   NewFields = maps:from_list(FieldList),
 	maps:from_list(maps:fold(
     fun
@@ -79,61 +102,61 @@ build_new(Map, FieldList)->
       (Name, FieldDesc, FieldsAcc) ->
         Default = auto_value(FieldDesc),
 		    Value = maps:get(Name, NewFields, Default),
-		    try_value(FieldDesc, Value),
+		    check_value(FieldDesc, Value),
 		    [{Name, Value} | FieldsAcc]
 	  end,
     [],
-    Map
+    DescMap
   )).
 
-% @doc Get field type with default
--spec get_value(
-    Map     :: description(),
-    OID     :: oid(),
-    Key     :: external_key(),
-    Default :: field_value()
-) ->
-  {ok, Value :: field_value()} | {error, Reason :: any()}.
+% @edoc Get list of all fields in the object
+-spec field_names(DescMap :: description()) -> [field_key()].
 
-get_value(Map, OID, Name, Default)->
-	case get_value(Map, OID, Name) of
-		{ok, none} ->
-      Default;
-		{ok, Value} ->
-      Value
+field_names(DescMap)->
+	maps:fold(
+    fun
+      (FieldName, _Map, FieldsAcc) when is_atom(FieldName) ->
+        FieldsAcc;
+      (FieldName, _Map, FieldsAcc) ->
+        [FieldName | FieldsAcc]
+	  end,
+    [],
+    DescMap
+  ).
+
+% @edoc Get type of storage for the field
+% TODO We need field storage while compiling query. How to obtain it?
+-spec get_storage(FieldDescription :: #field{}) -> storage_type().
+
+get_storage(#field{storage=Storage}) ->
+  Storage;
+get_storage(FieldID)->
+	lookup_storage(ramdisc, FieldID, <<"storage">>).
+
+% @edoc Get type of storage for the field
+-spec get_storage(
+    DescMap   :: description(),
+    FieldName :: field_key()
+) ->
+  {ok, Storage :: storage_type()} | {error, undefined_field}.
+
+get_storage(DescMap, FieldName) ->
+	case maps:find(FieldName, DescMap) of
+		{ok, #field{storage=Storage}} ->
+      {ok, Storage};
+		error ->
+      {error, undefined_field}
 	end.
 
-% @doc Get field type
--spec get_value(
-    Map     :: description(),
-    OID     :: oid(),
-    Key     :: external_key()
+% @edoc Get field type
+-spec get_type(
+    DescMap   :: description(),
+    FieldName :: field_key()
 ) ->
-  {ok, Value :: field_value()} | {error, Reason :: any()}.
+  {ok, Type :: field_type()} | {error, undefined_field}.
 
-get_value(Map, OID, Key)->
-	% Load storage
-	case mnemonic_oid4storage(OID) of
-    {error, _} = Err ->
-      Err;
-		{ok, Storage} ->
-	    case dlss:read(Storage, Key) of
-		    not_found -> % Storage is empty
-          {ok, none};
-		    Value ->
-          {ok, Value}
-	    end
-  end.
-
-auto_value(#field{default = none, autoincrement = true}) ->
-  erlang:integer_to_binary((erlang:unique_integer([positive,monotonic]) bsl 16) + ecomet_node:get_unique_id());
-auto_value(#field{default = none, autoincrement = false}) ->
-  none;
-auto_value(#field{default = Default}) ->
-	Default.
-
-get_type(Map, Name)->
-	case maps:find(Name, Map) of
+get_type(DescMap, FieldName)->
+	case maps:find(FieldName, DescMap) of
 		{ok, Desc}->
 			{ok, get_type(Desc)};
 		error ->
@@ -145,13 +168,168 @@ get_type(#field{type = list, subtype = SubType}) ->
 get_type(#field{type = Type}) ->
 	Type.
 
-% Check field value or throw an error
-try_value(#field{required = true}, none) ->
-  erlang:error(required_field);
-try_value(Desc, Value) ->
-  case ecomet_types:check_value(get_type(Desc), Value) of
-    ok ->
-      ok;
-    _ ->
-      erlang:error(invalid_value)
+% @doc Get field type with default
+-spec get_value(
+    DescMap   :: description(),
+    OID       :: oid(),
+    FieldName :: field_key(),
+    Default   :: field_value()
+) ->
+  {ok, Value :: field_value()} | {error, Reason :: any()}.
+
+get_value(DescMap, OID, FieldName, Default)->
+	case get_value(DescMap, OID, FieldName) of
+		{ok, none} ->
+      Default;
+		{ok, Value} ->
+      Value
+	end.
+
+% @edoc Get field type
+-spec get_value(
+    DescMap   :: description(),
+    OID       :: oid(),
+    FieldName :: field_key()
+) ->
+  {ok, Value :: field_value()} | {error, Reason :: any()}.
+
+get_value(DescMap, OID, FieldName)->
+	case get_storage(DescMap, FieldName) of
+    {error, _} = Err ->
+      Err;
+		{ok, StorageType} ->
+	    case ecomet_object:load_storage(OID, StorageType) of
+		    none -> % Storage is empty
+          {ok,none}; 
+		    Storage ->
+          {ok, maps:get(FieldName, Storage, none)}
+	    end
   end.
+
+% @edoc Return list of storages, that contain indexes for the fields
+-spec index_storages(DescMap :: description()) -> [storage_type()].
+
+index_storages(DescMap) ->
+	Storages = maps:get(index_storage, DescMap),
+	{StorageList,_} = lists:unzip(Storages),
+	StorageList.
+
+% @edoc Check if field is required
+-spec is_required(
+    DescMap   :: description(),
+    FieldName :: field_key()
+) ->
+  {ok, boolean()} | {error, undefined_field}.
+
+is_required(DescMap, FieldName)->
+	case maps:find(FieldName, DescMap) of
+		{ok, #field{required=IsRequired}} ->
+      {ok, IsRequired};
+		error->
+      {error, undefined_field}
+	end.
+
+% @doc Direct dirty lookup in storage
+-spec lookup_storage(
+    Type      :: storage_type(),
+    OID       :: oid(),
+    FieldName :: field_key()
+) ->
+  Value :: none | field_value().
+
+lookup_storage(Type, OID, FieldName)->
+	case ecomet_object:load_storage(OID, Type) of
+		none ->
+      none;
+		Storage ->
+      maps:get(FieldName, Storage, none)
+	end.
+
+%%=============================================================================
+%% TEST functions
+%%=============================================================================
+% @edoc Dump fields storages
+dump_storages([], _OID) ->
+  ok;
+dump_storages([{Type, Fields}| Rest], OID)->
+	case maps:size(Fields) > 0 of
+		true->
+      ecomet_object:save_storage(OID, Type, fields, Fields);
+		false->
+      ecomet_object:delete_storage(OID, Type, fields)
+	end,
+	dump_storages(Rest, OID).
+
+
+% @edoc Build storage changes from projectors (field names and its values)
+% returns projector map of aggregated per storage type 
+-spec get_changes(
+    [{FieldName :: field_key(), Value :: field_value()}],
+    DescMap :: description(),
+    InputAcc :: map()
+) -> OutputAcc :: map().
+
+get_changes([], DescMap, Result) ->
+  Result;
+get_changes([{FieldName, Value}|Rest], DescMap, Storages) ->
+	{ok, StorageType} = get_storage(DescMap, FieldName),
+	Storage = maps:get(StorageType, Storages, #{}),
+	get_changes(Rest, DescMap, Storages#{StorageType => Storage#{FieldName => Value}}).
+
+% @edoc Merge unchanged values into changed storages
+merge_storages([], _PreloadedStorages, _OID, Result) ->
+  Result;
+merge_storages([{Storage,Fields}|Rest],PreloadedStorages,OID,{MergedStorages,ChangedFields})->
+	OldFields=
+	case maps:find(Storage,PreloadedStorages) of
+		{ok,none}->#{};
+		{ok,PreLoaded}->PreLoaded;
+		error->
+			case ecomet_object:load_storage(OID,Storage) of
+				none->#{};
+				Loaded->Loaded
+			end
+	end,
+	ChangedStorageFields=
+	maps:fold(fun(Field,Value,ChangesList)->
+		case maps:find(Field,OldFields) of
+			% Value not changed
+			{ok,Value}->ChangesList;
+			% Really changed
+			_->[{Field,Value}|ChangesList]
+		end
+	end,[],Fields),
+	StorageResult=
+	case ChangedStorageFields of
+		% No real changes to storage, no need to save
+		[]->MergedStorages;
+		_->
+			MergedFields=maps:merge(OldFields,Fields),
+			ClearedFields=maps:filter(fun(_,Value)-> Value/=none end,MergedFields),
+			case {maps:size(OldFields),maps:size(ClearedFields)} of
+				% Storage did not exist and nothing to save now
+				{0,0}->MergedStorages;
+				% We here, if:
+				% 1. storage had not existed before, but we have data to write now
+				% 2. storage is updated
+				% 3. storage had existed before, but all data is cleared (empty will be deleted on dump step)
+				_->MergedStorages#{Storage=>ClearedFields}
+			end
+	end,
+	merge_storages(Rest,PreloadedStorages,OID,{StorageResult,ChangedStorageFields++ChangedFields}).
+
+%%=============================================================================
+%% Helpers
+%%=============================================================================
+auto_value(#field{default = none, autoincrement = true}) ->
+  erlang:integer_to_binary((erlang:unique_integer([positive,monotonic]) bsl 16) + ecomet_node:get_unique_id());
+auto_value(#field{default = none, autoincrement = false}) ->
+  none;
+auto_value(#field{default = Default}) ->
+	Default.
+
+% Check field value or throw an error
+check_value(#field{required=Required} = Desc, Value)->
+	?assertNotMatch({true,none}, {Required,Value}, requierd_field),
+	Type = get_type(Desc),
+	?assertMatch(ok, ecomet_types:check_value(Type, Value), invalid_value).

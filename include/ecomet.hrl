@@ -49,4 +49,51 @@
 -define(LOGDEBUG(Text),lager:debug(Text)).
 -define(LOGDEBUG(Text,Params),lager:debug(Text,Params)).
 
+-define(assertMatch(Value,Expression,Error),
+  begin
+    ((fun()->
+        case Expression of
+          ExPreSsIoNvAlUe=Value->ExPreSsIoNvAlUe;
+          _->?ERROR(Error)
+        end
+      end)())
+
+  end).
+
+-define(assertNotMatch(Value,Expression,Error),
+  begin
+    ((fun()->
+        case Expression of
+          Value->erlang:error(Error);
+          ExPreSsIoNvAlUe->ExPreSsIoNvAlUe
+        end
+      end)())
+  end).
+
+-define(assertNotError(Expression),
+  begin
+    ((fun()->
+        case Expression of
+          {error,Error}->erlang:error(Error);
+          ExPreSsIoNvAlUe->ExPreSsIoNvAlUe
+        end
+      end)())
+  end).
+
+-define(assertNotError(Expression,Error),
+  begin
+    ((fun()->
+      case Expression of
+        error->erlang:error(Error);
+        {error,_}->erlang:error(Error);
+        ExPreSsIoNvAlUe->ExPreSsIoNvAlUe
+      end
+      end)())
+  end).
+
+-define(assertTrue(Expression,Error),case Expression of true->ok; _->erlang:error(Error) end).
+-define(assertFalse(Expression,Error),case Expression of false->ok; _->erlang:error(Error) end).
+-define(assertOk(Expression,Error),case Expression of ok->ok; _->erlang:error(Error) end).
+
+
 -endif.
