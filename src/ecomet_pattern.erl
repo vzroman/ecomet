@@ -15,27 +15,24 @@
 %% specific language governing permissions and limitations
 %% under the License.
 %%----------------------------------------------------------------
--module(ecomet_field).
+-module(ecomet_pattern).
 
 %%=================================================================
 %%	Service API
 %%=================================================================
 -export([
-  build_description/1
+  get_map/1,
+  edit_map/2
 ]).
-
--define(DEFAULT_DESCRIPTION,#{
-  type => string,
-  subtype => none,
-  index => none,
-  required => false,
-  storage => disc,
-  default => none,
-  autoincrement => false
-}).
 
 %%=================================================================
 %%	Service API
 %%=================================================================
-build_description(Params)->
-  maps:merge(?DEFAULT_DESCRIPTION,Params).
+get_map(PatternID)->
+  case ecomet_schema:get_pattern(PatternID) of
+    Value when is_map(Value)->Value;
+    _->#{}
+  end.
+
+edit_map(PatternID,Map)->
+  ecomet_schema:set_pattern(PatternID,Map).

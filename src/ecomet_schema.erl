@@ -27,7 +27,10 @@
 %%=================================================================
 -export([
   add_mount_point/2,
-  remove_mount_point/1
+  remove_mount_point/1,
+
+  get_pattern/1,
+  set_pattern/2
 ]).
 
 %%=================================================================
@@ -56,6 +59,8 @@
 -record(mntPath,{k}).
 -record(mntName,{k}).
 
+% Patterns
+-record(pattern,{id}).
 
 -record(state,{
   cycle
@@ -108,6 +113,15 @@ remove_mount_point(FolderID)->
     { atomic, ok }-> ok;
     { aborted, Reason }->{error,Reason}
   end.
+
+get_pattern(ID)->
+  case mnesia:dirty_read(?SCHEMA,#pattern{id=ID}) of
+    [#kv{value = Value}] -> Value;
+    _->none
+  end.
+
+set_pattern(ID,Value)->
+  ok = mnesia:write(?SCHEMA,#kv{key = #pattern{id=ID}, value = Value },write).
 
 
 %%=================================================================

@@ -15,27 +15,11 @@
 %% specific language governing permissions and limitations
 %% under the License.
 %%----------------------------------------------------------------
--module(ecomet_field).
+-module(ecomet_lib).
 
 %%=================================================================
-%%	Service API
+%%	Common utilities
 %%=================================================================
 -export([
-  build_description/1
+
 ]).
-
--define(DEFAULT_DESCRIPTION,#{
-  type => string,
-  subtype => none,
-  index => none,
-  required => false,
-  storage => disc,
-  default => none,
-  autoincrement => false
-}).
-
-%%=================================================================
-%%	Service API
-%%=================================================================
-build_description(Params)->
-  maps:merge(?DEFAULT_DESCRIPTION,Params).
