@@ -21,6 +21,7 @@
 %%	Data API
 %%=================================================================
 -export([
+  transaction/1, sync_transaction/1,
   oid2path/1,
   path2oid/1,
   read_field/2,read_field/3
@@ -42,3 +43,9 @@ read_field(Object,FieldName,Default)->
     {ok,none}->{ok,Default};
     Result->Result
   end.
+
+transaction(Fun)->
+  ecomet_backend:transaction(Fun).
+
+sync_transaction(Fun)->
+  ecomet_backend:sync_transaction(Fun).

@@ -1,0 +1,370 @@
+%%----------------------------------------------------------------
+%% Copyright (c) 2020 Faceplate
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%----------------------------------------------------------------
+-module(ecomet_transaction).
+
+-include("ecomet.hrl").
+
+%% API
+-export([
+  internal/1,
+  start/0,
+  lock/6,
+  release_lock/1,
+  find_lock/1,
+  dict_get/1,
+  dict_get/2,
+  dict_put/1,
+  dict_remove/1,
+  queue_commit/1,
+  apply_commit/1,
+  on_commit/1,
+  get_type/0,
+  commit/0,
+  rollback/0
+]).
+
+-define(TKEY,eCoMeT_tRaNsAcTiOn).
+-define(LOCKTIMEOUT,10000).
+-define(LOCKKEY(DB,Storage,Type,Key),{DB,Storage,Type,Key}).
+
+-record(state,{locks,dict,log,droplog,parent,oncommit,type}).
+-record(lock,{value,type,pid}).
+
+% Run fun within transaction
+internal(Fun)->
+  tstart(internal),
+  case ecomet_backend:transaction(fun()->
+    Result=Fun(),
+    {Log,OnCommits}=tcommit(),
+    {Result,Log,OnCommits}
+  end) of
+    {ok,{Result,Log,OnCommits}}->
+      on_commit(Log,OnCommits),
+      {ok,Result};
+    {error,Error}->
+      rollback(),
+      {error,Error}
+  end.
+
+% Start external transaction
+start()->tstart(external).
+
+% Start transaction
+tstart(Type)->
+  case get(?TKEY) of
+    % It is root transaction
+    undefined->
+      put(?TKEY,#state{
+        locks= #{},
+        dict= #{},
+        log=[],
+        droplog=[],
+        parent=none,
+        oncommit=[],
+        type=Type
+      });
+    % Subtransaction
+    Parent->
+      % Variants:
+      SubType=
+        case {Parent#state.type,Type} of
+          % parent is external. Sub run as external, even if it is claimed as internal
+          {external,_}->external;
+          % parent is internal, sub is internal. Run as internal
+          {internal,internal}->internal;
+          % parent is internal, sub is external. Error
+          {internal,external}->?ERROR(external_transaction_within_internal)
+        end,
+      put(?TKEY,#state{
+        locks=Parent#state.locks,
+        dict= Parent#state.dict,
+        log=[],
+        droplog=[],
+        parent=Parent,
+        oncommit=[],
+        type=SubType
+      })
+  end.
+
+% Commit transaction
+commit()->
+  case get(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    #state{type = internal}->?ERROR(internal_transaction);
+    State when State#state.type==external->
+      case ecomet_backend:transaction(fun()->tcommit() end) of
+        {ok,{Log,OnCommits}}->
+          release_locks(maps:to_list(State#state.locks)),
+          on_commit(Log,OnCommits);
+        {error,Error}->?ERROR(Error)
+      end
+  end.
+
+% Transaction rollback, erase all changes
+rollback()->
+  case erase(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    % Main transaction
+    #state{parent=none,type=Type,locks=Locks}->
+      case Type of
+        internal->ok;
+        external->release_locks(maps:to_list(Locks))
+      end;
+    #state{parent=Parent,locks=Locks}->
+      % By default we hold all locks until main transaction finish
+      put(?TKEY,Parent#state{locks=Locks})
+  end,
+  ok.
+
+% Get type of current transaction
+get_type()->
+  case get(?TKEY) of
+    undefined->none;
+    State->State#state.type
+  end.
+
+lock(DB,Storage,Type,Key,Lock,Timeout) when is_integer(Timeout)->
+  LockKey=?LOCKKEY(DB,Storage,Type,Key),
+  case get(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    #state{locks=Locks,type=TType}=State->
+      case add_lock(LockKey,Type,Locks,TType,Timeout) of
+        {ok,Lock}->
+          put(?TKEY,State#state{locks=Locks#{LockKey=>Lock}}),
+          {ok,Lock#lock.value};
+        {error,Error}->{error,Error}
+      end
+  end;
+lock(DB,Storage,Type,Key,Lock,_Timeout)->
+  lock(DB,Storage,Type,Key,Lock,?LOCKTIMEOUT).
+
+
+add_lock(Key,Type,Locks,TType,Timeout)->
+  case maps:find(Key,Locks) of
+    error->get_lock(TType,Key,Type,Timeout);
+    {ok,Lock}->
+      case {Type,Lock#lock.type} of
+        % No need to upgrade
+        {read,_}->{ok,Lock};
+        {write,write}->{ok,Lock};
+        % Upgrade needed
+        {write,read}->upgrade_lock(TType,Key,Type,Lock,Timeout)
+      end
+  end.
+
+% Acquire lock for internal transaction
+get_lock(internal,?LOCKKEY(DB,Storage,Type,Key),Lock,_Timeout)->
+  Value= ecomet_backend:read(DB,Storage,Type,Key,Lock),
+  {ok,#lock{value=Value,type=Type,pid=internal}};
+% External transaction uses stick locks
+get_lock(external,Key,Type,Timeout)->
+  Self=self(),
+  PID=spawn(fun()->stick_lock(Self,Key,Type) end),
+  wait_stick_lock(PID,Timeout).
+wait_stick_lock(PID,Timeout)->
+  receive
+    {ecomet_stick_lock,Lock} when Lock#lock.pid==PID->{ok,Lock}
+  after
+    Timeout->
+      exit(PID,timeout),
+      {error,timeout}
+  end.
+
+upgrade_lock(internal,Key,Type,_Lock,Timeout)->
+  get_lock(internal,Key,Type,Timeout);
+upgrade_lock(external,_Key,Type,#lock{pid=PID},Timeout)->
+  PID!{upgrade,Type},
+  wait_stick_lock(PID,Timeout).
+
+% Executed in context of linked process
+stick_lock(Holder,Key,Type)->
+  ecomet_backend:transaction(fun()->
+    {ok,Lock}=get_lock(internal,Key,Type,timeout_not_used),
+    Holder!{ecomet_stick_lock,Lock#lock{pid=self()}},
+    wait_release(Key,Holder)
+  end).
+wait_release(Key,Holder)->
+  link(Holder),
+  process_flag(trap_exit,true),
+  receive
+  % Finish process
+    release->ok;
+  % Parent finished
+    {'EXIT',Holder,Reason}->exit(Reason);
+    {upgrade,NewType}->
+      % Use unlink because this process can be killed by timeout
+      process_flag(trap_exit,false),
+      unlink(Holder),
+      {ok,Lock}=get_lock(internal,Key,NewType,timeout_not_used),
+      Holder!{ecomet_stick_lock,Lock#lock{pid=self()}},
+      wait_release(Key,Holder)
+  end.
+
+release_lock(Key)->
+  case get(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    % Internal transaction holds locks until commit all parents
+    #state{type=internal}->ok;
+    State->
+      case maps:find(Key,State#state.locks) of
+        {ok,Lock}->release_stick_lock(Lock),
+          put(?TKEY,State#state{locks=maps:remove(Key,State#state.locks)}),
+          ok;
+        error->ok
+      end
+  end.
+release_stick_lock(#lock{pid=PID})->
+  PID!release.
+
+find_lock(Key)->
+  case get(?TKEY) of
+    undefined->none;
+    #state{locks=Locks}->
+      case maps:find(Key,Locks) of
+        error->none;
+        {ok,#lock{value=Value,type=Type}}->{Value,Type}
+      end
+  end.
+
+
+dict_get(Key)->
+  case get(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    #state{dict=Dict}->maps:get(Key,Dict)
+  end.
+dict_get(Key,Default)->
+  case get(?TKEY) of
+    undefined->Default;
+    #state{dict=Dict}->maps:get(Key,Dict,Default)
+  end.
+
+dict_put(KeyValueList)->
+  case get(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    State->
+      Dict=maps:merge(State#state.dict,maps:from_list(KeyValueList)),
+      put(?TKEY,State#state{dict=Dict})
+  end.
+
+dict_remove(KeyList)->
+  case get(?TKEY) of
+    undefined->ok;
+    State->
+      Dict=maps:without(KeyList,State#state.dict),
+      put(?TKEY,State#state{dict=Dict})
+  end.
+
+% Put oid to commit queue
+queue_commit(OID)->
+  case get(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    State->
+      NewState=
+        case lists:member(OID,State#state.log) of
+          false->State#state{log=[OID|State#state.log],droplog=[OID|State#state.droplog]};
+          true->State
+        end,
+      put(?TKEY,NewState)
+  end,
+  ok.
+
+apply_commit(OID)->
+  case get(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    State->
+      DropLog=lists:delete(OID,State#state.droplog),
+      put(?TKEY,State#state{droplog=DropLog})
+  end,
+  ok.
+
+% Add fun to execute if transaction committed
+on_commit(Fun) when is_function(Fun,0)->
+  case get(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    State->
+      OnCommits=[Fun|State#state.oncommit],
+      put(?TKEY,State#state{oncommit=OnCommits})
+  end;
+on_commit(_Invalid)->
+  ?ERROR(not_function).
+
+%%-----------------------------------------------------------------------
+%% Internal helpers
+%%-----------------------------------------------------------------------
+tcommit()->
+  case erase(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    % Root transaction
+    #state{parent=none,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits}->
+      CommitLog=run_commit(lists:reverse(lists:subtract(Log,DropLog)),Dict,[]),
+      {CommitLog,OnCommits};
+    State->
+      put(?TKEY,merge_commit(State)),
+      {[],[]}
+  end.
+
+% Commit changes to storage
+run_commit([OID|Rest],Dict,LogList)->
+  run_commit(Rest,Dict,[ecomet_object:commit(OID,Dict)|LogList]);
+run_commit([],_Dict,Log)->lists:reverse(Log).
+
+release_locks([{_Key,Lock}|Rest])->
+  release_stick_lock(Lock),
+  release_locks(Rest);
+release_locks([])->ok.
+
+% Merge results of the transaction to the parent
+merge_commit(#state{locks=Locks,dict=Dict,log=Log,droplog=DropLog,oncommit=OnCommits,parent=Parent})->
+  ClearedLog=lists:subtract(Log,DropLog),
+  MergedLog=merge_log(ClearedLog,Parent#state.log),
+  Parent#state{
+    locks=Locks,
+    dict=Dict,
+    log=MergedLog,
+    droplog=lists:subtract(Parent#state.droplog,ClearedLog),
+    oncommit=[OnCommits|Parent#state.oncommit]
+  }.
+
+merge_log([OID|Rest],Parentlog)->
+  Merged=
+    case lists:member(OID,Parentlog) of
+      false->[OID|Parentlog];
+      true->Parentlog
+    end,
+  merge_log(Rest,Merged);
+merge_log([],Parentlog)->Parentlog.
+
+on_commit(Log,OnCommits)->
+  run_notifications(Log),
+  run_oncommits(lists:reverse(OnCommits)).
+
+% Run notifications
+run_notifications([Log|Rest])->
+  ecomet_subscription:notify(Log),
+  run_notifications(Rest);
+run_notifications([])->ok.
+
+% Execute fun
+run_oncommits([F|Rest]) when is_function(F)->
+  try F() catch _:_->ok end,
+  run_oncommits(Rest);
+% Execute brunch (result of sub transaction)
+run_oncommits([Branch|Rest]) when is_list(Branch)->
+  run_oncommits(lists:reverse(Branch)),
+  run_oncommits(Rest);
+run_oncommits([])->ok.

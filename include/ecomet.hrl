@@ -19,6 +19,9 @@
 -ifndef(ECOMET_STRUCT).
 -define(ECOMET_STRUCT,1).
 
+-define(DATA,data).
+-define(INDEX,index).
+
 -define(RAMLOCAL,ramlocal).
 -define(RAM,ram).
 -define(RAMDISC,ramdisc).

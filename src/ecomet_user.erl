@@ -15,56 +15,53 @@
 %% specific language governing permissions and limitations
 %% under the License.
 %%----------------------------------------------------------------
--module(ecomet_pattern).
+-module(ecomet_user).
 
 %%=================================================================
 %%	Service API
 %%=================================================================
 -export([
-
-  get_map/1,
-  edit_map/2,
-
-  get_behaviours/1,
-  set_behaviours/2
-
+  get_user/0,
+  get_usergroups/0,
+  on_init_state/0,
+  is_admin/0
 ]).
+
+-define(CONTEXT,eCoMeT_uSeRcOnTeXt).
+-record(state,{uid,session,is_admin,groups}).
 
 %%=================================================================
 %%	Service API
 %%=================================================================
-get_map(PatternID)->
-  case ecomet_schema:get_pattern(PatternID) of
-    Value when is_map(Value)->Value;
-    _->#{}
+%% Get OID of current user
+get_user()->
+  case get(?CONTEXT) of
+    undefined->{error,user_undefined};
+    #state{uid=UID}->{ok,UID}
   end.
 
-edit_map(PatternID,Map)->
-  ecomet_schema:set_pattern(PatternID,Map).
-
-get_behaviours(Map) when is_map(Map)->
-  maps:get(handlers,Map,[]);
-get_behaviours(ObjectOrOID)->
-  case ecomet_object:is_object(ObjectOrOID) of
-    true->
-      OID = ecomet_object:get_oid(ObjectOrOID),
-      get_behaviours(OID);
-    _->
-      % Assume its an OID
-      Map = get_map(ObjectOrOID),
-      get_behaviours(Map)
+get_usergroups()->
+  case get(?CONTEXT) of
+    undefined->{error,user_undefined};
+    #state{groups=Groups}->
+      case Groups of
+        none->{ok,[]};
+        _->{ok,Groups}
+      end
   end.
 
-set_behaviours(Map,Handlers) when is_map(Map)->
-  Map#{handlers=>Handlers};
-set_behaviours(ObjectOrOID,Handlers)->
-  case ecomet_object:is_object(ObjectOrOID) of
-    true->
-      OID = ecomet_object:get_oid(ObjectOrOID),
-      set_behaviours(OID,Handlers);
-    _->
-      % Assume its an OID
-      Map = get_map(ObjectOrOID),
-      Map1 = set_behaviours(Map,Handlers),
-      edit_map(ObjectOrOID,Map1)
+% Set user context for master init procedure
+on_init_state()->
+  put(?CONTEXT,#state{
+    uid=none,
+    session=none,
+    is_admin=true,
+    groups=[]
+  }).
+
+%% Check if current user is admin
+is_admin()->
+  case get(?CONTEXT) of
+    undefined->{error,user_undefined};
+    #state{is_admin=IsAdmin}->{ok,IsAdmin}
   end.

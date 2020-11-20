@@ -30,7 +30,9 @@
   remove_mount_point/1,
 
   get_pattern/1,
-  set_pattern/2
+  set_pattern/2,
+
+  local_increment/1
 ]).
 
 %%=================================================================
@@ -123,6 +125,8 @@ get_pattern(ID)->
 set_pattern(ID,Value)->
   ok = mnesia:write(?SCHEMA,#kv{key = #pattern{id=ID}, value = Value },write).
 
+local_increment(Key)->
+  mnesia:dirty_update_counter(?INCREMENT,Key,1).
 
 %%=================================================================
 %%	OTP
@@ -234,17 +238,93 @@ create_schema()->
   end.
 
 prepare_schema()->
+  % Create a DB for the /root
   ecomet_backend:remove_db(?ROOT),
   ecomet_backend:create_db(?ROOT),
 
+  % Mount the root to the root DB
   add_mount_point({?FOLDER_PATTERN,?ROOT_FOLDER},?ROOT),
-
-
-
-
   ok.
 
 init_environment()->
+  % Add the low-level patterns to the schema
+  init_low_level_patterns(),
+
+  create_root(),
+
+  ok.
+
+init_low_level_patterns()->
+
+  %-------Object------------------
+  Object=#{
+    <<".name">>=>#{ type => string, index=> [simple], required => true },
+    <<".folder">>=>#{ type => link, index=> [simple], required => true },
+    <<".pattern">>=>#{ type => link, index=> [simple], required => true },
+    <<".readgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<".readgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<".ts">> =>#{ type => integer }
+  },
+  ObjectFieldsMap = build_pattern_schema(Object),
+  ObjectMap= ecomet_pattern:set_behaviours(ObjectFieldsMap,[ecomet_object]),
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:edit_map({?PATTERN_PATTERN,?OBJECT_PATTERN},ObjectMap)
+  end),
+
+  %-----Folder---------------------
+  Folder = maps:merge(Object,#{
+    <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<"only_patterns">>=>#{ type => list, subtype => link },
+    <<"exclude_patterns">>=>#{ type => list, subtype => link },
+    <<"recursive_rights">> =>#{ type => bool }
+  }),
+  FolderFieldsMap=build_pattern_schema(Folder),
+  FolderMap= ecomet_pattern:set_behaviours(FolderFieldsMap,[ecomet_folder,ecomet_object]),
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:edit_map({?PATTERN_PATTERN,?FOLDER_PATTERN},FolderMap)
+  end),
+
+  %-----Pattern---------------------
+  Pattern = maps:merge(Folder,#{
+    <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<"only_patterns">>=>#{ type => list, subtype => link },
+    <<"exclude_patterns">>=>#{ type => list, subtype => link },
+    <<"recursive_rights">> =>#{ type => bool }
+  }),
+  PatternFieldsMap=build_pattern_schema(Pattern),
+  PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[ecomet_pattern,ecomet_folder,ecomet_object]),
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:edit_map({?PATTERN_PATTERN,?PATTERN_PATTERN},PatternMap)
+  end),
+
+  %-----Field---------------------
+  Pattern = maps:merge(Folder,#{
+    <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<"only_patterns">>=>#{ type => list, subtype => link },
+    <<"exclude_patterns">>=>#{ type => list, subtype => link },
+    <<"recursive_rights">> =>#{ type => bool }
+  }),
+  PatternFieldsMap=build_pattern_schema(Pattern),
+  PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[ecomet_pattern,ecomet_folder,ecomet_object]),
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:edit_map({?PATTERN_PATTERN,?PATTERN_PATTERN},PatternMap)
+  end),
+
+  ok.
+
+build_pattern_schema(Fields)->
+  maps:fold(fun(Name,Config,Acc)->
+    C = ecomet_field:build_description(Config),
+    ecomet_field:map_add(Acc,Name,C)
+  end,#{},Fields).
+
+
+
+create_root()->
   % TODO
   ok.
 
