@@ -22,20 +22,20 @@
 %% API for object fields (alphabetical order)
 %% ====================================================================
 -export([
-  +build_new/2,
+  build_new/2,
   copy_to_pattern/2,
   delete_object/2,
   field_changes/4,
-  +field_names/1,
+  field_names/1,
   fields_storages/1,
   get_default/2,
   get_index/2,
-  +get_storage/1, get_storage/2,
-  +get_type/2,
-  +get_value/3, get_value/4,
-  +index_storages/1,
-  +is_required/2,
-  +lookup_storage/3,
+  get_storage/1, get_storage/2,
+  get_type/2,
+  get_value/3, get_value/4,
+  index_storages/1,
+  is_required/2,
+  lookup_storage/3,
   merge/3,
   save_changes/4
 ]).
@@ -46,11 +46,22 @@
 	test_build_description/1,
 	map_add/3,
 	map_delete/2,
-	+get_changes/3,
-	+merge_storages/4,
-	+dump_storages/2
+	get_changes/3,
+	merge_storages/4,
++dump_storages/2
 	]).
 -endif.
+
+-define(STORAGELEVEL(Storage), string:str([ramlocal, ram, ramdisc, disc], [Storage])).
+
+-define(IS_SYSTEM(FieldName), lists:member(FieldName, [
+	<<".name">>,
+	<<".folder">>,
+	<<".readgroups">>,
+	<<".writegroups">>,
+	<<".ts">>,
+	<<".deleted">>])
+).
 
 % @edoc metadata describing object in a format of map where
 % each key is field_key() and corresponding value is #field{} or
@@ -82,6 +93,9 @@
 % @edoc field type
 -type field_type() :: string | {list, string}.
 
+% @edoc storage name
+-type storage() :: atom().
+
 % @edoc internal presentation of field specification:
 % list of #field{} defines ecomet object
 -record(field, {type, subtype, index, required, storage, default, autoincrement}).
@@ -109,6 +123,72 @@ build_new(DescMap, FieldList)->
     DescMap
   )).
 
+%% @edoc Helper. Copy field to pattern
+copy_to_pattern(Field, PatternID)->
+	{ok, FieldStorage} = ecomet:read_field(Field, <<"storage">>),
+	{ok, PatternStorage} = ecomet_pattern:get_storage(PatternID),
+	EditFields = case ?STORAGELEVEL(PatternStorage) of
+		PatternLevel when PatternLevel > 2 -> % Object is persistent
+			case ?STORAGELEVEL(FieldStorage) of
+				FieldLevel when FieldLevel > 2 -> % Field is persistent too
+          [{<<".folder">>,PatternID}];
+				_-> % Field is temporary
+					{ok, FieldName} = ecomet:read_field(Field, <<".name">>),
+					case ?IS_SYSTEM(FieldName) of
+						% Field is not system. Persistent objects can contain temporary fields
+						false ->
+              [{<<".folder">>, PatternID}];
+						% Fields is system. It must be as persistent as object
+						true ->
+              [{<<".folder">>, PatternID}, {<<"storage">>, PatternStorage}]
+					end
+			end;
+			% Object is temporary. Field must be as temporary and local as object
+			_ ->
+        [{<<".folder">>, PatternID}, {<<"storage">>, PatternStorage}]
+		end,
+	ecomet_object:copy(Field, EditFields).
+
+% @edoc Delete object
+-spec delete_object(DescMap :: description(), OID :: oid()) -> [].
+
+delete_object(DescMap, OID)->
+	StorageList = maps:fold(
+    fun
+      (FieldName, _FieldDesc, StoragesAcc) when is_atom(FieldName) ->
+        StoragesAcc;
+      (FieldName, FieldDesc, StoragesAcc) when is_atom(FieldName) ->
+		    [get_storage(FieldDesc) | StoragesAcc]
+		end,
+	  [],
+    DescMap
+  ),
+  %@TODO foreach over ordset??
+	lists:foreach(
+    fun(Type)-> ecomet_object:delete_storage(OID, Type, fields) end,
+    ordsets:from_list(StorageList)
+  ).
+
+% @edoc Get changes for the field
+-spec field_changes(description(), map(), oid(), field_key())
+-> 
+    none | {New :: field_value(), Old :: field_value()}.
+
+field_changes(DescMap, Project, OID, FieldName)->
+	case maps:find(FieldName, Project) of
+		{ok, New} -> % Field is in the project. It's changed or it is object creating
+			% Compare with old value
+			{ok, Storage} = get_storage(DescMap, FieldName),
+			case lookup_storage(Storage, OID, FieldName) of
+				New->
+          none;
+				Old->
+          {New, Old}
+			end;
+		error->
+      none
+	end.
+
 % @edoc Get list of all fields in the object
 -spec field_names(DescMap :: description()) -> [field_key()].
 
@@ -123,6 +203,46 @@ field_names(DescMap)->
     [],
     DescMap
   ).
+
+% @edoc Return list of fields storages for object
+-spec fields_storages(DescMap :: description()) -> ordsets:new().
+
+fields_storages(DescMap)->
+	ordsets:from_list(
+    maps:fold(
+      fun
+        (FieldName, _Desc, StoragesAcc) when is_atom(FieldName) ->
+			    StoragesAcc;
+			  (_FieldName, Desc, StoragesAcc) ->
+          [Desc#field.storage | StoragesAcc]
+	    end,
+      [],
+      DescMap)
+    ).
+
+% @edoc Get default value for the field
+-spec get_default(DescMap :: description(), FieldName :: field_key()) ->
+    {ok, any()} | {error, undefined_field}.
+
+get_default(DescMap, FieldName)->
+	case maps:find(FieldName, DescMap) of
+		{ok, #field{default=Default}} ->
+      {ok, Default};
+		error ->
+      {error, undefined_field}
+	end.
+
+% @edoc Get field indexes
+-spec get_index(DescMap :: description(), FieldName :: field_key()) ->
+    {ok, any()} | {error, undefined_field}.
+
+get_index(DescMap, FieldName)->
+	case maps:find(FieldName, DescMap) of
+		{ok, #field{index=Index}} ->
+      {ok, Index};
+		error->
+      {error, undefined_field}
+	end.
 
 % @edoc Get type of storage for the field
 % TODO We need field storage while compiling query. How to obtain it?
@@ -245,6 +365,44 @@ lookup_storage(Type, OID, FieldName)->
       maps:get(FieldName, Storage, none)
 	end.
 
+% @edoc Merge new values on object edit
+-spec merge(
+    DescMap   :: description(),
+    Project   :: map(),
+    NewFields :: [{field_key(), field_value()}]
+) ->
+  map().
+
+merge(DescMap, Project, NewFields)->
+	lists:foldl(
+    fun({FieldName, Value}, ProjectAcc) ->
+      FieldSpec = maps:find(FieldName, DescMap),
+		  {ok, Desc} = ?assertNotMatch(error, FieldSpec, {undefined_field, FieldName}),
+		  check_value(Desc, Value),
+		  ProjectAcc#{FieldName => Value}
+	  end,
+    Project,
+    NewFields
+  ).
+
+% @edoc Save field changes to storage
+-spec save_changes(
+    DescMap   :: description(),
+    Project   :: [any()],
+    PreloadedStorages :: [storage()],
+    OID       :: oid()
+) ->
+  map().
+
+save_changes(DescMap, Project, PreloadedStorages, OID)->
+	% 1. Group project by storages
+	Changed = maps:to_list(get_changes(maps:to_list(Project), DescMap, #{})),
+	% 2. Merge existing values into changed storages
+	{Merged, ChangedFields} = merge_storages(Changed, PreloadedStorages, OID, {#{}, []}),
+	% 3. Save storages
+	dump_storages(maps:to_list(Merged), OID),
+	ChangedFields.
+
 %%=============================================================================
 %% TEST functions
 %%=============================================================================
@@ -269,7 +427,7 @@ dump_storages([{Type, Fields}| Rest], OID)->
     InputAcc :: map()
 ) -> OutputAcc :: map().
 
-get_changes([], DescMap, Result) ->
+get_changes([], _DescMap, Result) ->
   Result;
 get_changes([{FieldName, Value}|Rest], DescMap, Storages) ->
 	{ok, StorageType} = get_storage(DescMap, FieldName),

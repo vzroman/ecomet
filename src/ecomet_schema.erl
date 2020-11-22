@@ -87,7 +87,7 @@ add_mount_point(FolderID,DB)->
     { aborted, Reason }->{error,Reason}
   end.
 
-remove_mount_point(FolderID)->
+remove_mount_point(_FolderID)->
   ok.
 
 
