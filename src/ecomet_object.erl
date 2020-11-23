@@ -44,6 +44,24 @@
 %%=================================================================
 %%	Data API
 %%=================================================================
+%%============================================================================
+%% Main functions
+%%============================================================================
+% Create new object
+create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields)->
+  Map=ecomet_pattern:get_map(PatternID),
+  Fields=ecomet_field:build_new(Map,FieldList),
+  FolderID=maps:get(<<".folder">>,Fields),
+  ?assertMatch(write,check_rights(FolderID),access_denied),
+  OID=new_id(FolderID,PatternID),
+  Object=#object{oid=OID,edit=true,map=Map},
+  ?TRANSACTION(fun()->
+    % Put empty storages to dict. Trick for no real lookups
+    put_empty_storages(OID,Map),
+    save(Object,Fields,on_create)
+               end),
+  Object.
+
 read_field(Object,Field)->
   ok.
 
@@ -98,3 +116,31 @@ load_storage(OID,Type)->
     TStorage->
       TStorage
   end.
+
+%%============================================================================
+%%	Internal helpers
+%%============================================================================
+% Unique object identification. The principles:
+% * the id is a tuple of 2 elements: { PatternID, ObjectID }
+%   - the PatternID is an id of the pattern (type) of the object. It defines its schema.
+%    The PatternID consists only of the second (ObjectID) of the related pattern
+%   - the ObjectID is a unique (system wide) id of the object within a pattern (type)
+% * the ObjectID is a composed integer that can be presented as:
+%   - IDHIGH = ObjectID div ?BITSTRING_LENGTH. It's sort of high level degree
+%   - IDLOW  = ObjectID rem ?BITSTRING_LENGTH (low level degree)
+% * The system wide increment is too expensive, so the initial increment is the node-wide only
+%   and then the unique ID of the node is twisted into the IDHIGH. Actually it is added
+%   as 2 least significant bytes to the IDHIGH (IDHIGH = IDHIGH bsl 16 + NodeID )
+% * To be able to obtain the database to which the object belongs we insert (code) it into
+%   the IDHIGH the same way as we do with the NodeID: IDHIGH = IDHIGH bsl 8 + MountID
+new_id(FolderID,PatternID)->
+
+  Domain=get_domain(FolderID),
+  Pattern=get_id(PatternID),
+  ID= ecomet_backend:local_increment({Domain,Pattern}),
+  % We can get id that is unique for this node. Unique id for entire system is too expensive.
+  % To resolve the problem we mix NodeId (it's unique for entire system) into IDH.
+  % IDH format - <IDH,NodeID:16>
+  IDH=((ID div ?BITSTRING_LENGTH) bsl 16)+ecomet_node:get_unique_id(),
+  IDL=ID rem ?BITSTRING_LENGTH,
+  {Domain,Pattern,IDH*?BITSTRING_LENGTH+IDL}.

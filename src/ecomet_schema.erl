@@ -26,9 +26,17 @@
 %%	SERVICE API
 %%=================================================================
 -export([
+  %--------Database------------------
   add_mount_point/2,
   remove_mount_point/1,
+  get_db_by_folderId/1,
 
+  %--------Node----------------------
+  add_node/1,
+  remove_node/1,
+  get_node_id/1,
+
+  %-------Pattern--------------------
   get_pattern/1,
   set_pattern/2,
 
@@ -61,6 +69,10 @@
 -record(mntPath,{k}).
 -record(mntName,{k}).
 
+% Node indexing
+-record(nodeId,{k}).
+-record(nodeName,{k}).
+
 % Patterns
 -record(pattern,{id}).
 
@@ -69,8 +81,9 @@
 }).
 
 %%=================================================================
-%%	SERVICE API
+%%	DATABASE API
 %%=================================================================
+%%---------------Mount a new database to a folder------------------
 add_mount_point(FolderID,DB)->
   case mnesia:transaction(fun()->
     % Adding a new mount point requires lock on the schema
@@ -94,6 +107,7 @@ add_mount_point(FolderID,DB)->
     { aborted, Reason }->{error,Reason}
   end.
 
+%%---------------Unmount a database from a folder------------------
 remove_mount_point(FolderID)->
   case mnesia:transaction(fun()->
 
@@ -116,6 +130,57 @@ remove_mount_point(FolderID)->
     { aborted, Reason }->{error,Reason}
   end.
 
+get_db_by_folderId(OID)->
+  case mnesia:dirty_read(?SCHEMA,#mntOID{k=OID}) of
+    [#kv{value = DB}]->DB;
+    _->undefined
+  end.
+
+%%=================================================================
+%%	NODE API
+%%=================================================================
+%%------------Add a new node to the schema---------------
+add_node(Name)->
+  case mnesia:transaction(fun()->
+    % Adding a new mount point requires lock on the schema
+    mnesia:lock({table,?SCHEMA},write),
+
+    Id = new_node_id(),
+
+    % Index on id
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #nodeId{k=Id}, value = Name }, write ),
+    % name 2 id
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #nodeName{k=Name}, value = Id }, write )
+
+  end) of
+    { atomic, ok }-> ok;
+    { aborted, Reason }->{error,Reason}
+  end.
+
+%%------------Remove a node from the schema---------------
+remove_node(Name)->
+  case mnesia:transaction(fun()->
+
+    mnesia:lock({table,?SCHEMA},write),
+
+    [ #kv{ value = Id } ] = mnesia:read( ?SCHEMA, #nodeName{k=Name} ),
+
+    ok = mnesia:delete( ?SCHEMA, #nodeId{k=Id}, write ),
+
+    ok = mnesia:delete( ?SCHEMA, #nodeName{k=Name}, write )
+
+  end) of
+    { atomic, ok }-> ok;
+    { aborted, Reason }->{error,Reason}
+  end.
+
+get_node_id(Name)->
+  [ #kv{ value = Id } ] = mnesia:dirty_read( ?SCHEMA, #nodeName{k=Name} ),
+  Id.
+
+%%=================================================================
+%%	PATTERN API
+%%=================================================================
 get_pattern(ID)->
   case mnesia:dirty_read(?SCHEMA,#pattern{id=ID}) of
     [#kv{value = Value}] -> Value;
@@ -344,5 +409,16 @@ new_mount_id(#mntId{k=NextID}=Mnt,Id)->
     true -> new_mount_id( mnesia:dirty_next(?SCHEMA,Mnt), NextID )
   end;
 new_mount_id(_Other,Id)->
+  % '$end_of_table' or other keys range
+  Id + 1.
+
+new_node_id()->
+  new_node_id(mnesia:dirty_next(?SCHEMA, #nodeId{k=-1}), -1).
+new_node_id(#nodeId{k=NextID}=Node,Id)->
+  if
+    (NextID - Id) > 1 -> Id + 1 ;
+    true -> new_node_id( mnesia:dirty_next(?SCHEMA,Node), NextID )
+  end;
+new_node_id(_Other,Id)->
   % '$end_of_table' or other keys range
   Id + 1.

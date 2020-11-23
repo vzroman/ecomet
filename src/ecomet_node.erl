@@ -15,41 +15,21 @@
 %% specific language governing permissions and limitations
 %% under the License.
 %%----------------------------------------------------------------
--module(ecomet_folder).
-
--include("ecomet_schema.hrl").
-
--behaviour(ecomet_object).
+-module(ecomet_node).
 
 %%=================================================================
-%%	API
+%%	SERVICE API
 %%=================================================================
 -export([
-  oid2path/1,
-  path2oid/1
+  get_unique_id/0
 ]).
 
+
 %%=================================================================
-%%	API
+%%	SERVICE API
 %%=================================================================
-oid2path({?FOLDER_PATTERN,?ROOT_FOLDER})->
-  <<"/root">>.
-%%oid2path(OID)->
-%%  Object = ecomet_object:construct(OID),
-%%  { ok, Name } = ecomet:read_field( Object, <<".name">> ),
-%%  { ok, FolderID } = ecomet:read_field( Object, <<".folder">> ),
-%%  Path = oid2path( FolderID ),
-%%  <<Path/binary,"/",Name/binary>>.
-
-path2oid(<<"/root">>)->
-  {?FOLDER_PATTERN,?ROOT_FOLDER}.
-%%path2oid(Path)->
-%%  % TODO
-%%  ok.
-
-on_create(Object)->
-  ok.
-
-on_edit(Object)->
-  % TODO. Add a mount point if the DB is defined
-  ok.
+% Unique id of the node
+get_unique_id()->
+  get_unique_id(node()).
+get_unique_id(Node)->
+  ecomet_schema:get_node_id(Node).

@@ -21,6 +21,7 @@
 %%	Service API
 %%=================================================================
 -export([
+  build_new/2,
   build_description/1,
   map_add/3
 ]).
@@ -96,4 +97,34 @@ get_storage(Map,Name)->
   case Map of
     #{Name := #{storage :=Storage }}-> {ok,Storage};
     _->{error,undefined_field}
+  end.
+
+% Build fields structure on object creation
+build_new(Map,NewFields)->
+  ProjectAsList=
+    maps:fold(fun(Name,FieldDesc,Fields)->
+      % FieldsMap contain service info under atom keys
+      if is_atom(Name)->Fields; true->
+        Value=
+          case maps:find(Name,NewFields) of
+            error->auto_value(FieldDesc);
+            {ok,DefinedValue}->DefinedValue
+          end,
+        check_value(FieldDesc,Value),
+        [{Name,Value}|Fields]
+      end
+    end,[],Map),
+  maps:from_list(ProjectAsList).
+
+
+% Get auto value for field
+auto_value(#{default:=Default,autoincrement:=Increment})->
+  case Default of
+    none->
+      case Increment of
+        true->
+          integer_to_binary((erlang:unique_integer([positive,monotonic]) bsl 16)+ ecomet_node:get_unique_id());
+        false->none
+      end;
+    _->Default
   end.
