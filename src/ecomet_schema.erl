@@ -27,9 +27,12 @@
 %%=================================================================
 -export([
   %--------Database------------------
-  add_mount_point/2,
-  remove_mount_point/1,
-  get_db_by_folderId/1,
+  add_db/1,
+  remove_db/1,
+  mount_db/2,
+  unmount_db/1,
+  get_mounted_db/1,
+  get_db_id/1,
 
   %--------Node----------------------
   add_node/1,
@@ -63,11 +66,13 @@
 -define(SCHEMA,ecomet_schema).
 -define(ROOT,root).
 
+% Database indexing
+-record(dbId,{k}).
+-record(dbName,{k}).
 % Mount point indexing
--record(mntId,{k}).
 -record(mntOID,{k}).
 -record(mntPath,{k}).
--record(mntName,{k}).
+
 
 % Node indexing
 -record(nodeId,{k}).
@@ -83,24 +88,54 @@
 %%=================================================================
 %%	DATABASE API
 %%=================================================================
-%%---------------Mount a new database to a folder------------------
-add_mount_point(FolderID,DB)->
+%%------------Add a new database to the schema---------------
+add_db(Name)->
   case mnesia:transaction(fun()->
     % Adding a new mount point requires lock on the schema
     mnesia:lock({table,?SCHEMA},write),
 
-    Id = new_mount_id(),
+    Id = new_db_id(),
+
+    % Index on id
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #dbId{k=Id}, value = Name }, write ),
+    % name 2 id
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #dbName{k=Name}, value = Id }, write ),
+
+    Id
+  end) of
+    { atomic, Id }-> { ok, Id};
+    { aborted, Reason }->{error,Reason}
+  end.
+
+%%------------Remove a database from the schema---------------
+remove_db(Name)->
+  case mnesia:transaction(fun()->
+
+    mnesia:lock({table,?SCHEMA},write),
+
+    [ #kv{ value = Id } ] = mnesia:read( ?SCHEMA, #dbName{k=Name} ),
+
+    ok = mnesia:delete( ?SCHEMA, #dbId{k=Id}, write ),
+
+    ok = mnesia:delete( ?SCHEMA, #dbName{k=Name}, write )
+
+  end) of
+    { atomic, ok }-> ok;
+    { aborted, Reason }->{error,Reason}
+  end.
+
+%%---------------Mount a new database to a folder------------------
+mount_db(FolderID,DB)->
+  case mnesia:transaction(fun()->
+    % Adding a new mount point requires lock on the schema
+    mnesia:lock({table,?SCHEMA},write),
 
     { ok, Path } = ecomet:oid2path( FolderID ),
 
-    % Index on id
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntId{k=Id}, value = DB }, write ),
     % Index on OID
     ok = mnesia:write( ?SCHEMA, #kv{ key = #mntOID{k=FolderID}, value = DB }, write ),
     % Index on PATH
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntPath{k=Path}, value = DB }, write ),
-    % name 2 id
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntName{k=DB}, value = Id }, write )
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntPath{k=Path}, value = DB }, write )
 
   end) of
     { atomic, ok }-> ok;
@@ -108,32 +143,30 @@ add_mount_point(FolderID,DB)->
   end.
 
 %%---------------Unmount a database from a folder------------------
-remove_mount_point(FolderID)->
+unmount_db(FolderID)->
   case mnesia:transaction(fun()->
 
     mnesia:lock({table,?SCHEMA},write),
 
     { ok, Path } = ecomet:oid2path( FolderID ),
-    [ #kv{ value = DB } ] = mnesia:read( ?SCHEMA, #mntOID{k=FolderID} ),
-    [ #kv{ value = Id } ] = mnesia:read( ?SCHEMA, #mntName{k=DB} ),
-
-    ok = mnesia:delete( ?SCHEMA, #mntId{k=Id}, write ),
 
     ok = mnesia:delete( ?SCHEMA, #mntOID{k=FolderID}, write ),
 
-    ok = mnesia:delete( ?SCHEMA, #mntPath{k=Path}, write ),
-
-    ok = mnesia:delete( ?SCHEMA, #mntName{k=DB}, write )
+    ok = mnesia:delete( ?SCHEMA, #mntPath{k=Path}, write )
 
   end) of
     { atomic, ok }-> ok;
     { aborted, Reason }->{error,Reason}
   end.
 
-get_db_by_folderId(OID)->
+get_db_id(Name)->
+  [#kv{value = ID}] = mnesia:dirty_read(?SCHEMA,#dbName{k=Name}),
+  ID.
+
+get_mounted_db(OID)->
   case mnesia:dirty_read(?SCHEMA,#mntOID{k=OID}) of
     [#kv{value = DB}]->DB;
-    _->undefined
+    _->none
   end.
 
 %%=================================================================
@@ -307,8 +340,15 @@ prepare_schema()->
   ecomet_backend:remove_db(?ROOT),
   ecomet_backend:create_db(?ROOT),
 
-  % Mount the root to the root DB
-  add_mount_point({?FOLDER_PATTERN,?ROOT_FOLDER},?ROOT),
+  % Add the root db to the schema
+  add_db(?ROOT),
+  % Mount the root folder to the root DB
+  mount_db({?FOLDER_PATTERN,?ROOT_FOLDER},?ROOT),
+
+  % Add the node to the schema
+  add_node(node()),
+
+
   ok.
 
 init_environment()->
@@ -401,14 +441,14 @@ table_has_copy(Table,Type)->
   Copies=mnesia:table_info(?SCHEMA,Type),
   lists:member(Table,Copies).
 
-new_mount_id()->
-  new_mount_id(mnesia:dirty_next(?SCHEMA, #mntId{k=-1}), -1).
-new_mount_id(#mntId{k=NextID}=Mnt,Id)->
+new_db_id()->
+  new_db_id(mnesia:dirty_next(?SCHEMA, #dbId{k=-1}), -1).
+new_db_id(#dbId{k=NextID}=DB,Id)->
   if
     (NextID - Id) > 1 -> Id + 1 ;
-    true -> new_mount_id( mnesia:dirty_next(?SCHEMA,Mnt), NextID )
+    true -> new_db_id( mnesia:dirty_next(?SCHEMA,DB), NextID )
   end;
-new_mount_id(_Other,Id)->
+new_db_id(_Other,Id)->
   % '$end_of_table' or other keys range
   Id + 1.
 

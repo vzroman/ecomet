@@ -41,6 +41,7 @@
 
 -record(object,{oid,edit,map,deleted=false}).
 
+-define(OID(PatternID,ObjectID),{PatternID,ObjectID}).
 %%=================================================================
 %%	Data API
 %%=================================================================
@@ -132,15 +133,29 @@ load_storage(OID,Type)->
 %   and then the unique ID of the node is twisted into the IDHIGH. Actually it is added
 %   as 2 least significant bytes to the IDHIGH (IDHIGH = IDHIGH bsl 16 + NodeID )
 % * To be able to obtain the database to which the object belongs we insert (code) it into
-%   the IDHIGH the same way as we do with the NodeID: IDHIGH = IDHIGH bsl 8 + MountID
-new_id(FolderID,PatternID)->
-
-  Domain=get_domain(FolderID),
-  Pattern=get_id(PatternID),
-  ID= ecomet_backend:local_increment({Domain,Pattern}),
+%   the IDHIGH the same way as we do with the NodeID: IDHIGH = IDHIGH bsl 8 + MountID.
+% The final IDHIGH is:
+%   <IDHIGH,NodeID:16,DB:8>
+new_id(FolderID,?OID(PatternID,_))->
+  NodeID = ecomet_node:get_unique_id(),
+  DB = get_folder_db( FolderID ),
+  ID= ecomet_schema:local_increment({id,PatternID}),
   % We can get id that is unique for this node. Unique id for entire system is too expensive.
   % To resolve the problem we mix NodeId (it's unique for entire system) into IDH.
   % IDH format - <IDH,NodeID:16>
-  IDH=((ID div ?BITSTRING_LENGTH) bsl 16)+ecomet_node:get_unique_id(),
+  IDH=ID div ?BITSTRING_LENGTH,
   IDL=ID rem ?BITSTRING_LENGTH,
-  {Domain,Pattern,IDH*?BITSTRING_LENGTH+IDL}.
+  IDH1 = ((IDH bsl 16) + NodeID) bsl 8 + DB,
+  { PatternID, IDH1 * ?BITSTRING_LENGTH + IDL }.
+
+get_folder_db(?OID(_,ID)=FolderID)->
+  case ecomet_schema:get_mounted_db(FolderID) of
+    none->
+      % The folder is a simple folder, no DB is mounted to it.
+      % Obtain the ID of the db from the ID of the folder
+      IDH=ID div ?BITSTRING_LENGTH,
+      IDH rem 8;
+    DB->
+      % The folder itself is a mounted point
+      ecomet_schema:get_db_id(DB)
+  end.

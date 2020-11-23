@@ -27,6 +27,9 @@
 -define(RAMDISC,ramdisc).
 -define(DISC,disc).
 
+-define(BITSTRING_LENGTH,65536).
+-define(MAX_NODES,65535).
+
 -record(kv,{key,value}).
 
 -define(ERROR(Error),erlang:error(Error)).
