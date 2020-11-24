@@ -23,7 +23,8 @@
 -export([
   internal/1,
   start/0,
-  lock/6,
+  lock_key/4,
+  lock/3,
   release_lock/1,
   find_lock/1,
   dict_get/1,
@@ -138,20 +139,22 @@ get_type()->
     State->State#state.type
   end.
 
-lock(DB,Storage,Type,Key,Lock,Timeout) when is_integer(Timeout)->
-  LockKey=?LOCKKEY(DB,Storage,Type,Key),
+lock_key(DB,Storage,Type,Key)->
+  ?LOCKKEY(DB,Storage,Type,Key).
+
+lock(?LOCKKEY(_,_,_,_)=LockKey,Level,Timeout) when is_integer(Timeout)->
   case get(?TKEY) of
     undefined->?ERROR(no_transaction);
     #state{locks=Locks,type=TType}=State->
-      case add_lock(LockKey,Type,Locks,TType,Timeout) of
+      case add_lock(LockKey,Level,Locks,TType,Timeout) of
         {ok,Lock}->
           put(?TKEY,State#state{locks=Locks#{LockKey=>Lock}}),
           {ok,Lock#lock.value};
         {error,Error}->{error,Error}
       end
   end;
-lock(DB,Storage,Type,Key,Lock,_Timeout)->
-  lock(DB,Storage,Type,Key,Lock,?LOCKTIMEOUT).
+lock(?LOCKKEY(_,_,_,_)=LockKey,Level,_Timeout)->
+  lock(LockKey,Level,?LOCKTIMEOUT).
 
 
 add_lock(Key,Type,Locks,TType,Timeout)->

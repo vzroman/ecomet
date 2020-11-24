@@ -26,13 +26,16 @@
   edit_map/2,
 
   get_behaviours/1,
-  set_behaviours/2
+  set_behaviours/2,
 
+  get_storage/1
 ]).
 
 %%=================================================================
 %%	Service API
 %%=================================================================
+get_map(Map) when is_map(Map)->
+  Map;
 get_map(PatternID)->
   case ecomet_schema:get_pattern(PatternID) of
     Value when is_map(Value)->Value;
@@ -68,3 +71,8 @@ set_behaviours(ObjectOrOID,Handlers)->
       Map1 = set_behaviours(Map,Handlers),
       edit_map(ObjectOrOID,Map1)
   end.
+
+get_storage(OIDOrMap)->
+  % The storage type of an object is defined by its .name field
+  Map = get_map(OIDOrMap),
+  ecomet_field:get_storage(Map,<<".name">>).
