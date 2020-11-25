@@ -33,6 +33,7 @@
   unmount_db/1,
   get_mounted_db/1,
   get_db_id/1,
+  get_db_name/1,
 
   %--------Node----------------------
   add_node/1,
@@ -162,6 +163,10 @@ unmount_db(FolderID)->
 get_db_id(Name)->
   [#kv{value = ID}] = mnesia:dirty_read(?SCHEMA,#dbName{k=Name}),
   ID.
+
+get_db_name(ID)->
+  [#kv{value = Name}] = mnesia:dirty_read(?SCHEMA,#dbId{k=ID}),
+  Name.
 
 get_mounted_db(OID)->
   case mnesia:dirty_read(?SCHEMA,#mntOID{k=OID}) of

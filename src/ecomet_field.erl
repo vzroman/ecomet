@@ -27,8 +27,12 @@
   build_description/1,
   map_add/3,
   field_names/1,
+  get_type/2,
   index_storages/1,
-  fields_storages/1
+  get_index/2,
+  fields_storages/1,
+  save_changes/4,
+  delete_object/2
 ]).
 
 %%=================================================================
@@ -132,6 +136,11 @@ get_type(#{type:=list,subtype:=SubType})->
   {list,SubType};
 get_type(#{type:=Type})->
   Type.
+get_type(Map,Name)->
+  case Map of
+    #{ Name:= Config } -> {ok, get_type(Config)};
+    _->{error,undefined_field}
+  end.
 
 % Return list of storages, that contain indexes for the fields
 index_storages(Map)->
@@ -139,11 +148,92 @@ index_storages(Map)->
   {StorageList,_}=lists:unzip(Storages),
   StorageList.
 
+% Get field indexes
+get_index(Map,Name)->
+  case Map of
+    #{Name := #{index := Index } }->{ ok, Index };
+    _->{error,undefined_field}
+  end.
+
 % Return list of fields storages for object
 fields_storages(Map)->
   Types =
     [Type||{Name,#{storage:=Type}}<-maps:to_list(Map),is_binary(Name)],
   ordsets:from_list(Types).
+
+% Save field changes to storage
+save_changes(Map,Project,Loaded,OID)->
+  % 1. Group project by storages
+  Changed=get_changes(maps:to_list(Project),Map,#{}),
+  % 2. Merge existing values into changed storages
+  {Merged,ChangedFields}=merge_storages(maps:to_list(Changed),Loaded,OID,{#{},[]}),
+  % 3. Save storages
+  dump_storages(maps:to_list(Merged),OID),
+  ChangedFields.
+
+% Build storage changes from project
+get_changes([{Name,Value}|Rest],Map,Storages)->
+  {ok,StorageType}=get_storage(Map,Name),
+  Storage=maps:get(StorageType,Storages,#{}),
+  get_changes(Rest,Map,Storages#{StorageType=>Storage#{Name=>Value}});
+get_changes([],_Map,Result)->Result.
+
+% Merge unchanged values into changed storages
+merge_storages([{Storage,Fields}|Rest],Loaded,OID,{Merged,Changes})->
+  OldFields=
+    case Loaded of
+      #{ Storage := none }-> #{};
+      #{ Storage := StorageFields } -> StorageFields;
+      _->
+        case ecomet_object:load_storage(OID,Storage) of
+          none->#{};
+          Loaded->Loaded
+        end
+    end,
+
+  StorageChanges=
+    maps:fold(fun(Field,Value,ChangesList)->
+      case maps:find(Field,OldFields) of
+        % Value not changed
+        {ok,Value}->ChangesList;
+        % Really changed
+        _->[{Field,Value}|ChangesList]
+      end
+    end,[],Fields),
+
+  StorageResult=
+    case StorageChanges of
+      % No real changes to storage, no need to save
+      []->Merged;
+      _->
+        MergedFields=maps:merge(OldFields,Fields),
+        ClearedFields=maps:filter(fun(_,Value)-> Value/=none end,MergedFields),
+        case {maps:size(OldFields),maps:size(ClearedFields)} of
+          % Storage did not exist and nothing to save now
+          {0,0}->Merged;
+          % We here, if:
+          % 1. storage had not existed before, but we have data to write now
+          % 2. storage is updated
+          % 3. storage had existed before, but all data is cleared (empty will be deleted on dump step)
+          _->Merged#{Storage=>ClearedFields}
+        end
+    end,
+  merge_storages(Rest,Loaded,OID,{StorageResult,StorageChanges++Changes});
+merge_storages([],_Loaded,_OID,Result)->Result.
+
+% Dump fields storages
+dump_storages([{Type,Fields}|Rest],OID)->
+  case maps:size(Fields)>0 of
+    true->ecomet_object:save_storage(OID,Type,fields,Fields);
+    false->ecomet_object:delete_storage(OID,Type,fields)
+  end,
+  dump_storages(Rest,OID);
+dump_storages([],_OID)->ok.
+
+delete_object(Map,OID)->
+  % TODO. Each storage is to lookup for the database name by OID, we can optimize it
+  [ ecomet_object:delete_storage(OID,Type,fields) || Type <- fields_storages(Map) ],
+  ok.
 
 %%=================================================================
 %%	Data API

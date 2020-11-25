@@ -29,7 +29,12 @@
 %%=================================================================
 -export([
   load_storage/2,
-  commit/2
+  delete_storage/3,
+  save_storage/4,
+  commit/2,
+  get_db_name/1,
+  get_pattern/1,
+  get_id/1
 ]).
 
 %%=================================================================
@@ -49,7 +54,16 @@
   check_rights/1
 ]).
 
--record(object,{oid,edit,map,deleted=false}).
+%%===========================================================================
+%% Behaviour API
+%%===========================================================================
+-export([
+  on_create/1,
+  on_edit/1,
+  on_delete/1
+]).
+
+-record(object,{oid,edit,map,deleted=false,db}).
 
 -define(OID(PatternID,ObjectID),{PatternID,ObjectID}).
 -define(TRANSACTION(Fun),
@@ -92,11 +106,21 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields)->
 % Delete an object
 delete(#object{edit=false})->?ERROR(access_denied);
 delete(#object{oid=OID}=Object)->
-  Fields=ecomet_transaction:dict_get({OID,fields},#{}),
-  case ecomet_transaction:dict_get({OID,handler},none) of
-    none->save(Object#object{deleted=true},Fields,on_delete);
-    % Object can not be deleted? if it is under behaviour handlers
-    _->?ERROR(behaviours_run)
+  % Check the rights on the containing folder
+  {ok,FolderID}=read_field(Object,<<".folder">>),
+  case check_rights(FolderID,<<".contentreadgroups">>,<<".contentwritegroups">>) of
+    write ->
+      % Check if the object is under on_create or on_edit procedure at the moment
+      Fields=ecomet_transaction:dict_get({OID,fields},#{}),
+      case ecomet_transaction:dict_get({OID,handler},none) of
+        none->
+          % Queue the procedure
+          save(Object#object{deleted=true},Fields,on_delete);
+        _->
+          % Object can not be deleted? if it is under behaviour handlers
+          ?ERROR(behaviours_run)
+      end;
+    _->?ERROR(access_denied)
   end,
   ok.
 
@@ -200,7 +224,7 @@ load_storage(OID,Type)->
               _->false
             end
         end,
-      DB=get_db(OID),
+      DB=get_db_name(OID),
       Storage=
         case ecomet_backend:dirty_read(DB,?DATA,Type,{OID,fields},UseCache) of
           not_found->none;
@@ -217,51 +241,107 @@ load_storage(OID,Type)->
       TStorage
   end.
 
-% Save object changes to storages
+% Save object storage
+save_storage(OID,Type,Key,Value)->
+  DB=get_db_name(OID),
+  ecomet_backend:write(DB,object,Type,{OID,Key},Value).
+
+delete_storage(OID,Type,Key)->
+  DB=get_db_name(OID),
+  ecomet_backend:delete(DB,object,Type,{OID,Key}).
+
+% Save object changes to the storage
 commit(OID,Dict)->
+  % Retrieve the object from the transaction dictionary
   Object=maps:get({OID,object},Dict),
   Map=Object#object.map,
+  % Load backtags that are not loaded yet
   BackTags=load_backtags(Object,Dict),
   if
     Object#object.deleted->
+      %----------Delete procedure--------------------------
+      % Purge object fields
       ecomet_field:delete_object(Map,OID),
-      {[],Tags}=ecomet_index:delete_object(OID,BackTags),
+      % Purge object indexes
+      {[],Tags}= ecomet_index:delete_object(OID,BackTags),
+      % Purge object backtags
       delete_backtags(Object),
+      % The log record
       #ecomet_log{
         oid=OID,
-        ts=ecomet_ntpsrv:get_ts(),
+        ts=ecomet_lib:log_ts(),
         addtags=[],
         deltags=Tags,
         tags=[],
         fields=[]
       };
     true->
-      Fields=maps:get({OID,fields},Dict),
-      PreloadedFieldStorages=
+      %----------Create/Edit procedure-----------------------
+      % Step 1. Fields
+      #{ {OID,fields} := Fields} = Dict,
+      % Get loaded fields grouped by storage types
+      LoadedFields=
         lists:foldl(fun(Storage,Acc)->
           case maps:find({OID,Storage,fields},Dict) of
             {ok,StorageFields}->Acc#{Storage=>StorageFields};
             error->Acc
           end
-                    end,#{},ecomet_field:fields_storages(Map)),
-      ChangedFields=ecomet_field:save_changes(Map,Fields,PreloadedFieldStorages,OID),
-      {Add,Unchanged,Del,UpdatedBackTags}=ecomet_index:build_index(OID,Map,ChangedFields,BackTags),
+        end,#{},ecomet_field:fields_storages(Map)),
+      % Dump fields changes
+      ChangedFields=ecomet_field:save_changes(Map,Fields,LoadedFields,OID),
+
+      % Step 2. Indexes
+      % Update the object indexes and get changes
+      {Add,Unchanged,Del,UpdatedBackTags}= ecomet_index:build_index(OID,Map,ChangedFields,BackTags),
+      % Update the backtags
       save_backtags(maps:to_list(UpdatedBackTags),OID),
-      % We need types when exporting values
+      % TODO. We need to know fields types when exporting values. Is there a better solution?
       TypedFields=
+        [ begin
+            {ok,Type}=ecomet_field:get_type(Map,Field),
+            { Field, {Type,Value} }
+          end || { Field, Value } <- ChangedFields ],
         lists:foldl(fun({Field,Value},Acc)->
           {ok,Type}=ecomet_field:get_type(Map,Field),
           [{Field,{Type,Value}}|Acc]
-                    end,[],ChangedFields),
+        end,[],ChangedFields),
+      % The log record
       #ecomet_log{
         oid=OID,
-        ts=ecomet_ntpsrv:get_ts(),
+        ts=ecomet_lib:log_ts(),
         addtags=Add,
         deltags=Del,
         tags=Unchanged,
         fields=TypedFields
       }
   end.
+
+%%=====================================================================
+%% Behaviour handlers
+%%=====================================================================
+on_create(Object)->
+  {ok,FolderID}=ecomet:read_field(Object,<<".folder">>),
+  % Check storage type of folder, temporary folders can not contain persistent objects
+  ?assertNotError(ecomet_folder:check_ram(FolderID,Object),folder_is_ramonly),
+  % Check for unique names in folder
+  {ok,Name}=ecomet:read_field(Object,<<".name">>),
+  ?assertMatch({error,notfound},ecomet_folder:find_object(FolderID,Name),name_not_unique),
+  %Get rights
+  ecomet:edit_object(Object,lists:append(
+    create_rights(Object,FolderID),
+    [{<<".ts">>,ecomet_ntpsrv:get_ts()}]
+  )).
+
+on_edit(Object)->
+  % Check domain change
+  check_domain(Object),
+  % Check for unique name in folder
+  check_path(Object),
+  ?assertMatch(none,ecomet_object:field_changes(Object,<<".pattern">>),can_not_change_pattern),
+  ?assertMatch(none,ecomet_object:field_changes(Object,<<".ts">>),can_not_change_ts),
+  edit_rights(Object).
+
+on_delete(_Object)->ok.
 
 %%============================================================================
 %%	Internal helpers
@@ -296,20 +376,30 @@ new_id(FolderID,?OID(PatternID,_))->
 get_folder_db(FolderID)->
   case ecomet_schema:get_mounted_db(FolderID) of
     none->
-      get_db(FolderID);
+      % The folder is a simple folder, no DB is mounted to it.
+      % Obtain the ID of the db from the ID of the folder
+      get_db_id(FolderID);
     DB->
       % The folder itself is a mounted point
       ecomet_schema:get_db_id(DB)
   end.
 
-get_db(?OID(_,ID))->
-  % The folder is a simple folder, no DB is mounted to it.
-  % Obtain the ID of the db from the ID of the folder
+get_db_id(?OID(_,ID))->
   IDH=ID div ?BITSTRING_LENGTH,
   IDH rem 8.
 
+get_db_name(OID)->
+  ID = get_db_id(OID),
+  ecomet_schema:get_db_name(ID).
+
+get_pattern(?OID(PatternID,_))->
+  PatternID.
+
+get_id(?OID(_,ObjectID))->
+  ObjectID.
+
 get_lock_key(OID,Map)->
-  DB = get_db(OID),
+  DB = get_db_name(OID),
   {ok,Type}=ecomet_pattern:get_storage(Map),
   ecomet_transaction:lock_key(DB,object,Type,{OID,backtag}).
 
@@ -323,6 +413,31 @@ put_empty_storages(OID,Map)->
   BackTags= [{{OID,Storage,backtag},none} || Storage<-ecomet_field:index_storages(Map) ],
   Fields = [{{OID,Storage,fields},none} || Storage<-ecomet_field:fields_storages(Map)],
   ecomet_transaction:dict_put(BackTags ++ Fields).
+
+% Backtag handlers for commit routine
+load_backtags(#object{oid=OID,map=Map},Dict)->
+  DB = get_db_name(OID),
+  List=
+    [ case Dict of
+        #{ {OID,Type,backtag} := none } -> { Type, #{} };
+        #{ {OID,Type,backtag} := Loaded } -> { Type, Loaded };
+        _->
+          case ecomet_backend:dirty_read(DB,object,Type,{OID,backtag}) of
+            not_found -> { Type, #{} };
+            Loaded -> { Type, Loaded }
+          end
+      end || Type <- ecomet_field:index_storages(Map) ],
+  maps:from_list(List).
+
+save_backtags([{Storage,Tags}|Rest],OID)->
+  save_storage(OID,Storage,backtag,Tags),
+  save_backtags(Rest,OID);
+save_backtags([],_OID)->ok.
+
+delete_backtags(#object{oid=OID,map=Map})->
+  DB=get_db_name(OID),
+  [ ok = ecomet_backend:delete(DB,object,Type,{OID,backtag}) || Type <- ecomet_field:index_storages(Map)],
+  ok.
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet
 save(#object{oid=OID,map=Map}=Object,Fields,Handler)->
