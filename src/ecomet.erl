@@ -18,14 +18,56 @@
 -module(ecomet).
 
 %%=================================================================
+%%	Object-level CRUD
+%%=================================================================
+-export([
+  create_object/1,
+  open/1,open/2,open/3,open_nolock/1,open_rlock/1,open_wlock/1,
+  read_field/2,read_field/3,read_fields/2,
+  edit_object/2,
+  delete_object/1
+]).
+%%=================================================================
 %%	Data API
 %%=================================================================
 -export([
   transaction/1, sync_transaction/1,
   oid2path/1,
-  path2oid/1,
-  read_field/2,read_field/3
+  path2oid/1
 ]).
+
+%%=================================================================
+%%	Object-level CRUD
+%%=================================================================
+create_object(Fields)->
+  ecomet_object:create(Fields).
+
+open(OID)->
+  ecomet_object:open(OID).
+open(OID,Lock)->
+  ecomet_object:open(OID,Lock).
+open(OID,Lock,Timeout)->
+  ecomet_object:open(OID,Lock,Timeout).
+%----Legacy API---------------------------------------------------
+open_nolock(OID)->
+  open(OID,none).
+open_rlock(OID)->
+  open(OID,read).
+open_wlock(OID)->
+  open(OID,write).
+
+read_field(Object,Field)->
+  ecomet_object:read_field(Object,Field).
+read_field(Object,Field,Default)->
+  ecomet_object:read_field(Object,Field,Default).
+read_fields(Object,Fields)->
+  ecomet_object:read_fields(Object,Fields).
+
+edit_object(Object,Fields)->
+  ecomet_object:edit(Object,Fields).
+
+delete_object(Object)->
+  ecomet_object:delete(Object).
 
 %%=================================================================
 %%	Data API
@@ -35,14 +77,6 @@ oid2path(OID)->
 
 path2oid(Path)->
   ecomet_folder:path2oid(Path).
-
-read_field(Object,FieldName)->
-  read_field(Object,FieldName,none).
-read_field(Object,FieldName,Default)->
-  case ecomet_object:read_field(Object,FieldName) of
-    {ok,none}->{ok,Default};
-    Result->Result
-  end.
 
 transaction(Fun)->
   ecomet_backend:transaction(Fun).

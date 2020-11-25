@@ -45,8 +45,7 @@
   delete/1,
   open/1,open/2,open/3,
   edit/2,
-  read_field/2,
-  read_all/1,
+  read_field/2,read_field/3,read_fields/2,read_all/1,
   field_changes/2,
   is_object/1,
   is_oid/1,
@@ -146,7 +145,7 @@ delete(#object{oid=OID}=Object)->
   ok.
 
 % Open object
-open(OID)->open(OID,read,none).
+open(OID)->open(OID,none,none).
 open(OID,Lock)->open(OID,Lock,none).
 open(OID,Lock,Timeout)->
   % Build object
@@ -179,11 +178,15 @@ read_field(#object{oid=OID,map=Map},Field)->
     error->
       ecomet_field:get_value(Map,OID,Field)
   end.
+read_field(Object,Field,Default)->
+  case read_field(Object,Field) of
+    {ok,none}->{ok,Default};
+    Other->Other
+  end.
 
 read_fields(Object,Fields)->
   maps:map(fun(Name,Default)->
-    case read_field(Object,Name) of
-      {ok,none}->Default;
+    case read_field(Object,Name,Default) of
       {ok,Value}->Value;
       _->invalid_field
     end

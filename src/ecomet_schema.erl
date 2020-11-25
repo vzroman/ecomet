@@ -360,7 +360,14 @@ init_environment()->
   % Add the low-level patterns to the schema
   init_low_level_patterns(),
 
-  create_root(),
+  % Init root
+  init_root(),
+
+  % Attach low-level behaviours
+  attach_low_level_begaviours(),
+
+  % Init ecomet environment
+  init_ecomet_env(),
 
   ok.
 
@@ -372,12 +379,11 @@ init_low_level_patterns()->
     <<".folder">>=>#{ type => link, index=> [simple], required => true },
     <<".pattern">>=>#{ type => link, index=> [simple], required => true },
     <<".readgroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<".readgroups">>=>#{ type => list, subtype => link, index=> [simple] },
     <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
     <<".ts">> =>#{ type => integer }
   },
   ObjectFieldsMap = build_pattern_schema(Object),
-  ObjectMap= ecomet_pattern:set_behaviours(ObjectFieldsMap,[ecomet_object]),
+  ObjectMap= ecomet_pattern:set_behaviours(ObjectFieldsMap,[]),
   {ok,_} = ecomet:transaction(fun()->
     ecomet_pattern:edit_map({?PATTERN_PATTERN,?OBJECT_PATTERN},ObjectMap)
   end),
@@ -391,7 +397,7 @@ init_low_level_patterns()->
     <<"recursive_rights">> =>#{ type => bool }
   }),
   FolderFieldsMap=build_pattern_schema(Folder),
-  FolderMap= ecomet_pattern:set_behaviours(FolderFieldsMap,[ecomet_folder,ecomet_object]),
+  FolderMap= ecomet_pattern:set_behaviours(FolderFieldsMap,[]),
   {ok,_} = ecomet:transaction(fun()->
     ecomet_pattern:edit_map({?PATTERN_PATTERN,?FOLDER_PATTERN},FolderMap)
   end),
@@ -405,7 +411,7 @@ init_low_level_patterns()->
     <<"recursive_rights">> =>#{ type => bool }
   }),
   PatternFieldsMap=build_pattern_schema(Pattern),
-  PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[ecomet_pattern,ecomet_folder,ecomet_object]),
+  PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[]),
   {ok,_} = ecomet:transaction(fun()->
     ecomet_pattern:edit_map({?PATTERN_PATTERN,?PATTERN_PATTERN},PatternMap)
   end),
@@ -419,7 +425,7 @@ init_low_level_patterns()->
     <<"recursive_rights">> =>#{ type => bool }
   }),
   PatternFieldsMap=build_pattern_schema(Pattern),
-  PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[ecomet_pattern,ecomet_folder,ecomet_object]),
+  PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[]),
   {ok,_} = ecomet:transaction(fun()->
     ecomet_pattern:edit_map({?PATTERN_PATTERN,?PATTERN_PATTERN},PatternMap)
   end),
@@ -433,10 +439,14 @@ build_pattern_schema(Fields)->
   end,#{},Fields).
 
 
-
-create_root()->
-  % TODO
+init_root()->
+  Root = ecomet:create_object(#{
+    <<".name">>=><<"root">>,
+    <<".folder">>=> {?FOLDER_PATTERN,?ROOT_FOLDER},
+    <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN}
+  }),
   ok.
+
 
 table_exists(Table)->
   Known = mnesia:system_info(tables),
