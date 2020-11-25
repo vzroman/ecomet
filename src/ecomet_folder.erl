@@ -26,7 +26,8 @@
 %%=================================================================
 -export([
   oid2path/1,
-  path2oid/1
+  path2oid/1,
+  find_object/2
 ]).
 
 %%=================================================================
@@ -46,6 +47,10 @@ path2oid(<<"/root">>)->
 %%path2oid(Path)->
 %%  % TODO
 %%  ok.
+
+find_object(FolderID,Name)->
+  % TODO
+  { error, not_found }.
 
 on_create(Object)->
   ok.

@@ -24,6 +24,7 @@
 %%=================================================================
 -export([
   build_new/2,
+  merge/3,
   build_description/1,
   map_add/3,
   field_names/1,
@@ -104,6 +105,16 @@ build_new(Map,NewFields)->
      end || {Name,Config} <- maps:to_list(Map),is_binary(Name)],
   maps:from_list(Fields).
 
+% Merge new values on object edit
+merge(Map,Project,NewFields)->
+  maps:fold(fun(Name,Value,OutProject)->
+    case Map of
+      #{Name := Config}->
+        check_value(Config,Value),
+        OutProject#{Name=>Value};
+      _->?ERROR(undefined_field)
+    end
+  end,Project,NewFields).
 
 % Get auto value for field
 auto_value(#{default:=Default,autoincrement:=Increment},Key)->

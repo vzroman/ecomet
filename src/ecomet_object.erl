@@ -20,9 +20,9 @@
 -include("ecomet.hrl").
 -include("ecomet_schema.hrl").
 
--callback on_create(Object::tuple())->{ok,none}|{ok,Object::tuple()}|{error,term()}.
--callback on_edit(Object::tuple())->{ok,none}|{ok,Object::tuple()}|{error,term()}.
--callback on_delete(Object::tuple())->{ok,none}|{ok,Object::tuple()}|{error,term()}.
+-callback on_create(Object::tuple())->term().
+-callback on_edit(Object::tuple())->term().
+-callback on_delete(Object::tuple())->term().
 
 %%=================================================================
 %%	Service API
@@ -83,13 +83,27 @@
 %%============================================================================
 % Create new object
 create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields)->
+  % Get folder rights
+  Folder = construct(FolderID),
   % Check rights
-  case check_rights(FolderID,<<".contentreadgroups">>,<<".contentwritegroups">>) of
+  #{
+    <<".contentreadgroups">>:=Read,
+    <<".contentwritegroups">>:=Write
+  } = read_fields(Folder,#{
+    <<".contentreadgroups">>=>none,
+    <<".contentwritegroups">>=>none
+  }),
+  case check_rights(Read,Write) of
     write ->
       % Get the schema of the object type
       Map=ecomet_pattern:get_map(PatternID),
+      % Inherit rights
+      Fields1=#{
+        <<".readgroups">>=>Read,
+        <<".writegroups">>=>Write
+      },
       % Parse fields
-      Fields=ecomet_field:build_new(Map,Fields),
+      Fields=ecomet_field:build_new(Map,Fields1),
       % Generate new ID for the object
       OID=new_id(FolderID,PatternID),
       Object=#object{oid=OID,edit=true,map=Map},
@@ -108,7 +122,14 @@ delete(#object{edit=false})->?ERROR(access_denied);
 delete(#object{oid=OID}=Object)->
   % Check the rights on the containing folder
   {ok,FolderID}=read_field(Object,<<".folder">>),
-  case check_rights(FolderID,<<".contentreadgroups">>,<<".contentwritegroups">>) of
+  #{
+    <<".contentreadgroups">>:=Read,
+    <<".contentwritegroups">>:=Write
+  } = read_fields(construct(FolderID),#{
+    <<".contentreadgroups">>=>none,
+    <<".contentwritegroups">>=>none
+  }),
+  case check_rights(Read,Write) of
     write ->
       % Check if the object is under on_create or on_edit procedure at the moment
       Fields=ecomet_transaction:dict_get({OID,fields},#{}),
@@ -124,6 +145,30 @@ delete(#object{oid=OID}=Object)->
   end,
   ok.
 
+% Open object
+open(OID)->open(OID,read,none).
+open(OID,Lock)->open(OID,Lock,none).
+open(OID,Lock,Timeout)->
+  % Build object
+  Object=
+    case ecomet_transaction:dict_get({OID,object},none) of
+      % No object in transaction dict yet, build new
+      none->
+        New=construct(OID),
+        case check_rights(New) of
+          none->?ERROR(access_denied);
+          read->New#object{edit=false};
+          write->New#object{edit=true}
+        end;
+      % Object is deleted
+      #object{deleted=true}->?ERROR(object_deleted);
+      % We have object in transaction dict, take it
+      FoundObject->FoundObject
+    end,
+  % Set lock if requested
+  if Lock=/=none->get_lock(Lock,Object,Timeout); true->ok end,
+  Object.
+
 % Read field value
 read_field(#object{oid=OID,map=Map},Field)->
   % Check if we have project with changes in transaction dict
@@ -134,6 +179,15 @@ read_field(#object{oid=OID,map=Map},Field)->
     error->
       ecomet_field:get_value(Map,OID,Field)
   end.
+
+read_fields(Object,Fields)->
+  maps:map(fun(Name,Default)->
+    case read_field(Object,Name) of
+      {ok,none}->Default;
+      {ok,Value}->Value;
+      _->invalid_field
+    end
+  end,Fields).
 
 % Read all object fields
 read_all(#object{oid=OID,map=Map})->
@@ -147,6 +201,18 @@ read_all(#object{oid=OID,map=Map})->
          { Name, Value }
      end|| Name <- ecomet_field:field_names(Map)],
   maps:from_list(List).
+
+% Edit object
+edit(#object{edit=false},_FieldList)->?ERROR(access_denied);
+edit(#object{oid=OID,map=Map}=Object,Fields)->
+  OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
+  NewFields=ecomet_field:merge(Map,OldFields,Fields),
+  case ecomet_transaction:dict_get({OID,handler},none) of
+    none->save(Object,NewFields,on_edit);
+    % If object is under behaviour handlers, just save changes to dict
+    _->ecomet_transaction:dict_put([{{OID,fields},NewFields}])
+  end,
+  ok.
 
 % Check changes for the field within the transaction
 field_changes(#object{oid=OID,map=Map},Field)->
@@ -173,9 +239,19 @@ get_pattern_oid(?OID(PatternID,_))->
   ?OID(?PATTERN_PATTERN,PatternID).
 
 %% Check context user rights for the object
-check_rights(Object)->
-  check_rights(Object,<<".readgroups">>,<<".writegroups">>).
-check_rights(#object{oid=OID,map=Map},Read,Write)->
+check_rights(#object{}=Object)->
+  #{
+    <<".readgroups">>:=Read,
+    <<".writegroups">>:=Write
+  } = read_fields(Object,#{
+    <<".readgroups">> => none,
+    <<".writegroups">> => none
+  }),
+  check_rights(Read,Write);
+check_rights(OID)->
+  check_rights(construct(OID)).
+
+check_rights(Read,Write)->
   case ecomet_user:is_admin() of
     {error,Error}->?ERROR(Error);
     {ok,true}->write;
@@ -184,18 +260,17 @@ check_rights(#object{oid=OID,map=Map},Read,Write)->
       {ok,UGroups}=ecomet_user:get_usergroups(),
       UserGroups=ordsets:from_list([UID|UGroups]),
 
-      WriteGroups=ecomet_field:get_value(Map,OID,Write,[]),
+      WriteGroups=if is_list(Write)->Write; true->[] end,
       case ordsets:intersection(UserGroups,WriteGroups) of
         []->
-          ReadGroups=ecomet_field:get_value(Map,OID,Read,[]),
+          ReadGroups=if is_list(Read)->Read; true->[] end,
           case ordsets:intersection(UserGroups,ReadGroups) of
             []->none;
             _->read
           end;
         _->write
       end
-  end;
-check_rights(OID,Read,Write)->check_rights(construct(OID),Read,Write).
+  end.
 
 %%=================================================================
 %%	Service API
@@ -295,7 +370,8 @@ commit(OID,Dict)->
       {Add,Unchanged,Del,UpdatedBackTags}= ecomet_index:build_index(OID,Map,ChangedFields,BackTags),
       % Update the backtags
       save_backtags(maps:to_list(UpdatedBackTags),OID),
-      % TODO. We need to know fields types when exporting values. Is there a better solution?
+      % TODO. We need to know fields types when exporting values.
+      % Is there a better solution?
       TypedFields=
         [ begin
             {ok,Type}=ecomet_field:get_type(Map,Field),
@@ -320,28 +396,112 @@ commit(OID,Dict)->
 %% Behaviour handlers
 %%=====================================================================
 on_create(Object)->
-  {ok,FolderID}=ecomet:read_field(Object,<<".folder">>),
-  % Check storage type of folder, temporary folders can not contain persistent objects
-  ?assertNotError(ecomet_folder:check_ram(FolderID,Object),folder_is_ramonly),
-  % Check for unique names in folder
-  {ok,Name}=ecomet:read_field(Object,<<".name">>),
-  ?assertMatch({error,notfound},ecomet_folder:find_object(FolderID,Name),name_not_unique),
-  %Get rights
-  ecomet:edit_object(Object,lists:append(
-    create_rights(Object,FolderID),
-    [{<<".ts">>,ecomet_ntpsrv:get_ts()}]
-  )).
+  check_storage_type(Object),
+  check_path(Object),
+  edit_rights(Object),
+  edit(Object,#{
+    <<".ts">>=>ecomet_lib:log_ts()
+  }).
 
 on_edit(Object)->
   % Check domain change
-  check_domain(Object),
+  check_db(Object),
   % Check for unique name in folder
   check_path(Object),
-  ?assertMatch(none,ecomet_object:field_changes(Object,<<".pattern">>),can_not_change_pattern),
-  ?assertMatch(none,ecomet_object:field_changes(Object,<<".ts">>),can_not_change_ts),
+  case ecomet_object:field_changes(Object,<<".pattern">>) of
+    none->ok;
+    _->?ERROR(can_not_change_pattern)
+  end,
+  case ecomet_object:field_changes(Object,<<".ts">>) of
+    none->ok;
+    _->?ERROR(can_not_change_ts)
+  end,
   edit_rights(Object).
 
 on_delete(_Object)->ok.
+
+check_storage_type(Object)->
+  {ok,FolderID}=ecomet:read_field(Object,<<".folder">>),
+  PatternID = get_pattern_oid(FolderID),
+  case ecomet_pattern:get_storage(PatternID) of
+    ?RAM->
+      % Ram only folders cannot contain persistent objects
+      ObjectPatternID=get_pattern_oid(Object),
+      case ecomet_pattern:get_storage(ObjectPatternID) of
+        ?RAM->ok;
+        _->?ERROR(ram_only_folder)
+      end;
+    _->
+      % Persistent folders can contain any types of objects
+      ok
+  end.
+
+% Path is always unique
+check_path(Object)->
+  Changed=
+    case field_changes(Object,<<".name">>) of
+      none->
+        case field_changes(Object,<<".folder">>) of
+          none->false;
+          _->true
+        end;
+      _->true
+    end,
+  if
+    Changed->
+      {ok,FolderID}=read_field(Object,<<".folder">>),
+      {ok,Name}=read_field(Object,<<".name">>),
+      OID = get_oid(Object),
+      % Check that name does not include the path delimiter
+      case binary:split(Name,<<"/">>) of
+        [Name]->
+          case ecomet_folder:find_object(FolderID,Name) of
+            {error,notfound}->ok;
+            {ok,OID}->ok;
+            _->{error,{not_unique,Name}}
+          end;
+        _->?ERROR("the '/' symbol is not allowed in names")
+      end;
+    true->ok
+  end.
+
+% Object can not change its folder if it is in another database
+check_db(#object{oid=OID}=Object)->
+  case field_changes(Object,<<".folder">>) of
+    none->ok;
+    {FolderID,_}->
+      case {get_db_id(OID),get_db_id(FolderID)} of
+        {Same,Same}->ok;
+        _->
+          ?ERROR(different_database)
+      end
+  end.
+
+% ReadGroups must contain all the WriteGroups
+edit_rights(Object)->
+  IsChanged=
+    case field_changes(Object,<<".writegroups">>) of
+      none->
+        case field_changes(Object,<<".readgroups">>) of
+          none->false;
+          _->true
+        end;
+      _->true
+    end,
+  if
+    IsChanged ->
+      #{
+        <<".readgroups">>:=Read,
+        <<".writegroups">>:=Write
+      } = read_fields(Object,#{
+        <<".readgroups">> => [],
+        <<".writegroups">> => []
+      }),
+      edit(Object,#{
+        <<".readgroups">> => ordsets:from_list(Read++Write)
+      });
+    true -> ok
+  end.
 
 %%============================================================================
 %%	Internal helpers
@@ -397,6 +557,24 @@ get_pattern(?OID(PatternID,_))->
 
 get_id(?OID(_,ObjectID))->
   ObjectID.
+
+% Acquire lock on object
+get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
+  % Define the key
+  DB = get_db_name(OID),
+  {ok,Type}=ecomet_pattern:get_storage(Map),
+  Key = ecomet_transaction:lock_key(DB,object,Type,{OID,backtag}),
+
+  % Set lock on main backtag storage
+  case ecomet_transaction:lock(Key,Lock,Timeout) of
+    {ok,BackTag}->
+      % Put object and loaded storage to dict
+      ecomet_transaction:dict_put([
+        {{OID,object},Object},
+        {{OID,Type,backtag},BackTag}
+      ]);
+    { error, Error }->?ERROR(Error)
+  end.
 
 get_lock_key(OID,Map)->
   DB = get_db_name(OID),
