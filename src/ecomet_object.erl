@@ -356,7 +356,7 @@ commit(OID,Dict)->
     true->
       %----------Create/Edit procedure-----------------------
       % Step 1. Fields
-      #{ {OID,fields} := Fields} = Dict,
+      Fields = maps:get({OID,fields},Dict),
       % Get loaded fields grouped by storage types
       LoadedFields=
         lists:foldl(fun(Storage,Acc)->
@@ -599,10 +599,10 @@ put_empty_storages(OID,Map)->
 load_backtags(#object{oid=OID,map=Map},Dict)->
   DB = get_db_name(OID),
   List=
-    [ case Dict of
-        #{ {OID,Type,backtag} := none } -> { Type, #{} };
-        #{ {OID,Type,backtag} := Loaded } -> { Type, Loaded };
-        _->
+    [ case maps:find({OID,Type,backtag},Dict) of
+        {ok, none} -> { Type, #{} };
+        {ok, Loaded} -> { Type, Loaded };
+        error->
           case ecomet_backend:dirty_read(DB,object,Type,{OID,backtag}) of
             not_found -> { Type, #{} };
             Loaded -> { Type, Loaded }

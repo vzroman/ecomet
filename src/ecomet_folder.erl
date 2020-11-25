@@ -30,6 +30,15 @@
   find_object/2
 ]).
 
+%%===========================================================================
+%% Behaviour API
+%%===========================================================================
+-export([
+  on_create/1,
+  on_edit/1,
+  on_delete/1
+]).
+
 %%=================================================================
 %%	API
 %%=================================================================
@@ -48,13 +57,17 @@ path2oid(<<"/root">>)->
 %%  % TODO
 %%  ok.
 
-find_object(FolderID,Name)->
+find_object(_FolderID,_Name)->
   % TODO
   { error, not_found }.
 
-on_create(Object)->
+on_create(_Object)->
+  % TODO
   ok.
 
-on_edit(Object)->
+on_edit(_Object)->
   % TODO. Add a mount point if the DB is defined
+  ok.
+
+on_delete(_Object)->
   ok.

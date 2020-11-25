@@ -28,7 +28,7 @@
 %%	API
 %%=================================================================
 % Notify clients on change
-notify(Log)->
+notify(_Log)->
 %%	Query={'ANDNOT',
 %%		{'AND',[
 %%			{<<".pattern">>,get_pattern_id(),[<<"ramlocal">>]},

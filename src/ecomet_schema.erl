@@ -427,7 +427,7 @@ init_low_level_patterns()->
   PatternFieldsMap=build_pattern_schema(Pattern),
   PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[]),
   {ok,_} = ecomet:transaction(fun()->
-    ecomet_pattern:edit_map({?PATTERN_PATTERN,?PATTERN_PATTERN},PatternMap)
+    ecomet_pattern:edit_map({?PATTERN_PATTERN,?FIELD_PATTERN},PatternMap)
   end),
 
   ok.
@@ -440,13 +440,34 @@ build_pattern_schema(Fields)->
 
 
 init_root()->
-  Root = ecomet:create_object(#{
+  _Root = ecomet:create_object(#{
     <<".name">>=><<"root">>,
     <<".folder">>=> {?FOLDER_PATTERN,?ROOT_FOLDER},
     <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN}
   }),
   ok.
 
+attach_low_level_begaviours()->
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:set_behaviours({?PATTERN_PATTERN,?OBJECT_PATTERN},[ecomet_object])
+  end),
+
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:set_behaviours({?PATTERN_PATTERN,?FOLDER_PATTERN},[ecomet_folder,ecomet_object])
+  end),
+
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:set_behaviours({?PATTERN_PATTERN,?PATTERN_PATTERN},[ecomet_pattern,ecomet_folder,ecomet_object])
+  end),
+
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:set_behaviours({?PATTERN_PATTERN,?FIELD_PATTERN},[ecomet_field,ecomet_object])
+  end),
+  ok.
+
+init_ecomet_env()->
+  % TODO
+  ok.
 
 table_exists(Table)->
   Known = mnesia:system_info(tables),
