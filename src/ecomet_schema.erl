@@ -34,6 +34,7 @@
   get_mounted_db/1,
   get_db_id/1,
   get_db_name/1,
+  get_registered_databases/0,
 
   %--------Node----------------------
   add_node/1,
@@ -173,6 +174,14 @@ get_mounted_db(OID)->
     [#kv{value = DB}]->DB;
     _->none
   end.
+
+get_registered_databases()->
+  MS=[{
+    #kv{key = #dbName{k = '$1'}, value = '_'},
+    [],
+    ['$1']
+  }],
+  mnesia:dirty_select(?SCHEMA,MS).
 
 %%=================================================================
 %%	NODE API
@@ -446,12 +455,19 @@ build_pattern_schema(Fields)->
 
 
 init_root()->
-  _Root = ecomet:create_object(#{
+  Root = ecomet:create_object(#{
     <<".name">>=><<"root">>,
     <<".folder">>=> {?FOLDER_PATTERN,?ROOT_FOLDER},
     <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
     <<".ts">>=>ecomet_lib:log_ts()
   }),
+  _Patterns = ecomet:create_object(#{
+    <<".name">>=><<".pattern">>,
+    <<".folder">>=> ecomet:get_oid(Root),
+    <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
+    <<".ts">>=>ecomet_lib:log_ts()
+  }),
+
   ok.
 
 attach_low_level_begaviours()->

@@ -27,11 +27,25 @@
   edit_object/2,
   delete_object/1
 ]).
+
 %%=================================================================
-%%	Data API
+%%	Transactions
 %%=================================================================
 -export([
-  transaction/1, sync_transaction/1,
+  is_transaction/0,
+  transaction/1,
+  sync_transaction/1,
+  start_transaction/0,
+  commit_transaction/0,
+  rollback_transaction/0
+]).
+
+%%=================================================================
+%%	Identification API
+%%=================================================================
+-export([
+  get_oid/1,
+  get_path/1,
   oid2path/1,
   path2oid/1
 ]).
@@ -70,16 +84,38 @@ delete_object(Object)->
   ecomet_object:delete(Object).
 
 %%=================================================================
-%%	Data API
+%%	Transactions API
 %%=================================================================
-oid2path(OID)->
-  ecomet_folder:oid2path(OID).
-
-path2oid(Path)->
-  ecomet_folder:path2oid(Path).
+is_transaction()->
+  ecomet_transaction:get_type()=/=none.
 
 transaction(Fun)->
   ecomet_backend:transaction(Fun).
 
 sync_transaction(Fun)->
   ecomet_backend:sync_transaction(Fun).
+
+start_transaction()->
+  ecomet_transaction:start().
+
+commit_transaction()->
+  ecomet_transaction:commit().
+
+rollback_transaction()->
+  ecomet_transaction:rollback().
+
+%%=================================================================
+%%	Identification API
+%%=================================================================
+get_oid(Object)->
+  ecomet_object:get_oid(Object).
+
+get_path(Object)->
+  oid2path(get_oid(Object)).
+
+oid2path(OID)->
+  ecomet_folder:oid2path(OID).
+
+path2oid(Path)->
+  ecomet_folder:path2oid(Path).
+
