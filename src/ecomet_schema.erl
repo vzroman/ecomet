@@ -188,10 +188,11 @@ add_node(Name)->
     % Index on id
     ok = mnesia:write( ?SCHEMA, #kv{ key = #nodeId{k=Id}, value = Name }, write ),
     % name 2 id
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #nodeName{k=Name}, value = Id }, write )
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #nodeName{k=Name}, value = Id }, write ),
 
+    Id
   end) of
-    { atomic, ok }-> ok;
+    { atomic, Id }-> { ok, Id };
     { aborted, Reason }->{error,Reason}
   end.
 
@@ -343,6 +344,7 @@ create_schema()->
 prepare_schema()->
   % Create a DB for the /root
   ecomet_backend:remove_db(?ROOT),
+  ?LOGINFO("creating the root database"),
   ecomet_backend:create_db(?ROOT),
 
   % Add the root db to the schema
@@ -351,22 +353,26 @@ prepare_schema()->
   mount_db({?FOLDER_PATTERN,?ROOT_FOLDER},?ROOT),
 
   % Add the node to the schema
+  ?LOGINFO("adding the ~p to the schema",[node()]),
   add_node(node()),
-
 
   ok.
 
 init_environment()->
   % Add the low-level patterns to the schema
+  ?LOGINFO("initializing low-level patterns"),
   init_low_level_patterns(),
 
   % Init root
+  ?LOGINFO("creating the root directory"),
   init_root(),
 
   % Attach low-level behaviours
+  ?LOGINFO("attaching low-level behaviours"),
   attach_low_level_begaviours(),
 
   % Init ecomet environment
+  ?LOGINFO("initializing the ecomet environment"),
   init_ecomet_env(),
 
   ok.
@@ -404,11 +410,8 @@ init_low_level_patterns()->
 
   %-----Pattern---------------------
   Pattern = maps:merge(Folder,#{
-    <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<"only_patterns">>=>#{ type => list, subtype => link },
-    <<"exclude_patterns">>=>#{ type => list, subtype => link },
-    <<"recursive_rights">> =>#{ type => bool }
+    <<"behaviour_module">>=>#{ type => atom },
+    <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true }
   }),
   PatternFieldsMap=build_pattern_schema(Pattern),
   PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[]),
@@ -417,17 +420,19 @@ init_low_level_patterns()->
   end),
 
   %-----Field---------------------
-  Pattern = maps:merge(Folder,#{
-    <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<"only_patterns">>=>#{ type => list, subtype => link },
-    <<"exclude_patterns">>=>#{ type => list, subtype => link },
-    <<"recursive_rights">> =>#{ type => bool }
+  Field = maps:merge(Object,#{
+    <<"type">>=>#{ type => atom, required => true },
+    <<"subtype">>=>#{ type => atom },
+    <<"index">>=>#{ type => list, subtype => atom },
+    <<"required">>=>#{ type => bool },
+    <<"default_value">> =>#{ type => term },
+    <<"storage">>=>#{ type => atom, default_value => disc  },
+    <<"autoincrement">>=>#{ type => bool }
   }),
-  PatternFieldsMap=build_pattern_schema(Pattern),
-  PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[]),
+  FieldFieldsMap=build_pattern_schema(Field),
+  FieldMap= ecomet_pattern:set_behaviours(FieldFieldsMap,[]),
   {ok,_} = ecomet:transaction(fun()->
-    ecomet_pattern:edit_map({?PATTERN_PATTERN,?FIELD_PATTERN},PatternMap)
+    ecomet_pattern:edit_map({?PATTERN_PATTERN,?FIELD_PATTERN},FieldMap)
   end),
 
   ok.

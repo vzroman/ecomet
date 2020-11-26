@@ -43,7 +43,7 @@
 %%	API
 %%=================================================================
 oid2path({?FOLDER_PATTERN,?ROOT_FOLDER})->
-  <<"/root">>.
+  {ok,<<"/root">>}.
 %%oid2path(OID)->
 %%  Object = ecomet_object:construct(OID),
 %%  { ok, Name } = ecomet:read_field( Object, <<".name">> ),
@@ -52,7 +52,7 @@ oid2path({?FOLDER_PATTERN,?ROOT_FOLDER})->
 %%  <<Path/binary,"/",Name/binary>>.
 
 path2oid(<<"/root">>)->
-  {?FOLDER_PATTERN,?ROOT_FOLDER}.
+  {ok, {?FOLDER_PATTERN,?ROOT_FOLDER} }.
 %%path2oid(Path)->
 %%  % TODO
 %%  ok.

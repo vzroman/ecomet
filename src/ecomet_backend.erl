@@ -38,7 +38,7 @@
   delete/4,delete/5,dirty_delete/4
 ]).
 
--define(NAME(N,S,T),list_to_atom("ecomet_"++atom_to_list(N)++atom_to_list(S)++"_"++atom_to_list(T))).
+-define(NAME(N,S,T),list_to_atom("ecomet_"++atom_to_list(N)++"_"++atom_to_list(S)++"_"++atom_to_list(T))).
 
 -define(DB,[
   { ?RAMLOCAL, #{ type => ?RAM, local => true } },

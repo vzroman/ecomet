@@ -37,14 +37,14 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-  SchemaSrv=#{
-    id=>ecomet_schema,
-    start=>{ecomet_schema,start_link,[]},
-    restart=>permanent,
-    shutdown=>?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
-    type=>worker,
-    modules=>[ecomet_schema]
-  },
+%%  SchemaSrv=#{
+%%    id=>ecomet_schema,
+%%    start=>{ecomet_schema,start_link,[]},
+%%    restart=>permanent,
+%%    shutdown=>?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+%%    type=>worker,
+%%    modules=>[ecomet_schema]
+%%  },
 
   Supervisor=#{
     strategy=>one_for_one,
@@ -53,6 +53,6 @@ init([]) ->
   },
 
   {ok, {Supervisor, [
-    SchemaSrv
+    %SchemaSrv
   ]}}.
 

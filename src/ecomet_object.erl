@@ -322,11 +322,11 @@ load_storage(OID,Type)->
 % Save object storage
 save_storage(OID,Type,Key,Value)->
   DB=get_db_name(OID),
-  ecomet_backend:write(DB,object,Type,{OID,Key},Value).
+  ecomet_backend:write(DB,?DATA,Type,{OID,Key},Value).
 
 delete_storage(OID,Type,Key)->
   DB=get_db_name(OID),
-  ecomet_backend:delete(DB,object,Type,{OID,Key}).
+  ecomet_backend:delete(DB,?DATA,Type,{OID,Key}).
 
 % Save object changes to the storage
 commit(OID,Dict)->
@@ -603,7 +603,7 @@ load_backtags(#object{oid=OID,map=Map},Dict)->
         {ok, none} -> { Type, #{} };
         {ok, Loaded} -> { Type, Loaded };
         error->
-          case ecomet_backend:dirty_read(DB,object,Type,{OID,backtag}) of
+          case ecomet_backend:dirty_read(DB,?DATA,Type,{OID,backtag}) of
             not_found -> { Type, #{} };
             Loaded -> { Type, Loaded }
           end
@@ -617,7 +617,7 @@ save_backtags([],_OID)->ok.
 
 delete_backtags(#object{oid=OID,map=Map})->
   DB=get_db_name(OID),
-  [ ok = ecomet_backend:delete(DB,object,Type,{OID,backtag}) || Type <- ecomet_field:index_storages(Map)],
+  [ ok = ecomet_backend:delete(DB,?DATA,Type,{OID,backtag}) || Type <- ecomet_field:index_storages(Map)],
   ok.
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet

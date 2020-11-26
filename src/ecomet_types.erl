@@ -126,7 +126,8 @@ parse_safe(term,Value)->
   Value;
 %---------Link----------------------
 parse_safe(link,Value) when is_binary(Value)->
-  ecomet_folder:path2oid(Value);
+  {ok,OID}=ecomet_folder:path2oid(Value),
+  OID;
 parse_safe(link,OID)->
   case ecomet_object:is_oid(OID) of
     true->OID;
@@ -167,7 +168,8 @@ value_to_string(atom,Value)->
 value_to_string(binary,Value)->
   base64:encode(Value);
 value_to_string(link,Value)->
-  ecomet_folder:oid2path(Value);
+  {ok,Path}=ecomet_folder:oid2path(Value),
+  Path;
 value_to_string(term,Value)->
   term_to_string(Value);
 value_to_string({list,Type},Value)->
