@@ -364,6 +364,7 @@ init_environment()->
   init_low_level_patterns(),
 
   % Init root
+  ecomet_user:on_init_state(),
   ?LOGINFO("creating the root directory"),
   init_root(),
 
@@ -448,7 +449,8 @@ init_root()->
   _Root = ecomet:create_object(#{
     <<".name">>=><<"root">>,
     <<".folder">>=> {?FOLDER_PATTERN,?ROOT_FOLDER},
-    <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN}
+    <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
+    <<".ts">>=>ecomet_lib:log_ts()
   }),
   ok.
 

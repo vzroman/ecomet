@@ -97,12 +97,12 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields)->
       % Get the schema of the object type
       Map=ecomet_pattern:get_map(PatternID),
       % Inherit rights
-      Fields1=#{
+      Fields1=Fields#{
         <<".readgroups">>=>Read,
         <<".writegroups">>=>Write
       },
       % Parse fields
-      Fields=ecomet_field:build_new(Map,Fields1),
+      Fields2=ecomet_field:build_new(Map,Fields1),
       % Generate new ID for the object
       OID=new_id(FolderID,PatternID),
       Object=#object{oid=OID,edit=true,map=Map},
@@ -110,7 +110,7 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields)->
       ?TRANSACTION(fun()->
         % Put empty storages to dict. Trick for no real lookups
         put_empty_storages(OID,Map),
-        save(Object,Fields,on_create)
+        save(Object,Fields2,on_create)
       end),
       Object;
     _->?ERROR(access_denied)
@@ -380,10 +380,6 @@ commit(OID,Dict)->
             {ok,Type}=ecomet_field:get_type(Map,Field),
             { Field, {Type,Value} }
           end || { Field, Value } <- ChangedFields ],
-        lists:foldl(fun({Field,Value},Acc)->
-          {ok,Type}=ecomet_field:get_type(Map,Field),
-          [{Field,{Type,Value}}|Acc]
-        end,[],ChangedFields),
       % The log record
       #ecomet_log{
         oid=OID,
@@ -636,6 +632,9 @@ save(#object{oid=OID,map=Map}=Object,Fields,Handler)->
 
     % Release object from under the Handler
     ecomet_transaction:dict_remove([{OID,handler}]),
+
+    % Confirm the commit
+    ecomet_transaction:apply_commit(OID),
     % The result
     ok
   end).

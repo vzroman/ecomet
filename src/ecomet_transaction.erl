@@ -310,11 +310,12 @@ on_commit(_Invalid)->
 %% Internal helpers
 %%-----------------------------------------------------------------------
 tcommit()->
-  case erase(?TKEY) of
+  case get(?TKEY) of
     undefined->?ERROR(no_transaction);
     % Root transaction
     #state{parent=none,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits}->
       CommitLog=run_commit(lists:reverse(lists:subtract(Log,DropLog)),Dict,[]),
+      erase(?TKEY),
       {CommitLog,OnCommits};
     State->
       put(?TKEY,merge_commit(State)),

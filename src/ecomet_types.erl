@@ -188,7 +188,7 @@ check_value(Type,Value)->
     bool when is_boolean(Value)->ok;
     binary when is_binary(Value)->ok;
     atom when is_atom(Value)->ok;
-    link->case Value of {_D,_P,_I}->ok; _->error end;
+    link->case ecomet_object:is_oid(Value) of true->ok; _->error end;
     term->ok;
     {list,Subtype} when is_list(Value)->
       check_list_value(Value,Subtype);

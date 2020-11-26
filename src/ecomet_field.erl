@@ -30,6 +30,7 @@
   field_names/1,
   get_type/2,
   index_storages/1,
+  get_storage/2,
   get_index/2,
   fields_storages/1,
   save_changes/4,
@@ -96,8 +97,8 @@ build_new(Map,NewFields)->
        Value =
          case NewFields of
            #{ Name:= Defined } -> Defined;
-           _->
-             Key = { maps:get(<<".pattern">>,NewFields), Name},
+           #{ <<".pattern">>:= PatternID }->
+             Key = { PatternID, Name},
              auto_value(Config,Key)
          end,
        check_value(Config,Value),
