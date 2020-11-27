@@ -25,21 +25,47 @@
 -define(GET(Key,Config),proplists:get_value(Key,Config)).
 -define(GET(Key,Config,Default),proplists:get_value(Key,Config,Default)).
 
+-define(DEPENDENCIES,[
+  compiler,
+  syntax_tools,
+  goldrush,
+  lager,
+  dlss
+]).
+
+-define(START_DEPENDENCIES,[
+  begin
+    ct:pal("starting ~p",[D]),
+    ok = application:start(D)
+  end|| D <- ?DEPENDENCIES ]).
+
+-define(STOP_DEPENDENCIES,[
+  begin
+    ct:pal("stopping ~p",[D]),
+    application:stop(D)
+  end|| D <- lists:reverse(?DEPENDENCIES) ]).
+
 -define(BACKEND_INIT(),
   begin
-    application:stop(dlss),
+
+    ?STOP_DEPENDENCIES,
+
     mnesia:delete_schema([node()]),
     application:set_env(mnesia, dir,?config(priv_dir,Config)++"/DB_"++atom_to_list(?MODULE)),
-    ok = application:start(dlss),
+
+    ?START_DEPENDENCIES,
+
     {ok,_}=ecomet_schema:init([])
   end).
 
 -define(BACKEND_STOP(Timeout),(fun()->
-  application:stop(dlss),
+
+  ?STOP_DEPENDENCIES,
   Wait=fun(R,T)->
     case mnesia:system_info(is_running) of
       no->ok;
-      _->
+      Other->
+        ct:pal("is running ~p",[Other]),
         if
           T=<0->error;
           true->
@@ -47,7 +73,7 @@
             R(R,T-1000)
         end
     end
-       end,
+  end,
   Wait(Wait,Timeout)
 end)()).
 
