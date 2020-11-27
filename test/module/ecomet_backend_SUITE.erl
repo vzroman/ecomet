@@ -1,29 +1,20 @@
-%%-----------------------------------------------------------------
+%%----------------------------------------------------------------
+%% Copyright (c) 2020 Faceplate
 %%
-%% This Source Code Form is subject to the terms of the Mozilla Public
-%% License, v. 2.0. If a copy of the MPL was not distributed with this file,
-%% You can obtain one at http://mozilla.org/MPL/2.0/.
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
 %%
-%% Copyright (c) 2015, Invent Technology
-%% Author: Vozzhenikov Roman, vzroman@gmail.com.
+%%   http://www.apache.org/licenses/LICENSE-2.0
 %%
-%% Alternatively, the contents of this file may be used under the terms
-%% of the GNU General Public License Version 2.0, as described below:
-%%
-%% This file is free software: you may copy, redistribute and/or modify
-%% it under the terms of the GNU General Public License as published by the
-%% Free Software Foundation, either version 2.0 of the License, or (at your
-%% option) any later version.
-%%
-%% This file is distributed in the hope that it will be useful, but
-%% WITHOUT ANY WARRANTY; without even the implied warranty of
-%% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
-%% Public License for more details.
-%%
-%% You should have received a copy of the GNU General Public License
-%% along with this program. If not, see http://www.gnu.org/licenses/.
-%%
-%%-----------------------------------------------------------------
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%----------------------------------------------------------------
 -module(ecomet_backend_SUITE).
 
 -include("ecomet_test.hrl").
@@ -42,20 +33,23 @@
 
 
 -export([
-  test_sys_storages/1,
-  test_dirty_operations/1
+  test_root_db/1,
+  test_add_remove_db/1,
+  test_dirty_operations/1,
+  test_transactions/1
 ]).
 
 all()->
   [
-    test_sys_storages
+    test_root_db
+    ,test_add_remove_db
     ,test_dirty_operations
+    ,test_transactions
   ].
 
 groups()->
   [].
 
-%% Init system storages
 init_per_suite(Config)->
   ?BACKEND_INIT(),
   Config.
@@ -76,57 +70,72 @@ end_per_testcase(_,_Config)->
   ok.
 
 %%========================================================================
-%%    Test system storages availability and type
+%%    Test the root database availability and type
 %%========================================================================
-test_sys_storages(_Config)->
-%%  %%----------Object storage--------------------------------------------
-%%  % ramlocal storage
-%%  ram_copies=ecomet_backend:fragment_info(ecomet_sys_object_ramlocal,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_object_ramlocal,type),
-%%  true=ecomet_backend:fragment_info(ecomet_sys_object_ramlocal,local_content),
-%%  % ram storage
-%%  ram_copies=ecomet_backend:fragment_info(ecomet_sys_object_ram,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_object_ram,type),
-%%  false=ecomet_backend:fragment_info(ecomet_sys_object_ram,local_content),
-%%  % ramdisc storage
-%%  disc_copies=ecomet_backend:fragment_info(ecomet_sys_object_ramdisc,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_object_ramdisc,type),
-%%  false=ecomet_backend:fragment_info(ecomet_sys_object_ramdisc,local_content),
-%%  % discbuf storage
-%%  disc_copies=ecomet_backend:fragment_info(ecomet_sys_object_discbuf,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_object_discbuf,type),
-%%  false=ecomet_backend:fragment_info(ecomet_sys_object_discbuf,local_content),
-%%  % disc storage
-%%  disc_only_copies=ecomet_backend:fragment_info(ecomet_sys_object_disc,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_object_disc,type),
-%%  false=ecomet_backend:fragment_info(ecomet_sys_object_disc,local_content),
-%%
-%%  %%----------Index storage--------------------------------------------
-%%  % ramlocal storage
-%%  ram_copies=ecomet_backend:fragment_info(ecomet_sys_index_ramlocal,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_index_ramlocal,type),
-%%  true=ecomet_backend:fragment_info(ecomet_sys_index_ramlocal,local_content),
-%%  % ram storage
-%%  ram_copies=ecomet_backend:fragment_info(ecomet_sys_index_ram,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_index_ram,type),
-%%  false=ecomet_backend:fragment_info(ecomet_sys_index_ram,local_content),
-%%  % ramdisc storage
-%%  disc_copies=ecomet_backend:fragment_info(ecomet_sys_index_ramdisc,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_index_ramdisc,type),
-%%  false=ecomet_backend:fragment_info(ecomet_sys_index_ramdisc,local_content),
-%%  % discbuf storage
-%%  disc_copies=ecomet_backend:fragment_info(ecomet_sys_index_discbuf,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_index_discbuf,type),
-%%  false=ecomet_backend:fragment_info(ecomet_sys_index_discbuf,local_content),
-%%  % disc storage
-%%  disc_only_copies=ecomet_backend:fragment_info(ecomet_sys_index_disc,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_index_disc,type),
-%%  false=ecomet_backend:fragment_info(ecomet_sys_index_disc,local_content),
-%%
-%%  %%------------Node local params------------------------------------------
-%%  disc_copies=ecomet_backend:fragment_info(ecomet_sys_node,storage_type),
-%%  set=ecomet_backend:fragment_info(ecomet_sys_node,type),
-%%  true=ecomet_backend:fragment_info(ecomet_sys_node,local_content),
+test_root_db(_Config)->
+  %%----------Object storage--------------------------------------------
+  StorageList = ecomet_backend:get_storages(),
+  ct:pal("Storage list ~p",[StorageList]),
+  [] = [
+    % Object storage
+    ecomet_root_data_ramlocal,
+    ecomet_root_data_ram,
+    ecomet_root_data_ramdisc,
+    ecomet_root_data_disc,
+    % Index storage
+    ecomet_root_index_ramlocal,
+    ecomet_root_index_ram,
+    ecomet_root_index_ramdisc,
+    ecomet_root_index_disc
+  ] -- StorageList,
+
+  % Storage types
+  ramlocal = ecomet_backend:get_storage_type(ecomet_root_data_ramlocal),
+  ram = ecomet_backend:get_storage_type(ecomet_root_data_ram),
+  ramdisc = ecomet_backend:get_storage_type(ecomet_root_data_ramdisc),
+  disc = ecomet_backend:get_storage_type(ecomet_root_data_disc),
+
+  ramlocal = ecomet_backend:get_storage_type(ecomet_root_index_ramlocal),
+  ram = ecomet_backend:get_storage_type(ecomet_root_index_ram),
+  ramdisc = ecomet_backend:get_storage_type(ecomet_root_index_ramdisc),
+  disc = ecomet_backend:get_storage_type(ecomet_root_index_disc),
+
+  ok.
+
+test_add_remove_db(_Config)->
+
+  %--------------Add----------------------------------
+  BeforeAdd = ecomet_backend:get_storages(),
+
+  ok = ecomet_backend:create_db(test),
+
+  [ ] = (ecomet_backend:get_storages() -- BeforeAdd) -- [
+    % Object storage
+    ecomet_test_data_ramlocal,
+    ecomet_test_data_ram,
+    ecomet_test_data_ramdisc,
+    ecomet_test_data_disc,
+    % Index storage
+    ecomet_test_index_ramlocal,
+    ecomet_test_index_ram,
+    ecomet_test_index_ramdisc,
+    ecomet_test_index_disc
+  ],
+
+  % Storage types
+  ramlocal = ecomet_backend:get_storage_type(ecomet_test_data_ramlocal),
+  ram = ecomet_backend:get_storage_type(ecomet_test_data_ram),
+  ramdisc = ecomet_backend:get_storage_type(ecomet_test_data_ramdisc),
+  disc = ecomet_backend:get_storage_type(ecomet_test_data_disc),
+
+  ramlocal = ecomet_backend:get_storage_type(ecomet_test_index_ramlocal),
+  ram = ecomet_backend:get_storage_type(ecomet_test_index_ram),
+  ramdisc = ecomet_backend:get_storage_type(ecomet_test_index_ramdisc),
+  disc = ecomet_backend:get_storage_type(ecomet_test_index_disc),
+
+  %------------Remove-----------------------------------------
+  ok = ecomet_backend:remove_db(test),
+  BeforeAdd = ecomet_backend:get_storages(),
 
   ok.
 
@@ -201,4 +210,7 @@ test_dirty_operations(_Config)->
 %%  % Clean deleted record
 %%  ok=ecomet_backend:clean_discbuf_fragment(<<"ecomet_sys_object_discbuf">>,100.0),
 
+  ok.
+
+test_transactions(_Config)->
   ok.

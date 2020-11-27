@@ -25,7 +25,10 @@
 -export([
   create_db/1,
   remove_db/1,
-  get_storages/0
+  get_storages/0,
+  get_segments/1,
+  get_storage_type/1,
+  is_local_storage/1
 ]).
 
 %%=================================================================
@@ -61,7 +64,23 @@ remove_db(Name)->
   ok.
 
 get_storages()->
-  dlss:get_storages().
+  [ S || S <- dlss:get_storages(), string:prefix(atom_to_list(S),"ecomet_")=/=nomatch ].
+
+get_segments(Storage)->
+  dlss:get_segments( Storage ).
+
+get_storage_type(Storage)->
+  case dlss:get_storage_type(Storage) of
+    ram->
+      case is_local_storage(Storage) of
+        true->?RAMLOCAL;
+        _->?RAM
+      end;
+    Other->Other
+  end.
+
+is_local_storage(Storage)->
+  dlss:is_local_storage(Storage).
 
 %%=================================================================
 %%	Data API
