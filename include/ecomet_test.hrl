@@ -16,34 +16,39 @@
 %% under the License.
 %%----------------------------------------------------------------
 
--ifndef(DLSS_TEST).
--define(DLSS_TEST,1).
+-ifndef(ECOMET_TEST).
+-define(ECOMET_TEST,1).
 
 -include_lib("common_test/include/ct.hrl").
-
--define(assertError(Term, Expr),
-  begin
-    ((fun () ->
-      try (Expr) of
-        __V -> erlang:error({assertException,
-          [{module, ?MODULE},
-            {line, ?LINE},
-            {expression, (??Expr)},
-            {unexpected_success, __V}]})
-      catch
-        error:Term -> ok;
-        __C:__T:__Stack ->
-          erlang:error({assertException,
-            [{module, ?MODULE},
-              {line, ?LINE},
-              {expression, (??Expr)},
-              {unexpected_exception,
-                {__C, __T, __Stack}}]})
-      end
-      end)())
-  end).
+-include_lib("eunit/include/eunit.hrl").
 
 -define(GET(Key,Config),proplists:get_value(Key,Config)).
 -define(GET(Key,Config,Default),proplists:get_value(Key,Config,Default)).
+
+-define(BACKEND_INIT(),
+  begin
+    application:stop(dlss),
+    mnesia:delete_schema([node()]),
+    application:set_env(mnesia, dir,?config(priv_dir,Config)++"/DB_"++atom_to_list(?MODULE)),
+    ok = application:start(dlss),
+    {ok,_}=ecomet_schema:init([])
+  end).
+
+-define(BACKEND_STOP(Timeout),(fun()->
+  application:stop(dlss),
+  Wait=fun(R,T)->
+    case mnesia:system_info(is_running) of
+      no->ok;
+      _->
+        if
+          T=<0->error;
+          true->
+            timer:sleep(1000),
+            R(R,T-1000)
+        end
+    end
+       end,
+  Wait(Wait,Timeout)
+end)()).
 
 -endif.
