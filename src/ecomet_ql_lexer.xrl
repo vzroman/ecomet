@@ -114,7 +114,12 @@ Rules.
 .  : error(iolist_to_binary(io_lib:format("Unexpected token '~s'.", [TokenChars]))).
 
 Erlang code.
--compile([export_all]).
+
+-export([
+    to_hex/1,
+    to_atom/1,
+    to_macros/1
+]).
 
 to_hex([$0,$x|Hex]) ->
     list_to_integer(Hex,16).

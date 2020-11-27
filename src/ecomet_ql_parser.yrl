@@ -193,14 +193,14 @@ GroupBy -> integer : get_token('$1').
 
 Erlang code.
 
--include("ecomet_util.hrl").
-
 get_token({Token, _Line})->Token;
 get_token({_Token, _Line, Value}) -> Value.
 
 get_function({_Token,_Line,Function})->
-  ?assertMatch(true,erlang:function_exported(ecomet_query,Function,1),{invalid_function,Function}),
-  fun ecomet_query:Function/1.
+  case erlang:function_exported(ecomet_query,Function,1) of
+    true->fun ecomet_query:Function/1;
+    _->erlang:error({invalid_function,Function})
+  end.
 run_macros(Macros,ArgumentList)->
   ecomet_query:macros(Macros,ArgumentList).
 
