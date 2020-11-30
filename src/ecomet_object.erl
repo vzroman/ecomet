@@ -32,6 +32,7 @@
   delete_storage/3,
   save_storage/4,
   commit/2,
+  get_db_id/1,
   get_db_name/1,
   get_pattern/1,
   get_id/1
@@ -184,7 +185,10 @@ read_field(Object,Field,Default)->
     Other->Other
   end.
 
-read_fields(Object,Fields)->
+read_fields(Object,Fields) when is_list(Fields)->
+  Map = maps:from_list([ {Field,none} || Field <- Fields ]),
+  read_fields(Object, Map);
+read_fields(Object,Fields) when is_map(Fields)->
   maps:map(fun(Name,Default)->
     case read_field(Object,Name,Default) of
       {ok,Value}->Value;
@@ -522,7 +526,7 @@ edit_rights(Object)->
 %   <IDHIGH,NodeID:16,DB:8>
 new_id(FolderID,?OID(PatternID,_))->
   NodeID = ecomet_node:get_unique_id(),
-  DB = get_folder_db( FolderID ),
+  DB = ecomet_folder:get_db_id( FolderID ),
   ID= ecomet_schema:local_increment({id,PatternID}),
   % We can get id that is unique for this node. Unique id for entire system is too expensive.
   % To resolve the problem we mix NodeId (it's unique for entire system) into IDH.
@@ -531,17 +535,6 @@ new_id(FolderID,?OID(PatternID,_))->
   IDL=ID rem ?BITSTRING_LENGTH,
   IDH1 = ((IDH bsl 16) + NodeID) bsl 8 + DB,
   { PatternID, IDH1 * ?BITSTRING_LENGTH + IDL }.
-
-get_folder_db(FolderID)->
-  case ecomet_schema:get_mounted_db(FolderID) of
-    none->
-      % The folder is a simple folder, no DB is mounted to it.
-      % Obtain the ID of the db from the ID of the folder
-      get_db_id(FolderID);
-    DB->
-      % The folder itself is a mounted point
-      ecomet_schema:get_db_id(DB)
-  end.
 
 get_db_id(?OID(_,ID))->
   IDH=ID div ?BITSTRING_LENGTH,

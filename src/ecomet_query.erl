@@ -32,7 +32,8 @@
   set/3,
   delete/2,delete/3,
   execute/2,execute/3,
-  compile/3,compile/4
+  compile/3,compile/4,
+  system/3
 ]).
 
 %%====================================================================
@@ -160,6 +161,17 @@ get(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(get,Fields,Conditions,Params),
   Union=proplists:get_value(union,Params,{'OR',ecomet_resultset:new()}),
   execute(CompiledQuery,DBs,Union).
+
+system(DBs,Fields,Conditions)->
+  Conditions1=ecomet_resultset:prepare(Conditions),
+  {Map,Reduce}=compile_map_reduce(get,Fields,[]),
+  Compiled = #compiled_query{
+    conditions = Conditions1,
+    map = Map,
+    reduce = Reduce
+  },
+  execute(Compiled,DBs,{'OR',ecomet_resultset:new()}).
+
 %%=====================================================================
 %%	SET
 %%=====================================================================
@@ -187,10 +199,11 @@ delete(DBs,Conditions,Params)->
 %%=====================================================================
 compile(Type,Fields,Conditions)->compile(Type,Fields,Conditions,[]).
 compile(Type,Fields,Conditions,Params)->
-  PreparedConditions=ecomet_resultset:prepare(Conditions),
+  Conditions1=set_rights(Type,Conditions),
+  Conditions2=ecomet_resultset:prepare(Conditions1),
   {Map,Reduce}=compile_map_reduce(Type,Fields,Params),
   #compiled_query{
-    conditions = PreparedConditions,
+    conditions = Conditions2,
     map = Map,
     reduce = Reduce
   }.
@@ -890,7 +903,6 @@ wrap_transactions([S|Rest],Level,Acc)->
   wrap_transactions(Rest,Level,[S|Acc]);
 wrap_transactions([],_Level,Acc)->lists:reverse(Acc).
 
-
 %% ====================================================================
 %% QL functions
 %% ====================================================================
@@ -903,5 +915,28 @@ concat([],Acc)->Acc.
 string([Term])->
   ecomet_types:term_to_string(Term).
 
-	
 
+%% ====================================================================
+%% Internal helpers
+%% ====================================================================
+set_rights(system,Conditions)->
+  Conditions;
+set_rights(Type,Conditions)->
+  case ecomet_user:is_admin() of
+    {ok,true}->Conditions;
+    {error,Error}->?ERROR(Error);
+    _->
+      {ok,UserID}=ecomet_user:get_user(),
+      {ok,UserGroups}=ecomet_user:get_usergroups(),
+      Level=
+        if
+          Type=:=get -> <<".readgroups">>;
+          true -> <<".writegroups">>
+        end,
+      {'AND',[
+        Conditions,
+        {'OR',[
+          {Level,'=',GID}|| GID<-[UserID|UserGroups]
+        ]}
+      ]}
+  end.
