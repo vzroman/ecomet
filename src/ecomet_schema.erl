@@ -32,6 +32,7 @@
   mount_db/2,
   unmount_db/1,
   get_mounted_db/1,
+ get_mounted_folder/1,
   get_db_id/1,
   get_db_name/1,
   get_registered_databases/0,
@@ -140,7 +141,7 @@ mount_db(FolderID,DB)->
     % Index on OID
     ok = mnesia:write( ?SCHEMA, #kv{ key = #mntOID{k=FolderID}, value = DB }, write ),
     % Index on PATH
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntPath{k=Path}, value = DB }, write )
+    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntPath{k=Path}, value = FolderID }, write )
 
   end) of
     { atomic, ok }-> ok;
@@ -177,6 +178,11 @@ get_mounted_db(OID)->
     [#kv{value = DB}]->DB;
     _->none
   end.
+
+get_mounted_folder(Path)->
+  Closest = #mntPath{} = mnesia:dirty_prev(?SCHEMA,#mntPath{ k= Path }),
+  [#kv{value = FolderID}] = mnesia:dirty_read(?SCHEMA,Closest),
+  {Path,FolderID}.
 
 get_registered_databases()->
   MS=[{
