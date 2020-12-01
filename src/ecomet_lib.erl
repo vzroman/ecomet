@@ -17,13 +17,17 @@
 %%----------------------------------------------------------------
 -module(ecomet_lib).
 
+-include("ecomet.hrl").
 %%=================================================================
 %%	Common utilities
 %%=================================================================
 -export([
   parse_dt/1,
   dt_to_string/1,dt_to_string/2,
-  log_ts/0
+  log_ts/0,
+  to_object/1,to_object/2,to_object/3,to_object_system/1,
+  pipe/2,
+  module_exists/1
 ]).
 
 dt_to_string(DT)->
@@ -38,3 +42,55 @@ parse_dt(DT) when is_list(DT)->
 
 log_ts()->
   erlang:system_time(nano_seconds).
+
+to_object(ID)->
+  to_object(ID,none,none).
+to_object(ID,Lock)->
+  to_object(ID,Lock,none).
+to_object(<<"/root",_/binary>> =Path,Lock,Timeout)->
+  {ok,OID}=ecomet:path2oid(Path),
+  ecomet:open(OID,Lock,Timeout);
+to_object(ID, Lock,Timeout)->
+  case ecomet:is_object(ID) of
+    true when Lock=:=none->
+      ID;
+    true when Lock=/=none->
+      % The object is already opened, but we still may need to upgrade the lock
+      ecomet:open(?OID(ID),Lock,Timeout);
+    _->
+      % The ID is supposed to be an OID
+      ecomet:open(ID,Lock,Timeout)
+  end.
+to_object_system(<<"/root",_/binary>> =Path)->
+  {ok,OID}=ecomet:path2oid(Path),
+  ecomet_object:construct(OID);
+to_object_system(ID)->
+  case ecomet:is_object(ID) of
+    true->ID;
+    _->
+      ecomet_object:construct(ID)
+  end.
+
+pipe(Pipe,Acc)->
+  pipe(Pipe,Acc,1).
+pipe([H|T],Acc,Step)->
+  case try H(Acc) catch _:Exception->{error,Exception} end of
+    {ok,Acc1}->pipe(T,Acc1,Step+1);
+    ok->pipe(T,Acc,Step+1);
+    error->{error,Step,undefined};
+    {error,Error}->{error,Step,Error};
+    Unexpected->{error,Step,{unexpected,Unexpected}}
+  end;
+pipe([],Acc,_Step)->
+  {ok,Acc}.
+
+%% Utility for checking if the module is available
+module_exists(Module)->
+  case code:is_loaded(Module) of
+    {file,_}->true;
+    _->
+      case code:load_file(Module) of
+        {module,_}->true;
+        {error,_}->false
+      end
+  end.

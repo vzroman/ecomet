@@ -45,7 +45,9 @@
   create/1,
   delete/1,
   open/1,open/2,open/3,
+  construct/1,
   edit/2,
+  copy/2,
   read_field/2,read_field/3,read_fields/2,read_all/1,
   field_changes/2,
   is_object/1,
@@ -220,6 +222,11 @@ edit(#object{oid=OID,map=Map}=Object,Fields)->
     _->ecomet_transaction:dict_put([{{OID,fields},NewFields}])
   end,
   ok.
+
+copy(Object,Replace)->
+  Original = read_all(Object),
+  New = maps:merge(Original,Replace),
+  create(New).
 
 % Check changes for the field within the transaction
 field_changes(#object{oid=OID,map=Map},Field)->
@@ -458,7 +465,7 @@ check_path(Object)->
       % Check that name does not include the path delimiter
       case binary:split(Name,<<"/">>) of
         [Name]->
-          case ecomet_folder:find_object(FolderID,Name) of
+          case ecomet_folder:find_object_system(FolderID,Name) of
             {error,notfound}->ok;
             {ok,OID}->ok;
             _->{error,{not_unique,Name}}

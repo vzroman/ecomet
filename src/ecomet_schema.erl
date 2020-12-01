@@ -70,7 +70,6 @@
 
 -define(INCREMENT,list_to_atom("ecomet_"++atom_to_list(node()))).
 -define(SCHEMA,ecomet_schema).
--define(ROOT,root).
 
 % Database indexing
 -record(dbId,{k}).
@@ -425,7 +424,8 @@ init_low_level_patterns()->
   %-----Pattern---------------------
   Pattern = maps:merge(Folder,#{
     <<"behaviour_module">>=>#{ type => atom },
-    <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true }
+    <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
+    <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
   }),
   PatternFieldsMap=build_pattern_schema(Pattern),
   PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[]),
@@ -467,7 +467,7 @@ init_root()->
   }),
   _Patterns = ecomet:create_object(#{
     <<".name">>=><<".pattern">>,
-    <<".folder">>=> ecomet:get_oid(Root),
+    <<".folder">>=> ?OID(Root),
     <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
     <<".ts">>=>ecomet_lib:log_ts()
   }),

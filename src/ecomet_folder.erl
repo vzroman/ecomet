@@ -17,6 +17,7 @@
 %%----------------------------------------------------------------
 -module(ecomet_folder).
 
+-include("ecomet.hrl").
 -include("ecomet_schema.hrl").
 
 -behaviour(ecomet_object).
@@ -27,7 +28,7 @@
 -export([
   oid2path/1,
   path2oid/1,
-  find_object/2,
+  find_object/2,find_object_system/2,
   get_db_id/1,
   get_db_name/1,
   get_content/1,get_content_system/1
@@ -62,7 +63,7 @@ path2oid(<<"/root",Path/binary>>)->
 path2oid(_Path)->
   {error,invalid_path}.
 path2oid(FolderID,[Name|Tail])->
-  case find_object(FolderID,Name) of
+  case find_object_system(FolderID,Name) of
     {ok,ItemID} -> path2oid(ItemID,Tail);
     _->{ error, invalid_path }
   end;
@@ -70,6 +71,15 @@ path2oid(OID,[])->
   {ok,OID}.
 
 find_object(FolderID,Name)->
+  DB = get_db_name(FolderID),
+  case ecomet_query:get([DB],[<<".oid">>],{'AND',[{
+    <<".folder">>,'=',FolderID},
+    <<".name">>,'=',Name
+  ]}) of
+    []->{ error, not_found };
+    [OID|_]-> { ok, OID }
+  end.
+find_object_system(FolderID,Name)->
   DB = get_db_name(FolderID),
   case ecomet_query:system([DB],[<<".oid">>],{'AND',[{
     <<".folder">>,'=',FolderID},
@@ -127,7 +137,7 @@ on_delete(Object)->
   [ begin
       Item = ecomet:open(ItemID,_Lock=none),
       ok = ecomet:delete_object(Item)
-    end || ItemID <- get_content_system(ecomet:get_oid(Object)) ],
+    end || ItemID <- get_content_system(?OID(Object)) ],
   ok.
 
 
@@ -226,7 +236,7 @@ apply_recursion(Object)->
         end,
       if
         Changes=/=none ->
-          OID=ecomet:get_oid(Object),
+          OID=?OID(Object),
           ecomet:on_commit(fun()->
             [begin
                Item=ecomet:open_nolock(ItemID),

@@ -19,6 +19,8 @@
 -ifndef(ECOMET_STRUCT).
 -define(ECOMET_STRUCT,1).
 
+-define(ROOT,root).
+
 -define(DATA,data).
 -define(INDEX,index).
 
@@ -34,6 +36,11 @@
 -record(ecomet_log,{oid,ts,handler,addtags,deltags,tags,fields}).
 
 -define(ERROR(Error),erlang:error(Error)).
+
+-define(PIPE(Items,Acc),ecomet_lib:pipe(Items,Acc)).
+
+-define(OBJECT(ID),ecomet_lib:to_object_system(ID)).
+-define(OID(Object),ecomet:get_oid(Object)).
 
 -define(ENV(Key,Default),application:get_env(dlss,Key,Default)).
 -define(ENV(OS,Config,Default),

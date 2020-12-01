@@ -26,7 +26,8 @@
   read_field/2,read_field/3,read_fields/2,
   field_changes/2,
   edit_object/2,
-  delete_object/1
+  delete_object/1,
+  copy_object/2
 ]).
 
 %%=================================================================
@@ -49,7 +50,8 @@
   get_oid/1,
   get_path/1,
   oid2path/1,
-  path2oid/1
+  path2oid/1,
+  is_object/1
 ]).
 
 %%=================================================================
@@ -58,19 +60,19 @@
 create_object(Fields)->
   ecomet_object:create(Fields).
 
-open(OID)->
-  ecomet_object:open(OID).
-open(OID,Lock)->
-  ecomet_object:open(OID,Lock).
-open(OID,Lock,Timeout)->
-  ecomet_object:open(OID,Lock,Timeout).
+open(ID)->
+  ecomet_lib:to_object(ID).
+open(ID,Lock)->
+  ecomet_lib:to_object(ID,Lock).
+open(ID,Lock,Timeout)->
+  ecomet_object:open(ID,Lock,Timeout).
 %----Legacy API---------------------------------------------------
-open_nolock(OID)->
-  open(OID,none).
-open_rlock(OID)->
-  open(OID,read).
-open_wlock(OID)->
-  open(OID,write).
+open_nolock(ID)->
+  open(ID,none).
+open_rlock(ID)->
+  open(ID,read).
+open_wlock(ID)->
+  open(ID,write).
 
 read_field(Object,Field)->
   ecomet_object:read_field(Object,Field).
@@ -87,6 +89,10 @@ edit_object(Object,Fields)->
 
 delete_object(Object)->
   ecomet_object:delete(Object).
+
+copy_object(ID,Replace)->
+  Object = ecomet_lib:to_object(ID),
+  ecomet_object:copy(Object,Replace).
 
 %%=================================================================
 %%	Transactions API
@@ -125,4 +131,7 @@ oid2path(OID)->
 
 path2oid(Path)->
   ecomet_folder:path2oid(Path).
+
+is_object(Object)->
+  ecomet_object:is_object(Object).
 
