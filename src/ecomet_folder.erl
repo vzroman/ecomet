@@ -31,7 +31,8 @@
   find_object/2,find_object_system/2,
   get_db_id/1,
   get_db_name/1,
-  get_content/1,get_content_system/1
+  get_content/1,get_content_system/1,
+  is_empty/1
 ]).
 
 %%===========================================================================
@@ -99,6 +100,10 @@ get_content_system(Folder)->
   DB = get_db_name(Folder),
   ecomet_query:system([DB],[<<".oid">>],{<<".folder">>,'=',Folder}).
 
+is_empty(Folder)->
+  DB = get_db_name(Folder),
+  0 =:= ecomet_query:system([DB],[count],{<<".folder">>,'=',Folder}).
+
 
 get_db_id(FolderID)->
   case ecomet_schema:get_mounted_db(FolderID) of
@@ -123,10 +128,12 @@ get_db_name(FolderID)->
 %%	Ecomet behaviour
 %%=================================================================
 on_create(Object)->
+  check_database(Object),
   inherit_rights(Object),
   ok.
 
 on_edit(Object)->
+  check_database(Object),
   recursive_rights(Object),
   apply_recursion(Object),
   ok.
@@ -256,4 +263,30 @@ apply_recursion(Object)->
     true ->ok
   end.
 
+check_database(Object)->
+  case ecomet:field_changes(Object,<<"database">>) of
+    none->ok;
+    { MountedDB, UnmountedDB }->
+      FolderID = ?OID(Object),
+      % Step 1. Unmount the database (if mounted)
+      if
+        UnmountedDB =/=none->
+          % Detaching a database from a folder.
+          % Unmount is only allowed when the folder is empty
+          case is_empty(FolderID) of
+            true->
+              ok = ecomet_schema:unmount_db(FolderID);
+            _->
+              ?ERROR(contains_objects)
+          end;
+        true -> ok
+      end,
 
+      % Step 2. Mount a database
+      if
+        MountedDB =/=none ->
+          DB = ecomet_db:get_name(MountedDB),
+          ok = ecomet_schema:mount_db(FolderID,DB);
+        true -> ok
+      end
+  end.

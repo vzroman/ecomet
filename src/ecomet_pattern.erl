@@ -129,10 +129,7 @@ get_fields(Pattern,Names)->
 is_empty(Pattern)->
   OID=?OID(?OBJECT(Pattern)),
   DBs=ecomet_db:get_databases(),
-  case ecomet_query:system(DBs,[count],{<<".pattern">>,'=',OID}) of
-    0->true;
-    _->false
-  end.
+  0 =:= ecomet_query:system(DBs,[count],{<<".pattern">>,'=',OID}).
 
 %%=================================================================
 %%	Ecomet object behaviour

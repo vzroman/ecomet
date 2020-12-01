@@ -131,6 +131,7 @@ remove_db(Name)->
   end.
 
 %%---------------Mount a new database to a folder------------------
+% A database can be mounted to more than one folder
 mount_db(FolderID,DB)->
   case mnesia:transaction(fun()->
     % Adding a new mount point requires lock on the schema
@@ -419,7 +420,8 @@ init_low_level_patterns()->
     <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
     <<"only_patterns">>=>#{ type => list, subtype => link },
     <<"exclude_patterns">>=>#{ type => list, subtype => link },
-    <<"recursive_rights">> =>#{ type => bool }
+    <<"recursive_rights">> =>#{ type => bool },
+    <<"database">> =>#{ type => link, index=> [simple] }
   }),
   FolderFieldsMap=build_pattern_schema(Folder),
   FolderMap= ecomet_pattern:set_behaviours(FolderFieldsMap,[]),
