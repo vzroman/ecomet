@@ -389,7 +389,7 @@ init_environment()->
 
   % Attach low-level behaviours
   ?LOGINFO("attaching low-level behaviours"),
-  attach_low_level_begaviours(),
+  attach_low_level_behaviours(),
 
   % Init ecomet environment
   ?LOGINFO("initializing the ecomet environment"),
@@ -482,7 +482,7 @@ init_root()->
 
   ok.
 
-attach_low_level_begaviours()->
+attach_low_level_behaviours()->
   {ok,_} = ecomet:transaction(fun()->
     ecomet_pattern:set_behaviours({?PATTERN_PATTERN,?OBJECT_PATTERN},[ecomet_object])
   end),
