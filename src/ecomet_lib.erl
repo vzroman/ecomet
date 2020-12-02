@@ -50,23 +50,20 @@ to_object(ID,Lock)->
   to_object(ID,Lock,none).
 to_object(<<"/root",_/binary>> =Path,Lock,Timeout)->
   {ok,OID}=ecomet:path2oid(Path),
-  ecomet:open(OID,Lock,Timeout);
+  ecomet_object:open(OID,Lock,Timeout);
 to_object(ID, Lock,Timeout)->
-  case ecomet:is_object(ID) of
+  case ecomet_object:is_object(ID) of
     true when Lock=:=none->
       ID;
-    true when Lock=/=none->
+    true->
       % The object is already opened, but we still may need to upgrade the lock
-      ecomet:open(?OID(ID),Lock,Timeout);
-    _->
-      % The ID is supposed to be an OID
-      ecomet:open(ID,Lock,Timeout)
+      ecomet_object:open(?OID(ID),Lock,Timeout)
   end.
 to_object_system(<<"/root",_/binary>> =Path)->
   {ok,OID}=ecomet:path2oid(Path),
   ecomet_object:construct(OID);
 to_object_system(ID)->
-  case ecomet:is_object(ID) of
+  case ecomet_object:is_object(ID) of
     true->ID;
     _->
       ecomet_object:construct(ID)

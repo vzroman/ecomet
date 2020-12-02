@@ -587,7 +587,7 @@ construct(OID)->
   #object{oid=OID,edit=false,map=Map}.
 
 put_empty_storages(OID,Map)->
-  BackTags= [{{OID,Storage,backtag},none} || Storage<-ecomet_field:index_storages(Map) ],
+  BackTags= [{{OID,Storage,backtag},none} || Storage<-ecomet_pattern:index_storages(Map) ],
   Fields = [{{OID,Storage,fields},none} || Storage<-ecomet_field:fields_storages(Map)],
   ecomet_transaction:dict_put(BackTags ++ Fields).
 
@@ -603,7 +603,7 @@ load_backtags(#object{oid=OID,map=Map},Dict)->
             not_found -> { Type, #{} };
             Loaded -> { Type, Loaded }
           end
-      end || Type <- ecomet_field:index_storages(Map) ],
+      end || Type <- ecomet_pattern:index_storages(Map) ],
   maps:from_list(List).
 
 save_backtags([{Storage,Tags}|Rest],OID)->
@@ -613,7 +613,7 @@ save_backtags([],_OID)->ok.
 
 delete_backtags(#object{oid=OID,map=Map})->
   DB=get_db_name(OID),
-  [ ok = ecomet_backend:delete(DB,?DATA,Type,{OID,backtag}) || Type <- ecomet_field:index_storages(Map)],
+  [ ok = ecomet_backend:delete(DB,?DATA,Type,{OID,backtag}) || Type <- ecomet_pattern:index_storages(Map)],
   ok.
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet

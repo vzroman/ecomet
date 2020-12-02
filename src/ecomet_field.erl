@@ -26,7 +26,6 @@
   build_new/2,
   merge/3,
   get_type/2,
-  index_storages/1,
   get_storage/2,
   get_index/2,
   fields_storages/1,
@@ -100,75 +99,46 @@ build_description(Params)->
     maps:get(K,Params,Default)
   end,?DEFAULT_DESCRIPTION).
 
-inherit(Object,Config)->
-
-  % Calculate the difference
-  Original = ecomet:read_fields(Object,maps:keys(Config)),
-  Diff =
-    maps:fold(fun(K, V1, Acc)->
-      case Original of
-        #{ K := V1 } -> Acc;
-        #{ K := V0 } -> Acc#{K => {V0, V1} }
-      end
-    end,#{},Config),
-
-  % Are there objects for the pattern
-  {ok, PatternID} = ecomet:read_field(Object,<<".folder">>),
-  IsEmpty = ecomet_pattern:is_empty(PatternID),
-
-  % Check params that affect the existing extent
-  case maps:keys(Diff) -- ?EXTENT_CRITICAL of
-    []->ok;
-    _ when IsEmpty-> ok;
-    _->?ERROR(has_objects)
-  end,
-
-  % Inheritable params. Some params are inherited only on creation
-  Changes0 = maps:without([ storage, default, autoincrement ], Diff),
+inherit(Child,Parent)->
+  % Update extent critical params.
+  % IMPORTANT! We don't check the extent existence, because it is performed by the field behaviour
+  Child0 = maps:merge(Child,maps:with(?EXTENT_CRITICAL,Parent)),
 
   % Add new indexes. The index can be added but not removed
-  NewIndex=
-    case Changes0 of
-      #{index := Index1} when is_list(Index1) ->ordsets:from_list(Index1);
+  ParentIndex=
+    case Parent of
+      #{index := Index1} when is_list(Index1) ->Index1;
       _ -> []
     end,
-  OldIndex =
-    case Original of
-      #{index := Index0} when is_list(Index0)-> ordsets:from_list(Index0);
+  ChildIndex =
+    case Child of
+      #{index := Index0} when is_list(Index0)-> Index0;
       _->[]
     end,
-  Changes1=
-    case ordsets:subtract(NewIndex,OldIndex) of
-      []->Changes0;
-      IndexDiff -> Changes0#{index => ordsets:union(IndexDiff,OldIndex) }
+  Index=
+    case ordsets:from_list(ChildIndex ++ ParentIndex) of
+      []->none;
+      NewIndex->NewIndex
     end,
 
-  % Commit changes if they exist
-  case maps:size(Changes1) of
-    0->ok;
-    _->
-      Changes2 = from_schema(Changes1),
-      ecomet:edit_object(Object, Changes2)
-  end.
+  Child0#{index => Index}.
 
-check_parent(Object,Config)->
-
-  Original = ecomet:read_fields(Object,maps:keys(Config)),
+check_parent(Child,Parent)->
 
   % Children cannot change extent critical parameters defined in the parent
-  case maps:to_list(maps:with(?EXTENT_CRITICAL,Original)) -- maps:to_list(maps:with(?EXTENT_CRITICAL,Config)) of
+  case maps:to_list(maps:with(?EXTENT_CRITICAL,Child)) -- maps:to_list(maps:with(?EXTENT_CRITICAL,Parent)) of
     []->ok;
     _->?ERROR(parent_field)
   end,
 
   % Children cannot remove indexes defined in the parent
   ChildIndex=
-    case Config of
+    case Child of
       #{index := Index1} when is_list(Index1)->ordsets:from_list(Index1);
       _->[]
     end,
   ParentIndex=
-    case Original of
+    case Parent of
       #{index := Index0} when is_list(Index0)->ordsets:from_list(Index0);
       _->[]
     end,
@@ -268,12 +238,6 @@ get_type(Map,Name)->
     #{ Name:= Config } -> {ok, get_type(Config)};
     _->{error,undefined_field}
   end.
-
-% Return list of storages, that contain indexes for the fields
-index_storages(Map)->
-  Storages=maps:get(index_storage,Map),
-  {StorageList,_}=lists:unzip(Storages),
-  StorageList.
 
 % Get field indexes
 get_index(Map,Name)->

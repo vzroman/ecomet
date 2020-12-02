@@ -65,7 +65,7 @@ open(ID)->
 open(ID,Lock)->
   ecomet_lib:to_object(ID,Lock).
 open(ID,Lock,Timeout)->
-  ecomet_object:open(ID,Lock,Timeout).
+  ecomet_lib:to_object(ID,Lock,Timeout).
 %----Legacy API---------------------------------------------------
 open_nolock(ID)->
   open(ID,none).
