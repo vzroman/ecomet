@@ -59,7 +59,8 @@ path2oid(<<"/root">>)->
 %%Search object by path
 path2oid(<<"/root",_/binary>> = Path)->
   { MountPath, FolderID } = ecomet_schema:get_mounted_folder(Path),
-  <<MountPath/binary,Tail/binary>> = Path,
+  HeadSize = size(MountPath),
+  <<MountPath:HeadSize/binary,Tail/binary>> = Path,
   Tokens = string:tokens(unicode:characters_to_list(Tail),"/"),
   Path1= [ unicode:characters_to_binary(Name) || Name <- Tokens],
   path2oid(FolderID,Path1);
