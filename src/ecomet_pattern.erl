@@ -37,7 +37,10 @@
   get_parent/1,get_parents/1,
   get_children/1,get_children_recursive/1,
   get_fields/1,get_fields/2,
-  is_empty/1
+  is_empty/1,
+
+  append_field/3,
+  remove_field/2
 ]).
 
 %%===========================================================================
@@ -54,39 +57,28 @@
 %%=================================================================
 get_map(Map) when is_map(Map)->
   Map;
-get_map(PatternID)->
-  case ecomet_schema:get_pattern(PatternID) of
+get_map(Pattern)->
+  case ecomet_schema:get_pattern(?OID(Pattern)) of
     Value when is_map(Value)->Value;
     _->#{}
   end.
 
-edit_map(PatternID,Map)->
-  ecomet_schema:set_pattern(PatternID,Map).
+edit_map(Pattern,Map)->
+  ecomet_schema:set_pattern(?OID(Pattern),Map).
 
 get_behaviours(Map) when is_map(Map)->
   maps:get(handlers,Map,[]);
-get_behaviours(ObjectOrOID)->
-  case ecomet_object:is_object(ObjectOrOID) of
-    true->
-      get_behaviours(?OID(ObjectOrOID));
-    _->
-      % Assume its an OID
-      Map = get_map(ObjectOrOID),
-      get_behaviours(Map)
-  end.
+get_behaviours(Pattern)->
+  Map = get_map(Pattern),
+  get_behaviours(Map).
+
 
 set_behaviours(Map,Handlers) when is_map(Map)->
   Map#{handlers=>Handlers};
-set_behaviours(ObjectOrOID,Handlers)->
-  case ecomet_object:is_object(ObjectOrOID) of
-    true->
-      set_behaviours(?OID(ObjectOrOID),Handlers);
-    _->
-      % Assume its an OID
-      Map = get_map(ObjectOrOID),
-      Map1 = set_behaviours(Map,Handlers),
-      edit_map(ObjectOrOID,Map1)
-  end.
+set_behaviours(Pattern,Handlers)->
+  Map = get_map(Pattern),
+  Map1 = set_behaviours(Map,Handlers),
+  edit_map(Pattern,Map1).
 
 get_storage(OIDOrMap)->
   % The storage type of an object is defined by its .name field
@@ -104,32 +96,35 @@ get_parents(Pattern)->
   Parents.
 
 get_children(Pattern)->
-  OID=?OID(?OBJECT(Pattern)),
+  OID=?OID(Pattern),
   ecomet_query:system([?ROOT],[<<".oid">>],{<<"parent_pattern">>,'=',OID}).
 
 get_children_recursive(Pattern)->
-  OID=?OID(?OBJECT(Pattern)),
+  OID=?OID(Pattern),
   ecomet_query:system([?ROOT],[<<".oid">>],{<<"parents">>,'=',OID}).
 
 get_fields(Pattern)->
-  OID=?OID(?OBJECT(Pattern)),
-  Map = get_map(OID),
-  Names = ecomet_field:field_names(Map),
-  get_fields(Pattern,Names).
+  Map = get_map(Pattern),
+  maps:filter(fun(Name,_Value)->is_binary(Name) end,Map).
 
 get_fields(Pattern,Names)->
-  OID=?OID(?OBJECT(Pattern)),
-  Map =
-    [begin
-       {ok, FieldID} = ecomet_folder:find_object_system(OID,Name),
-       { Name, FieldID }
-     end || Name <- Names],
-  maps:from_list(Map).
+  Map = get_map(Pattern),
+  Fields=
+    [case Map of
+       #{F := Config}->{ F, Config };
+       _-> ?ERROR({invalid_field,F})
+     end || F <- Names],
+  maps:from_list(Fields).
 
 is_empty(Pattern)->
-  OID=?OID(?OBJECT(Pattern)),
+  OID=?OID(Pattern),
   DBs=ecomet_db:get_databases(),
   0 =:= ecomet_query:system(DBs,[count],{<<".pattern">>,'=',OID}).
+
+append_field(Pattern,Field,Config)->
+  Map = get_map(Pattern),
+  % Update the field config in the children
+  [].
 
 %%=================================================================
 %%	Ecomet object behaviour
@@ -204,6 +199,9 @@ inherit_fields(Object)->
   inherit_fields(?OID(Object),ParentFields).
 
 inherit_fields(PatternID,ParentFields)->
+
+  []
+
   Fields = get_fields(PatternID),
   ToAdd = maps:without(maps:keys(Fields),ParentFields),
   Added=

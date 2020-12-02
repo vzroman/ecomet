@@ -25,9 +25,6 @@
 -export([
   build_new/2,
   merge/3,
-  build_description/1,
-  map_add/3,
-  field_names/1,
   get_type/2,
   index_storages/1,
   get_storage/2,
@@ -46,6 +43,25 @@
   field_changes/4
 ]).
 
+%%=================================================================
+%%	Schema API
+%%=================================================================
+-export([
+  build_description/1,
+  to_schema/1,
+  from_schema/1,
+  inherit/2,
+  check_parent/2
+]).
+%%===========================================================================
+%% Ecomet object behaviour
+%%===========================================================================
+-export([
+  on_create/1,
+  on_edit/1,
+  on_delete/1
+]).
+
 -define(DEFAULT_DESCRIPTION,#{
   type => string,
   subtype => none,
@@ -56,35 +72,138 @@
   autoincrement => false
 }).
 
+-define(EXTENT_CRITICAL,[
+  type,
+  subtype,
+  required
+]).
+
 %%=================================================================
 %%	Service API
 %%=================================================================
-build_description(Params)->
-  maps:merge(?DEFAULT_DESCRIPTION,Params).
+to_schema(Params) when is_map(Params)->
+  maps:map(fun(K,Default)->
+    maps:get( atom_to_binary(K,utf8), Params, Default )
+  end,?DEFAULT_DESCRIPTION);
+to_schema(ID)->
+  Config = ecomet:read_fields(?OBJECT(ID),from_schema(?DEFAULT_DESCRIPTION)),
+  to_schema(Config).
 
-map_add(Map,Name,Field)->
-  % Add the new description to the map
-  Map1 = Map#{ Name => Field },
-  % Update indexes meta-info if the field has indexes
-  case Field of
-    #{ index:=Indexes, storage:=Storage } when Indexes=/=none->
-      % Storage types that impart in the indexing
-      StorageList=maps:get(index_storage,Map,[]),
-      % Remove the field from the storage types (if exists)
-      StorageList1=
-        [{Type,Fields--[Name]}||{Type,Fields} <- StorageList],
-      % Current config of the field storage type
-      StorageFields=proplists:get_value(Storage,StorageList1,[]),
-      % Add the field to the storage type
-      StorageList2 = [{Storage,[Name|StorageFields]}|proplists:delete(Storage,StorageList1)],
-      % Update the index configuration to the schema
-      Map1#{ index_storage => StorageList2};
+from_schema(Params)->
+  maps:fold(fun(K, V ,Acc)->
+    Acc#{ atom_to_binary(K,utf8) => V }
+  end,#{},Params ).
+
+build_description(Params)->
+  % TODO. Should be deprecated
+  maps:map(fun(K,Default)->
+    maps:get(K,Params,Default)
+  end,?DEFAULT_DESCRIPTION).
+
+inherit(Object,Config)->
+
+  % Calculate the difference
+  Original = ecomet:read_fields(Object,maps:keys(Config)),
+  Diff =
+    maps:fold(fun(K, V1, Acc)->
+      case Original of
+        #{ K := V1 } -> Acc;
+        #{ K := V0 } -> Acc#{K => {V0, V1} }
+      end
+    end,#{},Config),
+
+  % Are there objects for the pattern
+  {ok, PatternID} = ecomet:read_field(Object,<<".folder">>),
+  IsEmpty = ecomet_pattern:is_empty(PatternID),
+
+  % Check params that affect the existing extent
+  case maps:keys(Diff) -- ?EXTENT_CRITICAL of
+    []->ok;
+    _ when IsEmpty-> ok;
+    _->?ERROR(has_objects)
+  end,
+
+  % Inheritable params. Some params are inherited only on creation
+  Changes0 = maps:without([ storage, default, autoincrement ], Diff),
+
+  % Add new indexes. The index can be added but not removed
+  NewIndex=
+    case Changes0 of
+      #{index := Index1} when is_list(Index1) ->ordsets:from_list(Index1);
+      _ -> []
+    end,
+  OldIndex =
+    case Original of
+      #{index := Index0} when is_list(Index0)-> ordsets:from_list(Index0);
+      _->[]
+    end,
+  Changes1=
+    case ordsets:subtract(NewIndex,OldIndex) of
+      []->Changes0;
+      IndexDiff -> Changes0#{index => ordsets:union(IndexDiff,OldIndex) }
+    end,
+
+  % Commit changes if they exist
+  case maps:size(Changes1) of
+    0->ok;
     _->
-      Map1
+      Changes2 = from_schema(Changes1),
+      ecomet:edit_object(Object, Changes2)
   end.
+
+check_parent(Object,Config)->
+
+  Original = ecomet:read_fields(Object,maps:keys(Config)),
+
+  % Children cannot change extent critical parameters defined in the parent
+  case maps:to_list(maps:with(?EXTENT_CRITICAL,Original)) -- maps:to_list(maps:with(?EXTENT_CRITICAL,Config)) of
+    []->ok;
+    _->?ERROR(parent_field)
+  end,
+
+  % Children cannot remove indexes defined in the parent
+  ChildIndex=
+    case Config of
+      #{index := Index1} when is_list(Index1)->ordsets:from_list(Index1);
+      _->[]
+    end,
+  ParentIndex=
+    case Original of
+      #{index := Index0} when is_list(Index0)->ordsets:from_list(Index0);
+      _->[]
+    end,
+  case ordsets:subtract(ParentIndex,ChildIndex) of
+    []->ok;
+    _->?ERROR(parent_index)
+  end.
+
+
+
+%%map_add(Map,Name,Field)->
+%%  % Add the new description to the map
+%%  Map1 = Map#{ Name => Field },
+%%  % Update indexes meta-info if the field has indexes
+%%  case Field of
+%%    #{ index:=Indexes, storage:=Storage } when Indexes=/=none->
+%%      % Storage types that impart in the indexing
+%%      StorageList=maps:get(index_storage,Map,[]),
+%%      % Remove the field from the storage types (if exists)
+%%      StorageList1=
+%%        [{Type,Fields--[Name]}||{Type,Fields} <- StorageList],
+%%      % Current config of the field storage type
+%%      StorageFields=proplists:get_value(Storage,StorageList1,[]),
+%%      % Add the field to the storage type
+%%      StorageList2 = [{Storage,[Name|StorageFields]}|proplists:delete(Storage,StorageList1)],
+%%      % Update the index configuration to the schema
+%%      Map1#{ index_storage => StorageList2};
+%%    _->
+%%      Map1
+%%  end.
 
 % Get type of storage for the field
 get_storage(Map,Name)->
+  % TODO. We should apply to the pattern for a field config
+  % because the map is handled by the pattern
   case Map of
     #{Name := #{storage :=Storage }}-> {ok,Storage};
     _->{error,undefined_field}
@@ -139,10 +258,6 @@ check_value(Config,Value)->
     ok -> ok;
     _->?ERROR(invalid_value)
   end.
-
-% Get list of all fields in the object
-field_names(Map)->
-  [ Name || Name <- maps:keys(Map), is_binary(Name) ].
 
 get_type(#{type:=list,subtype:=SubType})->
   {list,SubType};
@@ -290,5 +405,38 @@ field_changes(Map,Project,OID,Name)->
     error->none
   end.
 
+%%=================================================================
+%%	Ecomet object behaviour
+%%=================================================================
+on_create(Object)->
+  check_storage(Object,true),
+  check_type(Object,true),
+  check_index(Object,true),
+  check_default(Object,true),
+  edit_map(Object),
+  ok.
+
+on_edit(Object)->
+  {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
+  IsEmpty = ecomet_pattern:is_empty(PatternID),
+  check_storage(Object,IsEmpty),
+  check_type(Object,IsEmpty),
+  check_index(Object,IsEmpty),
+  check_default(Object,IsEmpty),
+  edit_map(Object),
+  ok.
+
+on_delete(Object)->
+  {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
+  case ecomet_pattern:is_empty(PatternID) of
+    true->
+      % Update the schema
+      {ok,Name}=ecomet:read_field(Object,<<".name">>),
+      ecomet_pattern:remove_field(PatternID,Name),
+      ok;
+    _->
+      % The field cannot be deleted if the extent already exists
+      ?ERROR(has_objects)
+  end.
 
 

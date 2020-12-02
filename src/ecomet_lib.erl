@@ -26,6 +26,7 @@
   dt_to_string/1,dt_to_string/2,
   log_ts/0,
   to_object/1,to_object/2,to_object/3,to_object_system/1,
+  to_oid/1,
   pipe/2,
   module_exists/1
 ]).
@@ -69,6 +70,15 @@ to_object_system(ID)->
     true->ID;
     _->
       ecomet_object:construct(ID)
+  end.
+
+to_oid(<<"/root",_/binary>> =Path)->
+  {ok,OID}=ecomet:path2oid(Path),
+  OID;
+to_oid(ID)->
+  case ecomet_object:is_oid(ID) of
+    true->ID;
+    _->ecomet:get_oid(?OBJECT(ID))
   end.
 
 pipe(Pipe,Acc)->
