@@ -21,13 +21,16 @@
 
 -define(ROOT,root).
 
+%--------Database storage-----------------------
 -define(DATA,data).
 -define(INDEX,index).
 
+%-------Supported storage types------------------
 -define(RAMLOCAL,ramlocal).
 -define(RAM,ram).
 -define(RAMDISC,ramdisc).
 -define(DISC,disc).
+
 
 -define(BITSTRING_LENGTH,65536).
 -define(MAX_NODES,65535).
@@ -40,11 +43,7 @@
 -define(PIPE(Items,Acc),ecomet_lib:pipe(Items,Acc)).
 
 -define(OBJECT(ID),ecomet_lib:to_object_system(ID)).
--define(OID(Object),
-  case ecomet_object:is_oid(Object) of
-    true->Object;
-    _->ecomet:get_oid(?OBJECT(Object))
-  end).
+-define(OID(ID),ecomet_lib:to_oid(ID)).
 
 -define(ENV(Key,Default),application:get_env(dlss,Key,Default)).
 -define(ENV(OS,Config,Default),

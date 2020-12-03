@@ -37,7 +37,16 @@
   get_parent/1,get_parents/1,
   get_children/1,get_children_recursive/1,
   get_fields/1,get_fields/2,
-  is_empty/1
+  is_empty/1,
+  index_storages/1
+]).
+
+%%=================================================================
+%%	Schema API
+%%=================================================================
+-export([
+  append_field/3,
+  remove_field/2
 ]).
 
 %%===========================================================================
@@ -54,44 +63,38 @@
 %%=================================================================
 get_map(Map) when is_map(Map)->
   Map;
-get_map(PatternID)->
-  case ecomet_schema:get_pattern(PatternID) of
+get_map(Pattern)->
+  case ecomet_schema:get_pattern(?OID(Pattern)) of
     Value when is_map(Value)->Value;
     _->#{}
   end.
 
-edit_map(PatternID,Map)->
-  ecomet_schema:set_pattern(PatternID,Map).
+edit_map(Pattern,Map)->
+  ecomet_schema:set_pattern(?OID(Pattern),Map).
 
 get_behaviours(Map) when is_map(Map)->
   maps:get(handlers,Map,[]);
-get_behaviours(ObjectOrOID)->
-  case ecomet_object:is_object(ObjectOrOID) of
-    true->
-      get_behaviours(?OID(ObjectOrOID));
-    _->
-      % Assume its an OID
-      Map = get_map(ObjectOrOID),
-      get_behaviours(Map)
-  end.
+get_behaviours(Pattern)->
+  Map = get_map(Pattern),
+  get_behaviours(Map).
+
 
 set_behaviours(Map,Handlers) when is_map(Map)->
   Map#{handlers=>Handlers};
-set_behaviours(ObjectOrOID,Handlers)->
-  case ecomet_object:is_object(ObjectOrOID) of
-    true->
-      set_behaviours(?OID(ObjectOrOID),Handlers);
-    _->
-      % Assume its an OID
-      Map = get_map(ObjectOrOID),
-      Map1 = set_behaviours(Map,Handlers),
-      edit_map(ObjectOrOID,Map1)
-  end.
+set_behaviours(Pattern,Handlers)->
+  Map = get_map(Pattern),
+  Map1 = set_behaviours(Map,Handlers),
+  edit_map(Pattern,Map1).
 
 get_storage(OIDOrMap)->
-  % The storage type of an object is defined by its .name field
   Map = get_map(OIDOrMap),
-  ecomet_field:get_storage(Map,<<".name">>).
+  % The storage type of an object is defined by its .name field
+  case ecomet_field:get_storage(Map,<<".name">>) of
+    {ok,Storage}->Storage;
+    _->
+      % If the pattern is not developed yet the default storage type is disc
+      ?DISC
+  end.
 
 get_parent(Pattern)->
   Object = ?OBJECT(Pattern),
@@ -104,32 +107,113 @@ get_parents(Pattern)->
   Parents.
 
 get_children(Pattern)->
-  OID=?OID(?OBJECT(Pattern)),
+  OID=?OID(Pattern),
   ecomet_query:system([?ROOT],[<<".oid">>],{<<"parent_pattern">>,'=',OID}).
 
 get_children_recursive(Pattern)->
-  OID=?OID(?OBJECT(Pattern)),
+  OID=?OID(Pattern),
   ecomet_query:system([?ROOT],[<<".oid">>],{<<"parents">>,'=',OID}).
 
 get_fields(Pattern)->
-  OID=?OID(?OBJECT(Pattern)),
-  Map = get_map(OID),
-  Names = ecomet_field:field_names(Map),
-  get_fields(Pattern,Names).
+  Map = get_map(Pattern),
+  maps:filter(fun(Name,_Value)->is_binary(Name) end,Map).
 
 get_fields(Pattern,Names)->
-  OID=?OID(?OBJECT(Pattern)),
-  Map =
-    [begin
-       {ok, FieldID} = ecomet_folder:find_object_system(OID,Name),
-       { Name, FieldID }
-     end || Name <- Names],
-  maps:from_list(Map).
+  Map = get_map(Pattern),
+  Fields=
+    [case Map of
+       #{F := Config}->{ F, Config };
+       _-> ?ERROR({invalid_field,F})
+     end || F <- Names],
+  maps:from_list(Fields).
 
 is_empty(Pattern)->
-  OID=?OID(?OBJECT(Pattern)),
+  OID=?OID(Pattern),
   DBs=ecomet_db:get_databases(),
   0 =:= ecomet_query:system(DBs,[count],{<<".pattern">>,'=',OID}).
+
+index_storages(Pattern)->
+  #{index := Index} = get_map(Pattern),
+  Index.
+
+%%=================================================================
+%%	Schema API
+%%=================================================================
+append_field(Pattern,Field,Config)->
+  Map = get_map(Pattern),
+
+  % Check for conflicts with the parent
+  case Map of
+    #{ Field:=_ }->
+      % The field is updated. Check if it conflicts with the parent
+      ParentID = get_parent(Pattern),
+      % Get the parent's map (see THE TRICK below)
+      ParentMap =
+        case get({'@pattern_map@',ParentID}) of
+          undefined->get_map(ParentID);
+          Stored->Stored
+        end,
+      case ParentMap of
+        #{Field := Parent} ->
+          ecomet_field:check_parent(Config,Parent);
+        _->
+          % The field is not defined in the parent
+          ok
+      end;
+    _->
+      % The field didn't exist, so it cannot be defined in the parent
+      ok
+  end,
+
+  % Update the map
+  Map1 = Map#{Field => Config},
+  Map2 = Map1#{ index => get_indexed(Map1) },
+
+  % Update the field config in the children.
+  % THE TRICK! The schema is edited inside a transaction, therefore
+  % changes are not seen until the transaction is committed. A child
+  % on its change will try to check the changes against parent.
+  % To make the changes in the parent available we save them into the process dictionary
+  put({'@pattern_map@',?OID(Pattern)}, Map2),
+
+  % Update children
+  Fields = get_fields(Map2),
+  [ inherit_fields(ChildID,Fields) || ChildID <- get_children(Pattern)],
+
+  % Update the schema
+  edit_map(Pattern, Map2).
+
+remove_field(Pattern,Field)->
+  % Check if the field is defined in the parent
+  ParentID = get_parent(Pattern),
+  % Get the parent's map (see THE TRICK below)
+  ParentMap =
+    case get({'@pattern_map@',ParentID}) of
+      undefined->get_map(ParentID);
+      Stored->Stored
+    end,
+  case ParentMap of
+    #{Field:=_} -> ?ERROR(parent_field);
+    _->ok
+  end,
+
+  % Update the map
+  Map = get_map(Pattern),
+  Map1 = maps:remove(Field,Map),
+  Map2 = Map1#{ index => get_indexed(Map1) },
+
+  % Update the field config in the children.
+  % THE TRICK! The schema is edited inside a transaction, therefore
+  % changes are not seen until the transaction is committed. A child
+  % on its change will try to check the changes against parent.
+  % To make the changes in the parent available we save them into the process dictionary
+  put({'@pattern_map@',?OID(Pattern)}, Map2),
+
+  % update children
+  [ remove_field(ChildID,Field) || ChildID <- get_children(Pattern) ],
+
+  % Update the schema
+  edit_map(Pattern, Map2).
 
 %%=================================================================
 %%	Ecomet object behaviour
@@ -203,17 +287,40 @@ inherit_fields(Object)->
   ParentFields = get_fields(ParentID),
   inherit_fields(?OID(Object),ParentFields).
 
-inherit_fields(PatternID,ParentFields)->
-  Fields = get_fields(PatternID),
-  ToAdd = maps:without(maps:keys(Fields),ParentFields),
-  Added=
-   [ begin
-       Field = ecomet:copy_object(FieldID, #{<<".folder">> => PatternID}),
-       { Name, ?OID(Field) }
-     end || {Name,FieldID} <- maps:to_list(ToAdd) ],
-  NewFields = maps:merge(Fields,maps:from_list(Added)),
 
-  % Recursively update children patterns
-  Children = get_children(PatternID),
-  [ inherit_fields(ChildID,NewFields) || ChildID <- Children ].
+%%=================================================================
+%%	Internal helpers
+%%=================================================================
+inherit_fields(PatternID,ParentFields)->
+  ChildFields = get_fields(PatternID),
+
+  [case ChildFields of
+     #{ Name := Child}->
+       % CASE 1. The field is already defined in the child, inherit algorithm
+       Child1 = ecomet_field:inherit(Child,Parent),
+       Child2 = ecomet_field:from_schema(Child1),
+       % Edit object
+       {ok, FieldID} =ecomet_folder:find_object(PatternID, Name),
+       {ok, Field} = ecomet:open(FieldID,write),
+       ok = ecomet:edit_object(Field,Child2);
+     _->
+       % CASE 2. The field is not defined in the child yet, create a new one
+      ecomet:create_object(Parent#{
+        <<".name">>=>Name,
+        <<".folder">>=>PatternID,
+        <<".pattern">>=>{?PATTERN_PATTERN,?FIELD_PATTERN}
+      })
+   end || {Name, Parent} <- maps:to_list(ParentFields)],
+  ok.
+
+get_indexed(Map)->
+  Indexed =
+    [ ecomet_field:get_storage(Map,Name) || { Name, _} <- get_fields(Map),
+      case ecomet_field:get_index(Map,Name) of
+        {ok, Index} when is_list(Index)->true;
+        _->false
+      end ],
+  ordsets:from_list(Indexed).
+
+
 

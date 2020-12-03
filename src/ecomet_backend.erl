@@ -28,7 +28,8 @@
   get_storages/0,
   get_segments/1,
   get_storage_type/1,
-  is_local_storage/1
+  is_local_storage/1,
+  get_supported_types/0
 ]).
 
 %%=================================================================
@@ -82,6 +83,9 @@ get_storage_type(Storage)->
 is_local_storage(Storage)->
   dlss:is_local_storage(Storage).
 
+get_supported_types()->
+  [?RAMLOCAL,?RAM,?RAMDISC,?DISC].
+
 %%=================================================================
 %%	Data API
 %%=================================================================
@@ -126,7 +130,5 @@ delete(DB,Storage,Type,Key,Lock)->
 
 dirty_delete(DB,Storage,Type,Key)->
   dlss:dirty_delete(?NAME(DB,Storage,Type),Key).
-
-
 
 
