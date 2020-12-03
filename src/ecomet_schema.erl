@@ -32,7 +32,7 @@
   mount_db/2,
   unmount_db/1,
   get_mounted_db/1,
- get_mounted_folder/1,
+  get_mounted_folder/1,
   get_db_id/1,
   get_db_name/1,
   get_registered_databases/0,
@@ -476,14 +476,75 @@ init_root()->
     <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
     <<".ts">>=>ecomet_lib:log_ts()
   }),
-  _Patterns = ecomet:create_object(#{
-    <<".name">>=><<".pattern">>,
-    <<".folder">>=> ?OID(Root),
-    <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
-    <<".ts">>=>ecomet_lib:log_ts()
-  }),
+
+  Tree = [
+    { <<".patterns">>, #{
+      fields=>#{
+        <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
+        <<".ts">>=>ecomet_lib:log_ts()
+      },
+      children=>[
+        % #1. ?OBJECT_PATTERN
+        { <<".object">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"behaviour_module">>=>ecomet_object,
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
+            <<"parents">>=>[],
+            <<".ts">>=>ecomet_lib:log_ts()
+          },
+          children=>init_pattern_fields({?PATTERN_PATTERN,?OBJECT_PATTERN})
+        }},
+        % #2. ?FOLDER_PATTERN
+        { <<".folder">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"behaviour_module">>=>ecomet_folder,
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
+            <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}],
+            <<".ts">>=>ecomet_lib:log_ts()
+          },
+          children=>init_pattern_fields({?PATTERN_PATTERN,?FOLDER_PATTERN})
+        }},
+        % #3. ?PATTERN_PATTERN
+        { <<".pattern">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"behaviour_module">>=>ecomet_pattern,
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN},
+            <<"parents">>=>[{?PATTERN_PATTERN,?FOLDER_PATTERN},{?PATTERN_PATTERN,?OBJECT_PATTERN}],
+            <<".ts">>=>ecomet_lib:log_ts()
+          },
+          children=>init_pattern_fields({?PATTERN_PATTERN,?PATTERN_PATTERN})
+        }},
+        % #4. ?FIELD_PATTERN
+        { <<".folder">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"behaviour_module">>=>ecomet_field,
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
+            <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}],
+            <<".ts">>=>ecomet_lib:log_ts()
+          },
+          children=>init_pattern_fields({?PATTERN_PATTERN,?FIELD_PATTERN})
+        }}
+      ]
+    }}
+  ],
+
+  init_tree(?OID(Root),Tree),
 
   ok.
+
+init_pattern_fields(ID)->
+  Fields = ecomet_pattern:get_fields(ID),
+  [ begin
+      Config1 = ecomet_field:from_schema(Config),
+      { Name, #{ fields=> Config1#{
+        <<".pattern">> => { ?PATTERN_PATTERN, ?FIELD_PATTERN },
+        <<".ts">>=>ecomet_lib:log_ts()
+      }} }
+    end || { Name, Config } <- ordsets:from_list(maps:to_list(Fields)) ].
 
 attach_low_level_begaviours()->
   {ok,_} = ecomet:transaction(fun()->
@@ -536,3 +597,15 @@ new_node_id(#nodeId{k=NextID}=Node,Id)->
 new_node_id(_Other,Id)->
   % '$end_of_table' or other keys range
   Id + 1.
+
+init_tree(FolderID,Items)->
+  [ begin
+      Fields = maps:get(fields,Params),
+      Object = ecomet:create_object(Fields#{
+        <<".name">>=>Name,
+        <<".folder">>=>FolderID
+      }),
+
+      init_tree(?OID(Object),maps:get(children,Params,[]))
+
+    end || { Name, Params } <- Items ].
