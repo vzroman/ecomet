@@ -84,7 +84,8 @@ set_behaviours(Map,Handlers) when is_map(Map)->
 set_behaviours(Pattern,Handlers)->
   Map = get_map(Pattern),
   Map1 = set_behaviours(Map,Handlers),
-  edit_map(Pattern,Map1).
+  edit_map(Pattern,Map1),
+  Map1.
 
 get_storage(OIDOrMap)->
   Map = get_map(OIDOrMap),

@@ -400,6 +400,10 @@ init_environment()->
 init_low_level_patterns()->
 
   %-------Object------------------
+  ObjectID = {?PATTERN_PATTERN,?OBJECT_PATTERN},
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:set_behaviours(ObjectID,[])
+  end),
   Object=#{
     <<".name">>=>#{ type => string, index=> [simple], required => true },
     <<".folder">>=>#{ type => link, index=> [simple], required => true },
@@ -408,13 +412,13 @@ init_low_level_patterns()->
     <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
     <<".ts">> =>#{ type => integer }
   },
-  ObjectFieldsMap = build_pattern_schema(Object),
-  ObjectMap= ecomet_pattern:set_behaviours(ObjectFieldsMap,[]),
-  {ok,_} = ecomet:transaction(fun()->
-    ecomet_pattern:edit_map({?PATTERN_PATTERN,?OBJECT_PATTERN},ObjectMap)
-  end),
+  init_pattern_fields(maps:to_list(Object),ObjectID),
 
   %-----Folder---------------------
+  FolderID = {?PATTERN_PATTERN,?FOLDER_PATTERN},
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:set_behaviours(FolderID,[])
+  end),
   Folder = maps:merge(Object,#{
     <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
     <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
@@ -423,25 +427,25 @@ init_low_level_patterns()->
     <<"recursive_rights">> =>#{ type => bool },
     <<"database">> =>#{ type => link, index=> [simple] }
   }),
-  FolderFieldsMap=build_pattern_schema(Folder),
-  FolderMap= ecomet_pattern:set_behaviours(FolderFieldsMap,[]),
-  {ok,_} = ecomet:transaction(fun()->
-    ecomet_pattern:edit_map({?PATTERN_PATTERN,?FOLDER_PATTERN},FolderMap)
-  end),
+  init_pattern_fields(maps:to_list(Folder),FolderID),
 
   %-----Pattern---------------------
+  PatternID = {?PATTERN_PATTERN,?PATTERN_PATTERN},
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:set_behaviours(PatternID,[])
+  end),
   Pattern = maps:merge(Folder,#{
     <<"behaviour_module">>=>#{ type => atom },
     <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
     <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
   }),
-  PatternFieldsMap=build_pattern_schema(Pattern),
-  PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[]),
-  {ok,_} = ecomet:transaction(fun()->
-    ecomet_pattern:edit_map({?PATTERN_PATTERN,?PATTERN_PATTERN},PatternMap)
-  end),
+  init_pattern_fields(maps:to_list(Pattern),PatternID),
 
   %-----Field---------------------
+  FieldID = {?PATTERN_PATTERN,?FIELD_PATTERN},
+  {ok,_} = ecomet:transaction(fun()->
+    ecomet_pattern:set_behaviours(FieldID,[])
+  end),
   Field = maps:merge(Object,#{
     <<"type">>=>#{ type => atom, required => true },
     <<"subtype">>=>#{ type => atom },
@@ -451,19 +455,18 @@ init_low_level_patterns()->
     <<"storage">>=>#{ type => atom, default_value => disc  },
     <<"autoincrement">>=>#{ type => bool }
   }),
-  FieldFieldsMap=build_pattern_schema(Field),
-  FieldMap= ecomet_pattern:set_behaviours(FieldFieldsMap,[]),
-  {ok,_} = ecomet:transaction(fun()->
-    ecomet_pattern:edit_map({?PATTERN_PATTERN,?FIELD_PATTERN},FieldMap)
-  end),
+  init_pattern_fields(maps:to_list(Field),FieldID),
 
   ok.
 
-build_pattern_schema(Fields)->
-  maps:fold(fun(Name,Config,Acc)->
-    C = ecomet_field:build_description(Config),
-    ecomet_field:map_add(Acc,Name,C)
-  end,#{},Fields).
+init_pattern_fields([{Field,Config}|Rest],PatternID)->
+  {ok,_} = ecomet:transaction(fun()->
+    Config1 = ecomet_field:build_description(Config),
+    ecomet_pattern:append_field(PatternID,Field,Config1)
+  end),
+  init_pattern_fields(Rest,PatternID);
+init_pattern_fields([],_PatternID)->
+  ok.
 
 
 init_root()->
