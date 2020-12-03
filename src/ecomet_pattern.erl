@@ -109,11 +109,17 @@ get_parents(Pattern)->
 
 get_children(Pattern)->
   OID=?OID(Pattern),
-  ecomet_query:system([?ROOT],[<<".oid">>],{<<"parent_pattern">>,'=',OID}).
+  ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
+    {<<".pattern">>,'=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
+    {<<"parent_pattern">>,'=',OID}
+  ]}).
 
 get_children_recursive(Pattern)->
   OID=?OID(Pattern),
-  ecomet_query:system([?ROOT],[<<".oid">>],{<<"parents">>,'=',OID}).
+  ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
+    {<<".pattern">>,'=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
+    {<<"parents">>,'=',OID}
+  ]}).
 
 get_fields(Pattern)->
   Map = get_map(Pattern),
@@ -180,6 +186,7 @@ append_field(Pattern,Field,Config)->
   % Update children
   Fields = get_fields(Map2),
   [ inherit_fields(ChildID,Fields) || ChildID <- get_children(Pattern)],
+  erase({'@pattern_map@',?OID(Pattern)}),
 
   % Update the schema
   edit_map(Pattern, Map2).
@@ -212,6 +219,7 @@ remove_field(Pattern,Field)->
 
   % update children
   [ remove_field(ChildID,Field) || ChildID <- get_children(Pattern) ],
+  erase({'@pattern_map@',?OID(Pattern)}),
 
   % Update the schema
   edit_map(Pattern, Map2).
@@ -315,13 +323,17 @@ inherit_fields(PatternID,ParentFields)->
   ok.
 
 get_indexed(Map)->
-  Indexed =
-    [ ecomet_field:get_storage(Map,Name) || { Name, _} <- get_fields(Map),
-      case ecomet_field:get_index(Map,Name) of
-        {ok, Index} when is_list(Index)->true;
-        _->false
-      end ],
-  ordsets:from_list(Indexed).
+  Types=
+    maps:fold(fun(Name,_Config, Acc)->
+        case ecomet_field:get_index(Map,Name) of
+          {ok, Index} when is_list(Index)->
+            {ok,Storage}=ecomet_field:get_storage(Map,Name),
+            Acc#{Storage=>true};
+          _->
+            Acc
+        end
+    end,#{}, get_fields(Map) ),
+  maps:keys(Types).
 
 
 
