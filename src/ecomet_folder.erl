@@ -48,7 +48,7 @@
 %%	API
 %%=================================================================
 oid2path({?FOLDER_PATTERN,?ROOT_FOLDER})->
-  {ok,<<"/root">>};
+  <<"/root">>;
 oid2path(OID)->
   Object = ecomet_object:construct(OID),
   #{ <<".name">>:=Name, <<".folder">>:=FolderID } = ecomet:read_fields(Object, [<<".folder">>,<<".name">>]),

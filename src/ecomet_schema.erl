@@ -137,7 +137,7 @@ mount_db(FolderID,DB)->
     % Adding a new mount point requires lock on the schema
     mnesia:lock({table,?SCHEMA},write),
 
-    { ok, Path } = ecomet:oid2path( FolderID ),
+    Path = ecomet:oid2path( FolderID ),
 
     % Index on OID
     ok = mnesia:write( ?SCHEMA, #kv{ key = #mntOID{k=FolderID}, value = DB }, write ),
@@ -155,7 +155,7 @@ unmount_db(FolderID)->
 
     mnesia:lock({table,?SCHEMA},write),
 
-    { ok, Path } = ecomet:oid2path( FolderID ),
+    Path = ecomet:oid2path( FolderID ),
 
     ok = mnesia:delete( ?SCHEMA, #mntOID{k=FolderID}, write ),
 
@@ -472,7 +472,7 @@ init_pattern_fields([],_PatternID)->
 init_root()->
   Root = ecomet:create_object(#{
     <<".name">>=><<"root">>,
-    <<".folder">>=> {?FOLDER_PATTERN,?ROOT_FOLDER},
+    <<".folder">>=> {?FOLDER_PATTERN,0},
     <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
     <<".ts">>=>ecomet_lib:log_ts()
   }),
