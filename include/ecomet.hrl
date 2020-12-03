@@ -21,13 +21,16 @@
 
 -define(ROOT,root).
 
+%--------Database storage-----------------------
 -define(DATA,data).
 -define(INDEX,index).
 
+%-------Supported storage types------------------
 -define(RAMLOCAL,ramlocal).
 -define(RAM,ram).
 -define(RAMDISC,ramdisc).
 -define(DISC,disc).
+
 
 -define(BITSTRING_LENGTH,65536).
 -define(MAX_NODES,65535).

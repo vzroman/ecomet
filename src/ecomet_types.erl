@@ -27,7 +27,8 @@
   value_to_string/2,
   check_value/2,
   string_to_term/1,
-  term_to_string/1
+  term_to_string/1,
+  get_supported_types/0
 ]).
 
 %%---------------------------------------------------------------------
@@ -214,4 +215,17 @@ string_to_term(Binary)->
 % Convert erlang term to string
 term_to_string(Term)->
   unicode:characters_to_binary(io_lib:format("~p",[Term])).
+
+get_supported_types()->
+  Primitives=[
+    string,
+    integer,
+    float,
+    bool,
+    binary,
+    atom,
+    link,
+    term
+  ],
+  Primitives ++ [ {list, P} || P <- Primitives ].
 

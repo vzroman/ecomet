@@ -87,9 +87,14 @@ set_behaviours(Pattern,Handlers)->
   edit_map(Pattern,Map1).
 
 get_storage(OIDOrMap)->
-  % The storage type of an object is defined by its .name field
   Map = get_map(OIDOrMap),
-  ecomet_field:get_storage(Map,<<".name">>).
+  % The storage type of an object is defined by its .name field
+  case ecomet_field:get_storage(Map,<<".name">>) of
+    {ok,Storage}->Storage;
+    _->
+      % If the pattern is not developed yet the default storage type is disc
+      ?DISC
+  end.
 
 get_parent(Pattern)->
   Object = ?OBJECT(Pattern),

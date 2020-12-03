@@ -561,7 +561,7 @@ get_id(?ObjectID(_,ObjectID))->
 get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
   % Define the key
   DB = get_db_name(OID),
-  {ok,Type}=ecomet_pattern:get_storage(Map),
+  Type=ecomet_pattern:get_storage(Map),
   Key = ecomet_transaction:lock_key(DB,object,Type,{OID,backtag}),
 
   % Set lock on main backtag storage
@@ -577,7 +577,7 @@ get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
 
 get_lock_key(OID,Map)->
   DB = get_db_name(OID),
-  {ok,Type}=ecomet_pattern:get_storage(Map),
+  Type=ecomet_pattern:get_storage(Map),
   ecomet_transaction:lock_key(DB,object,Type,{OID,backtag}).
 
 % Fast object open, only for system dirty read

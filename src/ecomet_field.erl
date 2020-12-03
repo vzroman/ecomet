@@ -147,29 +147,6 @@ check_parent(Child,Parent)->
     _->?ERROR(parent_index)
   end.
 
-
-
-%%map_add(Map,Name,Field)->
-%%  % Add the new description to the map
-%%  Map1 = Map#{ Name => Field },
-%%  % Update indexes meta-info if the field has indexes
-%%  case Field of
-%%    #{ index:=Indexes, storage:=Storage } when Indexes=/=none->
-%%      % Storage types that impart in the indexing
-%%      StorageList=maps:get(index_storage,Map,[]),
-%%      % Remove the field from the storage types (if exists)
-%%      StorageList1=
-%%        [{Type,Fields--[Name]}||{Type,Fields} <- StorageList],
-%%      % Current config of the field storage type
-%%      StorageFields=proplists:get_value(Storage,StorageList1,[]),
-%%      % Add the field to the storage type
-%%      StorageList2 = [{Storage,[Name|StorageFields]}|proplists:delete(Storage,StorageList1)],
-%%      % Update the index configuration to the schema
-%%      Map1#{ index_storage => StorageList2};
-%%    _->
-%%      Map1
-%%  end.
-
 % Get type of storage for the field
 get_storage(Map,Name)->
   % TODO. We should apply to the pattern for a field config
@@ -373,22 +350,34 @@ field_changes(Map,Project,OID,Name)->
 %%	Ecomet object behaviour
 %%=================================================================
 on_create(Object)->
+  check_name(Object,true),
+  check_folder(Object,true),
   check_storage(Object,true),
   check_type(Object,true),
   check_index(Object,true),
   check_default(Object,true),
-  edit_map(Object),
-  ok.
+
+  % Append the field to the schema
+  { ok, Name }=ecomet:read_field(Object, <<".name">>),
+  { ok, PatternID } = ecomet:read_field(Object, <<".folder">>),
+  Config = to_schema(Object),
+  ok = ecomet_pattern:append_field(PatternID, Name, Config).
 
 on_edit(Object)->
   {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
   IsEmpty = ecomet_pattern:is_empty(PatternID),
+  check_name(Object,IsEmpty),
+  check_folder(Object,IsEmpty),
   check_storage(Object,IsEmpty),
   check_type(Object,IsEmpty),
   check_index(Object,IsEmpty),
   check_default(Object,IsEmpty),
-  edit_map(Object),
-  ok.
+
+  % Append the field to the schema
+  { ok, Name }=ecomet:read_field(Object, <<".name">>),
+  { ok, PatternID } = ecomet:read_field(Object, <<".folder">>),
+  Config = to_schema(Object),
+  ok = ecomet_pattern:append_field(PatternID, Name, Config).
 
 on_delete(Object)->
   {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
@@ -404,3 +393,105 @@ on_delete(Object)->
   end.
 
 
+check_name(Object,IsEmpty)->
+  case ecomet:field_changes(Object,<<".name">>) of
+    none->ok;
+    { _NewName, _OldName } when not IsEmpty->
+      % Cannot rename a field if there are already objects created with the schema
+      ?ERROR(has_objects);
+    { NewName, OldName }->
+      % Check the name for forbidden symbols
+      case re:run(NewName,"^(\\.(\\w)+|(\\w+))$") of
+        {match,_}->
+          if
+            OldName=/=none->
+              % The field is going to be renamed, remove the old name from the schema
+              {ok,PatternID}=ecomet:read_field(Object,<<".folder">>),
+              ecomet_pattern:remove_field(PatternID,OldName);
+            true -> ok
+          end;
+        _->?ERROR(invalid_name)
+      end
+  end.
+
+check_folder(Object, _IsEmpty)->
+  case ecomet:field_changes(Object,<<".folder">>) of
+    none -> ok;
+    { _NewFolder, none }->
+      % Create procedure
+      ok;
+    { _NewFolder, _OldFolder }->
+      ?ERROR(cannot_change_pattern)
+  end.
+
+check_storage(Object,IsEmpty)->
+  case ecomet:field_changes(Object,<<"storage">>) of
+    none->ok;
+    { _NewStorage, _OldStorage } when not IsEmpty->
+      % Cannot change the storage for the field if there are already objects created with the schema
+      ?ERROR(has_objects);
+    { NewStorage, _OldStorage } when NewStorage=:=?RAMDISC; NewStorage=:=?DISC->
+      % Cannot create persistent fields in the memory only pattern
+      {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
+      PatternStorage = ecomet_pattern:get_storage(PatternID),
+      if
+        PatternStorage=:=?RAMLOCAL; PatternStorage=:=?RAM ->
+          ?ERROR(memory_only_pattern);
+        true -> ok
+      end;
+    { NewStorage, _OldStorage } ->
+      % Just check for other supported types
+      case lists:member( NewStorage, ecomet_backend:get_supported_types() ) of
+        true->ok;
+        _->?ERROR(invalid_storage_type)
+      end
+  end.
+
+check_type(Object,IsEmpty)->
+  IsChanged =
+    ecomet:field_changes(Object,<<"type">>) =/=none
+      orelse
+    ecomet:field_changes(Object,<<"subtype">>) =/=none,
+  if
+    not IsChanged->ok;
+    not IsEmpty ->
+      % Cannot change the type of the field if there are already objects created with the schema
+      ?ERROR(has_objects);
+    true ->
+      % Check the type for supported types
+      Supported = ecomet_types:get_supported_types(),
+      Config = to_schema(Object),
+      Type = get_type(Config),
+      case lists:member(Type,Supported) of
+        true->ok;
+        _->?ERROR(invalid_type)
+      end
+  end.
+
+check_index(Object,_IsEmpty)->
+  case ecomet:field_changes(Object,<<"index">>) of
+    none->ok;
+    { none, _OldStorage }->ok;
+    { NewIndex, _OldStorage }->
+      Supported = ecomet_index:get_supported_types(),
+      % Remove duplicates
+      Index = ordsets:from_list(NewIndex),
+      case Index -- Supported of
+        []->ok;
+        _->?ERROR(invalid_index_type)
+      end,
+      ecomet:edit_object(Object,#{<<"index">>=>Index})
+  end.
+
+check_default(Object,_IsEmpty)->
+  case ecomet:field_changes(Object,<<"default">>) of
+    none->ok;
+    {none,_Old}->ok;
+    { NewDefault, _Old}->
+      Type = get_type(to_schema(Object)),
+      case ecomet_types:parse_value(Type,NewDefault) of
+        {ok,Parsed}->
+          ok = ecomet:edit_object(Object,#{<<"default">>=>Parsed});
+        _->?ERROR(invalid_default_value)
+      end
+  end.
