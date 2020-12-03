@@ -45,6 +45,7 @@
   %-------Pattern--------------------
   get_pattern/1,
   set_pattern/2,
+  build_pattern_schema/1,
 
   local_increment/1
 ]).
@@ -468,6 +469,11 @@ init_pattern_fields([{Field,Config}|Rest],PatternID)->
 init_pattern_fields([],_PatternID)->
   ok.
 
+build_pattern_schema(Fields)->
+  maps:fold(fun(Name,Config,Acc)->
+    C = ecomet_field:build_description(Config),
+    ecomet_field:map_add(Acc,Name,C)
+            end,#{},Fields).
 
 init_root()->
   Root = ecomet:create_object(#{
