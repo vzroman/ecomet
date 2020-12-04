@@ -62,15 +62,48 @@
   code_change/3
 ]).
 
-%%====================================================================
-%%		Test API
-%%====================================================================
 
 -define(DEFAULT_SCHEMA_CYCLE, 1000).
 -define(WAIT_SCHEMA_TIMEOUT,5000).
 
 -define(INCREMENT,list_to_atom("ecomet_"++atom_to_list(node()))).
 -define(SCHEMA,ecomet_schema).
+
+%%====================================================================
+%%		System patterns
+%%====================================================================
+-define(OBJECT_SCHEMA,#{
+  <<".name">>=>#{ type => string, index=> [simple], required => true },
+  <<".folder">>=>#{ type => link, index=> [simple], required => true },
+  <<".pattern">>=>#{ type => link, index=> [simple], required => true },
+  <<".readgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<".ts">> =>#{ type => integer }
+}).
+-define(FOLDER_SCHEMA,?OBJECT_SCHEMA#{
+  <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<"only_patterns">>=>#{ type => list, subtype => link },
+  <<"exclude_patterns">>=>#{ type => list, subtype => link },
+  <<"recursive_rights">> =>#{ type => bool },
+  <<"database">> =>#{ type => link, index=> [simple] }
+}).
+-define(PATTERN_SCHEMA,?FOLDER_SCHEMA#{
+  <<"behaviour_module">>=>#{ type => atom },
+  <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
+  <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
+}).
+-define(FIELD_SCHEMA,?OBJECT_SCHEMA#{
+  <<"type">>=>#{ type => atom, required => true },
+  <<"subtype">>=>#{ type => atom },
+  <<"index">>=>#{ type => list, subtype => atom },
+  <<"required">>=>#{ type => bool },
+  <<"default_value">> =>#{ type => term },
+  <<"storage">>=>#{ type => atom, default_value => disc  },
+  <<"autoincrement">>=>#{ type => bool }
+}).
+
+
 
 % Database indexing
 -record(dbId,{k}).
@@ -404,58 +437,28 @@ init_low_level_patterns()->
   {ok,_} = ecomet:transaction(fun()->
     ecomet_pattern:set_behaviours(ObjectID,[])
   end),
-  Object=#{
-    <<".name">>=>#{ type => string, index=> [simple], required => true },
-    <<".folder">>=>#{ type => link, index=> [simple], required => true },
-    <<".pattern">>=>#{ type => link, index=> [simple], required => true },
-    <<".readgroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<".ts">> =>#{ type => integer }
-  },
-  init_pattern_fields(maps:to_list(Object),ObjectID),
+  init_pattern_fields(maps:to_list(?OBJECT_SCHEMA),ObjectID),
 
   %-----Folder---------------------
   FolderID = {?PATTERN_PATTERN,?FOLDER_PATTERN},
   {ok,_} = ecomet:transaction(fun()->
     ecomet_pattern:set_behaviours(FolderID,[])
   end),
-  Folder = maps:merge(Object,#{
-    <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<"only_patterns">>=>#{ type => list, subtype => link },
-    <<"exclude_patterns">>=>#{ type => list, subtype => link },
-    <<"recursive_rights">> =>#{ type => bool },
-    <<"database">> =>#{ type => link, index=> [simple] }
-  }),
-  init_pattern_fields(maps:to_list(Folder),FolderID),
+  init_pattern_fields(maps:to_list(?FOLDER_SCHEMA),FolderID),
 
   %-----Pattern---------------------
   PatternID = {?PATTERN_PATTERN,?PATTERN_PATTERN},
   {ok,_} = ecomet:transaction(fun()->
     ecomet_pattern:set_behaviours(PatternID,[])
   end),
-  Pattern = maps:merge(Folder,#{
-    <<"behaviour_module">>=>#{ type => atom },
-    <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
-    <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
-  }),
-  init_pattern_fields(maps:to_list(Pattern),PatternID),
+  init_pattern_fields(maps:to_list(?PATTERN_SCHEMA),PatternID),
 
   %-----Field---------------------
   FieldID = {?PATTERN_PATTERN,?FIELD_PATTERN},
   {ok,_} = ecomet:transaction(fun()->
     ecomet_pattern:set_behaviours(FieldID,[])
   end),
-  Field = maps:merge(Object,#{
-    <<"type">>=>#{ type => atom, required => true },
-    <<"subtype">>=>#{ type => atom },
-    <<"index">>=>#{ type => list, subtype => atom },
-    <<"required">>=>#{ type => bool },
-    <<"default_value">> =>#{ type => term },
-    <<"storage">>=>#{ type => atom, default_value => disc  },
-    <<"autoincrement">>=>#{ type => bool }
-  }),
-  init_pattern_fields(maps:to_list(Field),FieldID),
+  init_pattern_fields(maps:to_list(?FIELD_SCHEMA),FieldID),
 
   ok.
 
@@ -493,7 +496,7 @@ init_root()->
             <<"parents">>=>[],
             <<".ts">>=>ecomet_lib:log_ts()
           },
-          children=>init_pattern_fields({?PATTERN_PATTERN,?OBJECT_PATTERN})
+          children=>init_pattern_fields(?OBJECT_SCHEMA)
         }},
         % #2. ?FOLDER_PATTERN
         { <<".folder">>, #{
@@ -504,7 +507,7 @@ init_root()->
             <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}],
             <<".ts">>=>ecomet_lib:log_ts()
           },
-          children=>init_pattern_fields({?PATTERN_PATTERN,?FOLDER_PATTERN})
+          children=>init_pattern_fields(?FOLDER_SCHEMA)
         }},
         % #3. ?PATTERN_PATTERN
         { <<".pattern">>, #{
@@ -515,7 +518,7 @@ init_root()->
             <<"parents">>=>[{?PATTERN_PATTERN,?FOLDER_PATTERN},{?PATTERN_PATTERN,?OBJECT_PATTERN}],
             <<".ts">>=>ecomet_lib:log_ts()
           },
-          children=>init_pattern_fields({?PATTERN_PATTERN,?PATTERN_PATTERN})
+          children=>init_pattern_fields(?PATTERN_SCHEMA)
         }},
         % #4. ?FIELD_PATTERN
         { <<".folder">>, #{
@@ -526,7 +529,7 @@ init_root()->
             <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}],
             <<".ts">>=>ecomet_lib:log_ts()
           },
-          children=>init_pattern_fields({?PATTERN_PATTERN,?FIELD_PATTERN})
+          children=>init_pattern_fields(?FIELD_SCHEMA)
         }}
       ]
     }}
@@ -536,10 +539,9 @@ init_root()->
 
   ok.
 
-init_pattern_fields(ID)->
-  Fields = ecomet_pattern:get_fields(ID),
+init_pattern_fields(Fields)->
   [ begin
-      Config1 = ecomet_field:from_schema(Config),
+      Config1 = ecomet_field:from_schema(ecomet_field:build_description(Config)),
       { Name, #{ fields=> Config1#{
         <<".pattern">> => { ?PATTERN_PATTERN, ?FIELD_PATTERN },
         <<".ts">>=>ecomet_lib:log_ts()
@@ -573,8 +575,8 @@ table_exists(Table)->
   lists:member(Table,Known).
 
 table_has_copy(Table,Type)->
-  Copies=mnesia:table_info(?SCHEMA,Type),
-  lists:member(Table,Copies).
+  Copies=mnesia:table_info(Table,Type),
+  lists:member(node(),Copies).
 
 new_db_id()->
   new_db_id(mnesia:dirty_next(?SCHEMA, #dbId{k=-1}), -1).
@@ -601,11 +603,16 @@ new_node_id(_Other,Id)->
 init_tree(FolderID,Items)->
   [ begin
       Fields = maps:get(fields,Params),
-      Object = ecomet:create_object(Fields#{
-        <<".name">>=>Name,
-        <<".folder">>=>FolderID
-      }),
-
-      init_tree(?OID(Object),maps:get(children,Params,[]))
+      ItemID=
+        case ecomet_folder:find_object_system(FolderID,Name) of
+          {ok,OID}->OID;
+          _->
+            Object = ecomet:create_object(Fields#{
+              <<".name">>=>Name,
+              <<".folder">>=>FolderID
+            }),
+            ?OID(Object)
+        end,
+      init_tree(ItemID,maps:get(children,Params,[]))
 
     end || { Name, Params } <- Items ].
