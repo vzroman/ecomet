@@ -31,6 +31,7 @@
   find_object/2,find_object_system/2,
   get_db_id/1,
   get_db_name/1,
+  find_mount_points/1,
   get_content/1,get_content_system/1,
   is_empty/1
 ]).
@@ -48,7 +49,7 @@
 %%	API
 %%=================================================================
 oid2path({?FOLDER_PATTERN,?ROOT_FOLDER})->
-  {ok,<<"/root">>};
+  <<"/root">>;
 oid2path(OID)->
   Object = ecomet_object:construct(OID),
   #{ <<".name">>:=Name, <<".folder">>:=FolderID } = ecomet:read_fields(Object, [<<".folder">>,<<".name">>]),
@@ -59,8 +60,8 @@ path2oid(<<"/root">>)->
 %%Search object by path
 path2oid(<<"/root",_/binary>> = Path)->
   { MountPath, FolderID } = ecomet_schema:get_mounted_folder(Path),
-  MPS = byte_size(MountPath),
-  <<MountPath:MPS/binary, Tail/binary>> = Path,
+  HeadSize = size(MountPath),
+  <<MountPath:HeadSize/binary,Tail/binary>> = Path,
   Tokens = string:tokens(unicode:characters_to_list(Tail),"/"),
   Path1= [ unicode:characters_to_binary(Name) || Name <- Tokens],
   path2oid(FolderID,Path1);
@@ -76,18 +77,18 @@ path2oid(OID,[])->
 
 find_object(FolderID,Name)->
   DB = get_db_name(FolderID),
-  case ecomet_query:get([DB],[<<".oid">>],{'AND',[{
-    <<".folder">>,'=',FolderID},
-    <<".name">>,'=',Name
+  case ecomet_query:get([DB],[<<".oid">>],{'AND',[
+    { <<".folder">>,'=',FolderID},
+    { <<".name">>,'=',Name }
   ]}) of
     []->{ error, not_found };
     [OID|_]-> { ok, OID }
   end.
 find_object_system(FolderID,Name)->
   DB = get_db_name(FolderID),
-  case ecomet_query:system([DB],[<<".oid">>],{'AND',[{
-    <<".folder">>,'=',FolderID},
-    <<".name">>,'=',Name
+  case ecomet_query:system([DB],[<<".oid">>],{'AND',[
+    {<<".folder">>,'=',FolderID},
+    { <<".name">>,'=',Name}
   ]}) of
     []->{ error, not_found };
     [OID|_]-> { ok, OID }
@@ -125,6 +126,20 @@ get_db_name(FolderID)->
     DB->
       DB
   end.
+
+find_mount_points(DB) when is_atom(DB);is_binary(DB)->
+  {ok,DB_OID} = ecomet_db:get_by_name(DB),
+  find_mount_points(DB_OID);
+find_mount_points(ID)->
+  DBs = ecomet_db:get_databases(),
+  % Folder descendants
+  Patterns = [{?PATTERN_PATTERN,?FOLDER_PATTERN} | ecomet_pattern:get_children({?PATTERN_PATTERN,?FOLDER_PATTERN}) ],
+  ecomet_query:system([DBs],[<<".oid">>],{'AND',[
+    {'OR',[ {<<".pattern">>,'=',P} || P <- Patterns ]},
+    {<<"database">>,'=',?OID(ID)}
+  ]}).
+
+
 %%=================================================================
 %%	Ecomet behaviour
 %%=================================================================

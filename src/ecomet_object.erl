@@ -67,7 +67,7 @@
 
 -record(object,{oid,edit,map,deleted=false,db}).
 
--define(OID(PatternID,ObjectID),{PatternID,ObjectID}).
+-define(ObjectID(PatternID,ObjectID),{PatternID,ObjectID}).
 -define(TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
     none->
@@ -208,7 +208,7 @@ read_all(#object{oid=OID,map=Map})->
        _->
          {ok,Value}=ecomet_field:get_value(Map,OID,Name),
          { Name, Value }
-     end|| Name <- ecomet_field:field_names(Map)],
+     end|| Name <- maps:keys(ecomet_pattern:get_fields(Map)) ],
   maps:from_list(List).
 
 % Edit object
@@ -238,7 +238,7 @@ is_object(#object{})->
 is_object(_Other)->
   false.
 
-is_oid(?OID(_,_))->
+is_oid(?ObjectID(_,_))->
   true;
 is_oid(_Invalid)->
   false.
@@ -249,8 +249,8 @@ get_oid(#object{oid=OID})->OID.
 %%Return oid of pattern of the object
 get_pattern_oid(#object{oid=OID})->
   get_pattern_oid(OID);
-get_pattern_oid(?OID(PatternID,_))->
-  ?OID(?PATTERN_PATTERN,PatternID).
+get_pattern_oid(?ObjectID(PatternID,_))->
+  ?ObjectID(?PATTERN_PATTERN,PatternID).
 
 %% Check context user rights for the object
 check_rights(#object{}=Object)->
@@ -524,14 +524,14 @@ edit_rights(Object)->
 % * the ObjectID is a composed integer that can be presented as:
 %   - IDHIGH = ObjectID div ?BITSTRING_LENGTH. It's sort of high level degree
 %   - IDLOW  = ObjectID rem ?BITSTRING_LENGTH (low level degree)
-% * The system wide increment is too expensive, so the initial increment is the node-wide only
+% * The system wide increment is too expensive, so the initial increment is unique node-wide only
 %   and then the unique ID of the node is twisted into the IDHIGH. Actually it is added
 %   as 2 least significant bytes to the IDHIGH (IDHIGH = IDHIGH bsl 16 + NodeID )
 % * To be able to obtain the database to which the object belongs we insert (code) it into
 %   the IDHIGH the same way as we do with the NodeID: IDHIGH = IDHIGH bsl 8 + MountID.
 % The final IDHIGH is:
 %   <IDHIGH,NodeID:16,DB:8>
-new_id(FolderID,?OID(PatternID,_))->
+new_id(FolderID,?ObjectID(_,PatternID))->
   NodeID = ecomet_node:get_unique_id(),
   DB = ecomet_folder:get_db_id( FolderID ),
   ID= ecomet_schema:local_increment({id,PatternID}),
@@ -543,7 +543,7 @@ new_id(FolderID,?OID(PatternID,_))->
   IDH1 = ((IDH bsl 16) + NodeID) bsl 8 + DB,
   { PatternID, IDH1 * ?BITSTRING_LENGTH + IDL }.
 
-get_db_id(?OID(_,ID))->
+get_db_id(?ObjectID(_,ID))->
   IDH=ID div ?BITSTRING_LENGTH,
   IDH rem 8.
 
@@ -551,17 +551,17 @@ get_db_name(OID)->
   ID = get_db_id(OID),
   ecomet_schema:get_db_name(ID).
 
-get_pattern(?OID(PatternID,_))->
+get_pattern(?ObjectID(PatternID,_))->
   PatternID.
 
-get_id(?OID(_,ObjectID))->
+get_id(?ObjectID(_,ObjectID))->
   ObjectID.
 
 % Acquire lock on object
 get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
   % Define the key
   DB = get_db_name(OID),
-  {ok,Type}=ecomet_pattern:get_storage(Map),
+  Type=ecomet_pattern:get_storage(Map),
   Key = ecomet_transaction:lock_key(DB,object,Type,{OID,backtag}),
 
   % Set lock on main backtag storage
@@ -577,7 +577,7 @@ get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
 
 get_lock_key(OID,Map)->
   DB = get_db_name(OID),
-  {ok,Type}=ecomet_pattern:get_storage(Map),
+  Type=ecomet_pattern:get_storage(Map),
   ecomet_transaction:lock_key(DB,object,Type,{OID,backtag}).
 
 % Fast object open, only for system dirty read
@@ -587,7 +587,7 @@ construct(OID)->
   #object{oid=OID,edit=false,map=Map}.
 
 put_empty_storages(OID,Map)->
-  BackTags= [{{OID,Storage,backtag},none} || Storage<-ecomet_field:index_storages(Map) ],
+  BackTags= [{{OID,Storage,backtag},none} || Storage<-ecomet_pattern:index_storages(Map) ],
   Fields = [{{OID,Storage,fields},none} || Storage<-ecomet_field:fields_storages(Map)],
   ecomet_transaction:dict_put(BackTags ++ Fields).
 
@@ -603,7 +603,7 @@ load_backtags(#object{oid=OID,map=Map},Dict)->
             not_found -> { Type, #{} };
             Loaded -> { Type, Loaded }
           end
-      end || Type <- ecomet_field:index_storages(Map) ],
+      end || Type <- ecomet_pattern:index_storages(Map) ],
   maps:from_list(List).
 
 save_backtags([{Storage,Tags}|Rest],OID)->
@@ -613,7 +613,7 @@ save_backtags([],_OID)->ok.
 
 delete_backtags(#object{oid=OID,map=Map})->
   DB=get_db_name(OID),
-  [ ok = ecomet_backend:delete(DB,?DATA,Type,{OID,backtag}) || Type <- ecomet_field:index_storages(Map)],
+  [ ok = ecomet_backend:delete(DB,?DATA,Type,{OID,backtag}) || Type <- ecomet_pattern:index_storages(Map)],
   ok.
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet

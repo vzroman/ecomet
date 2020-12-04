@@ -32,7 +32,7 @@
   mount_db/2,
   unmount_db/1,
   get_mounted_db/1,
- get_mounted_folder/1,
+  get_mounted_folder/1,
   get_db_id/1,
   get_db_name/1,
   get_registered_databases/0,
@@ -62,15 +62,48 @@
   code_change/3
 ]).
 
-%%====================================================================
-%%		Test API
-%%====================================================================
 
 -define(DEFAULT_SCHEMA_CYCLE, 1000).
 -define(WAIT_SCHEMA_TIMEOUT,5000).
 
 -define(INCREMENT,list_to_atom("ecomet_"++atom_to_list(node()))).
 -define(SCHEMA,ecomet_schema).
+
+%%====================================================================
+%%		System patterns
+%%====================================================================
+-define(OBJECT_SCHEMA,#{
+  <<".name">>=>#{ type => string, index=> [simple], required => true },
+  <<".folder">>=>#{ type => link, index=> [simple], required => true },
+  <<".pattern">>=>#{ type => link, index=> [simple], required => true },
+  <<".readgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<".ts">> =>#{ type => integer }
+}).
+-define(FOLDER_SCHEMA,?OBJECT_SCHEMA#{
+  <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<"only_patterns">>=>#{ type => list, subtype => link },
+  <<"exclude_patterns">>=>#{ type => list, subtype => link },
+  <<"recursive_rights">> =>#{ type => bool },
+  <<"database">> =>#{ type => link, index=> [simple] }
+}).
+-define(PATTERN_SCHEMA,?FOLDER_SCHEMA#{
+  <<"behaviour_module">>=>#{ type => atom },
+  <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
+  <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
+}).
+-define(FIELD_SCHEMA,?OBJECT_SCHEMA#{
+  <<"type">>=>#{ type => atom, required => true },
+  <<"subtype">>=>#{ type => atom },
+  <<"index">>=>#{ type => list, subtype => atom },
+  <<"required">>=>#{ type => bool },
+  <<"default_value">> =>#{ type => term },
+  <<"storage">>=>#{ type => atom, default_value => disc  },
+  <<"autoincrement">>=>#{ type => bool }
+}).
+
+
 
 % Database indexing
 -record(dbId,{k}).
@@ -137,7 +170,7 @@ mount_db(FolderID,DB)->
     % Adding a new mount point requires lock on the schema
     mnesia:lock({table,?SCHEMA},write),
 
-    { ok, Path } = ecomet:oid2path( FolderID ),
+    Path = ecomet:oid2path( FolderID ),
 
     % Index on OID
     ok = mnesia:write( ?SCHEMA, #kv{ key = #mntOID{k=FolderID}, value = DB }, write ),
@@ -155,7 +188,7 @@ unmount_db(FolderID)->
 
     mnesia:lock({table,?SCHEMA},write),
 
-    { ok, Path } = ecomet:oid2path( FolderID ),
+    Path = ecomet:oid2path( FolderID ),
 
     ok = mnesia:delete( ?SCHEMA, #mntOID{k=FolderID}, write ),
 
@@ -389,7 +422,7 @@ init_environment()->
 
   % Attach low-level behaviours
   ?LOGINFO("attaching low-level behaviours"),
-  attach_low_level_behaviours(),
+  attach_low_level_begaviours(),
 
   % Init ecomet environment
   ?LOGINFO("initializing the ecomet environment"),
@@ -400,89 +433,122 @@ init_environment()->
 init_low_level_patterns()->
 
   %-------Object------------------
-  Object=#{
-    <<".name">>=>#{ type => string, index=> [simple], required => true },
-    <<".folder">>=>#{ type => link, index=> [simple], required => true },
-    <<".pattern">>=>#{ type => link, index=> [simple], required => true },
-    <<".readgroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<".ts">> =>#{ type => integer }
-  },
-  ObjectFieldsMap = build_pattern_schema(Object),
-  ObjectMap= ecomet_pattern:set_behaviours(ObjectFieldsMap,[]),
+  ObjectID = {?PATTERN_PATTERN,?OBJECT_PATTERN},
   {ok,_} = ecomet:transaction(fun()->
-    ecomet_pattern:edit_map({?PATTERN_PATTERN,?OBJECT_PATTERN},ObjectMap)
+    ecomet_pattern:set_behaviours(ObjectID,[])
   end),
+  init_pattern_fields(maps:to_list(?OBJECT_SCHEMA),ObjectID),
 
   %-----Folder---------------------
-  Folder = maps:merge(Object,#{
-    <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<"only_patterns">>=>#{ type => list, subtype => link },
-    <<"exclude_patterns">>=>#{ type => list, subtype => link },
-    <<"recursive_rights">> =>#{ type => bool },
-    <<"database">> =>#{ type => link, index=> [simple] }
-  }),
-  FolderFieldsMap=build_pattern_schema(Folder),
-  FolderMap= ecomet_pattern:set_behaviours(FolderFieldsMap,[]),
+  FolderID = {?PATTERN_PATTERN,?FOLDER_PATTERN},
   {ok,_} = ecomet:transaction(fun()->
-    ecomet_pattern:edit_map({?PATTERN_PATTERN,?FOLDER_PATTERN},FolderMap)
+    ecomet_pattern:set_behaviours(FolderID,[])
   end),
+  init_pattern_fields(maps:to_list(?FOLDER_SCHEMA),FolderID),
 
   %-----Pattern---------------------
-  Pattern = maps:merge(Folder,#{
-    <<"behaviour_module">>=>#{ type => atom },
-    <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
-    <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
-  }),
-  PatternFieldsMap=build_pattern_schema(Pattern),
-  PatternMap= ecomet_pattern:set_behaviours(PatternFieldsMap,[]),
+  PatternID = {?PATTERN_PATTERN,?PATTERN_PATTERN},
   {ok,_} = ecomet:transaction(fun()->
-    ecomet_pattern:edit_map({?PATTERN_PATTERN,?PATTERN_PATTERN},PatternMap)
+    ecomet_pattern:set_behaviours(PatternID,[])
   end),
+  init_pattern_fields(maps:to_list(?PATTERN_SCHEMA),PatternID),
 
   %-----Field---------------------
-  Field = maps:merge(Object,#{
-    <<"type">>=>#{ type => atom, required => true },
-    <<"subtype">>=>#{ type => atom },
-    <<"index">>=>#{ type => list, subtype => atom },
-    <<"required">>=>#{ type => bool },
-    <<"default_value">> =>#{ type => term },
-    <<"storage">>=>#{ type => atom, default_value => disc  },
-    <<"autoincrement">>=>#{ type => bool }
-  }),
-  FieldFieldsMap=build_pattern_schema(Field),
-  FieldMap= ecomet_pattern:set_behaviours(FieldFieldsMap,[]),
+  FieldID = {?PATTERN_PATTERN,?FIELD_PATTERN},
   {ok,_} = ecomet:transaction(fun()->
-    ecomet_pattern:edit_map({?PATTERN_PATTERN,?FIELD_PATTERN},FieldMap)
+    ecomet_pattern:set_behaviours(FieldID,[])
   end),
+  init_pattern_fields(maps:to_list(?FIELD_SCHEMA),FieldID),
 
   ok.
 
-build_pattern_schema(Fields)->
-  maps:fold(fun(Name,Config,Acc)->
-    C = ecomet_field:build_description(Config),
-    ecomet_field:map_add(Acc,Name,C)
-  end,#{},Fields).
+init_pattern_fields([{Field,Config}|Rest],PatternID)->
+  {ok,_} = ecomet:transaction(fun()->
+    Config1 = ecomet_field:build_description(Config),
+    ecomet_pattern:append_field(PatternID,Field,Config1)
+  end),
+  init_pattern_fields(Rest,PatternID);
+init_pattern_fields([],_PatternID)->
+  ok.
 
 
 init_root()->
   Root = ecomet:create_object(#{
     <<".name">>=><<"root">>,
-    <<".folder">>=> {?FOLDER_PATTERN,?ROOT_FOLDER},
+    <<".folder">>=> {?FOLDER_PATTERN,0},
     <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
     <<".ts">>=>ecomet_lib:log_ts()
   }),
-  _Patterns = ecomet:create_object(#{
-    <<".name">>=><<".pattern">>,
-    <<".folder">>=> ?OID(Root),
-    <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
-    <<".ts">>=>ecomet_lib:log_ts()
-  }),
+
+  Tree = [
+    { <<".patterns">>, #{
+      fields=>#{
+        <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
+        <<".ts">>=>ecomet_lib:log_ts()
+      },
+      children=>[
+        % #1. ?OBJECT_PATTERN
+        { <<".object">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"behaviour_module">>=>ecomet_object,
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
+            <<"parents">>=>[],
+            <<".ts">>=>ecomet_lib:log_ts()
+          },
+          children=>init_pattern_fields(?OBJECT_SCHEMA)
+        }},
+        % #2. ?FOLDER_PATTERN
+        { <<".folder">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"behaviour_module">>=>ecomet_folder,
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
+            <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}],
+            <<".ts">>=>ecomet_lib:log_ts()
+          },
+          children=>init_pattern_fields(?FOLDER_SCHEMA)
+        }},
+        % #3. ?PATTERN_PATTERN
+        { <<".pattern">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"behaviour_module">>=>ecomet_pattern,
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN},
+            <<"parents">>=>[{?PATTERN_PATTERN,?FOLDER_PATTERN},{?PATTERN_PATTERN,?OBJECT_PATTERN}],
+            <<".ts">>=>ecomet_lib:log_ts()
+          },
+          children=>init_pattern_fields(?PATTERN_SCHEMA)
+        }},
+        % #4. ?FIELD_PATTERN
+        { <<".folder">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"behaviour_module">>=>ecomet_field,
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
+            <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}],
+            <<".ts">>=>ecomet_lib:log_ts()
+          },
+          children=>init_pattern_fields(?FIELD_SCHEMA)
+        }}
+      ]
+    }}
+  ],
+
+  init_tree(?OID(Root),Tree),
 
   ok.
 
-attach_low_level_behaviours()->
+init_pattern_fields(Fields)->
+  [ begin
+      Config1 = ecomet_field:from_schema(ecomet_field:build_description(Config)),
+      { Name, #{ fields=> Config1#{
+        <<".pattern">> => { ?PATTERN_PATTERN, ?FIELD_PATTERN },
+        <<".ts">>=>ecomet_lib:log_ts()
+      }} }
+    end || { Name, Config } <- ordsets:from_list(maps:to_list(Fields)) ].
+
+attach_low_level_begaviours()->
   {ok,_} = ecomet:transaction(fun()->
     ecomet_pattern:set_behaviours({?PATTERN_PATTERN,?OBJECT_PATTERN},[ecomet_object])
   end),
@@ -509,8 +575,8 @@ table_exists(Table)->
   lists:member(Table,Known).
 
 table_has_copy(Table,Type)->
-  Copies=mnesia:table_info(?SCHEMA,Type),
-  lists:member(Table,Copies).
+  Copies=mnesia:table_info(Table,Type),
+  lists:member(node(),Copies).
 
 new_db_id()->
   new_db_id(mnesia:dirty_next(?SCHEMA, #dbId{k=-1}), -1).
@@ -533,3 +599,20 @@ new_node_id(#nodeId{k=NextID}=Node,Id)->
 new_node_id(_Other,Id)->
   % '$end_of_table' or other keys range
   Id + 1.
+
+init_tree(FolderID,Items)->
+  [ begin
+      Fields = maps:get(fields,Params),
+      ItemID=
+        case ecomet_folder:find_object_system(FolderID,Name) of
+          {ok,OID}->OID;
+          _->
+            Object = ecomet:create_object(Fields#{
+              <<".name">>=>Name,
+              <<".folder">>=>FolderID
+            }),
+            ?OID(Object)
+        end,
+      init_tree(ItemID,maps:get(children,Params,[]))
+
+    end || { Name, Params } <- Items ].

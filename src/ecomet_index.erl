@@ -26,7 +26,8 @@
 -export([
   build_index/4,
   delete_object/2,
-  read_tag/4
+  read_tag/4,
+  get_supported_types/0
 ]).
 
 %%====================================================================
@@ -270,3 +271,10 @@ read_tag(DB,Storage,Vector,Tag)->
     not_found->none;
     IndexValue-> ecomet_bits:bubbles_to_bits(IndexValue)
   end.
+
+get_supported_types()->
+  [
+    simple,
+    '3gram',
+    datetime
+  ].
