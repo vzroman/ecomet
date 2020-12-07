@@ -72,8 +72,8 @@
   case ecomet_transaction:get_type() of
     none->
       case ecomet_transaction:internal(Fun) of
-        {ok,_}->ok;
-        {error,Error}->?ERROR(Error)
+        {ok,_TResult}->_TResult;
+        {error,_TError}->?ERROR(_TError)
       end;
     _->Fun()
   end).
@@ -217,9 +217,11 @@ edit(#object{oid=OID,map=Map}=Object,Fields)->
   OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
   NewFields=ecomet_field:merge(Map,OldFields,Fields),
   case ecomet_transaction:dict_get({OID,handler},none) of
-    none->save(Object,NewFields,on_edit);
-    % If object is under behaviour handlers, just save changes to dict
-    _->ecomet_transaction:dict_put([{{OID,fields},NewFields}])
+    none->
+      save(Object,NewFields,on_edit);
+    _->
+      % If object is under behaviour handlers, just save changes to dict
+      ecomet_transaction:dict_put([{{OID,fields},NewFields}])
   end,
   ok.
 
@@ -466,7 +468,7 @@ check_path(Object)->
       case binary:split(Name,<<"/">>) of
         [Name]->
           case ecomet_folder:find_object_system(FolderID,Name) of
-            {error,notfound}->ok;
+            {error,not_found}->ok;
             {ok,OID}->ok;
             _->{error,{not_unique,Name}}
           end;

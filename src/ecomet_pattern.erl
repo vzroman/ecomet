@@ -64,13 +64,44 @@
 get_map(Map) when is_map(Map)->
   Map;
 get_map(Pattern)->
-  case ecomet_schema:get_pattern(?OID(Pattern)) of
-    Value when is_map(Value)->Value;
-    _->#{}
+  case ecomet_transaction:dict_get({'@pattern_map@',Pattern},undefined) of
+    undefined->
+      case ecomet_schema:get_pattern(?OID(Pattern)) of
+        Value when is_map(Value)->Value;
+        _->#{}
+      end;
+    UnderTransaction->
+      UnderTransaction
   end.
 
 edit_map(Pattern,Map)->
-  ecomet_schema:set_pattern(?OID(Pattern),Map).
+  PatternID=?OID(Pattern),
+  case ecomet_transaction:dict_get({'@pattern_map@',PatternID},undefined) of
+    undefined->
+      ecomet_schema:set_pattern(PatternID,Map);
+    _UnderTransaction->
+      ecomet_transaction:dict_put(#{{'@pattern_map@',PatternID}=>Map})
+  end.
+
+wrap_transaction(PatternID,Fun)->
+  % Check if the schema is already under transaction
+  RootTransaction = ecomet_transaction:dict_get({'@pattern_map@',PatternID},undefined)=:=undefined,
+  % Put the schema into the transaction
+  Map = get_map(PatternID),
+  ecomet_transaction:dict_put(#{
+    {'@pattern_map@',PatternID}=>Map
+  }),
+  % Perform schema transformations
+  Fun(Map),
+  % Commit the schema if there is no upper level transaction
+  if
+    RootTransaction ->
+      NewMap=get_map(PatternID),
+      ecomet_transaction:dict_remove([{'@pattern_map@',PatternID}]),
+      edit_map(PatternID,NewMap);
+    true ->
+      ok
+  end.
 
 get_behaviours(Map) when is_map(Map)->
   maps:get(handlers,Map,[]);
@@ -147,82 +178,63 @@ index_storages(Pattern)->
 %%	Schema API
 %%=================================================================
 append_field(Pattern,Field,Config)->
-  Map = get_map(Pattern),
+  wrap_transaction(?OID(Pattern),fun(Map)->
+    % Check for conflicts with the parent
+    case Map of
+      #{ Field:=_ }->
+        % The field is updated. Check if it conflicts with the parent
+        ParentID = get_parent(Pattern),
+        % Get the parent's map (see THE TRICK below)
+        case get_map(ParentID) of
+          #{Field := Parent} ->
+            ecomet_field:check_parent(Config,Parent);
+          _->
+            % The field is not defined in the parent
+            ok
+        end;
+      _->
+        % The field didn't exist, it is either inherit process or
+        % creating a new field that is not defined in the parent.
+        % In both cases we don't need to check parent config
+        ok
+    end,
 
-  % Check for conflicts with the parent
-  case Map of
-    #{ Field:=_ }->
-      % The field is updated. Check if it conflicts with the parent
-      ParentID = get_parent(Pattern),
-      % Get the parent's map (see THE TRICK below)
-      ParentMap =
-        case get({'@pattern_map@',ParentID}) of
-          undefined->get_map(ParentID);
-          Stored->Stored
-        end,
-      case ParentMap of
-        #{Field := Parent} ->
-          ecomet_field:check_parent(Config,Parent);
-        _->
-          % The field is not defined in the parent
-          ok
-      end;
-    _->
-      % The field didn't exist, so it cannot be defined in the parent
-      ok
-  end,
+    % Update the map
+    Map1 = Map#{Field => Config},
+    Map2 = Map1#{ index => get_indexed(Map1) },
 
-  % Update the map
-  Map1 = Map#{Field => Config},
-  Map2 = Map1#{ index => get_indexed(Map1) },
+    edit_map(Pattern,Map2),
 
-  % Update the field config in the children.
-  % THE TRICK! The schema is edited inside a transaction, therefore
-  % changes are not seen until the transaction is committed. A child
-  % on its change will try to check the changes against parent.
-  % To make the changes in the parent available we save them into the process dictionary
-  put({'@pattern_map@',?OID(Pattern)}, Map2),
+    % Update children
+    Fields = get_fields(Map2),
+    [ inherit_fields(ChildID,Fields) || ChildID <- get_children(Pattern)]
 
-  % Update children
-  Fields = get_fields(Map2),
-  [ inherit_fields(ChildID,Fields) || ChildID <- get_children(Pattern)],
-  erase({'@pattern_map@',?OID(Pattern)}),
+  end),
 
-  % Update the schema
-  edit_map(Pattern, Map2).
+  ok.
 
 remove_field(Pattern,Field)->
-  % Check if the field is defined in the parent
-  ParentID = get_parent(Pattern),
-  % Get the parent's map (see THE TRICK below)
-  ParentMap =
-    case get({'@pattern_map@',ParentID}) of
-      undefined->get_map(ParentID);
-      Stored->Stored
+
+  wrap_transaction(?OID(Pattern),fun(Map)->
+
+    % Check if the field is defined in the parent
+    ParentID = get_parent(Pattern),
+    case get_map(ParentID) of
+      #{Field:=_} -> ?ERROR(parent_field);
+      _->ok
     end,
-  case ParentMap of
-    #{Field:=_} -> ?ERROR(parent_field);
-    _->ok
-  end,
 
-  % Update the map
-  Map = get_map(Pattern),
-  Map1 = maps:remove(Field,Map),
-  Map2 = Map1#{ index => get_indexed(Map1) },
+    % Update the map
+    Map1 = maps:remove(Field,Map),
+    Map2 = Map1#{ index => get_indexed(Map1) },
 
-  % Update the field config in the children.
-  % THE TRICK! The schema is edited inside a transaction, therefore
-  % changes are not seen until the transaction is committed. A child
-  % on its change will try to check the changes against parent.
-  % To make the changes in the parent available we save them into the process dictionary
-  put({'@pattern_map@',?OID(Pattern)}, Map2),
+    edit_map(Pattern,Map2),
 
-  % update children
-  [ remove_field(ChildID,Field) || ChildID <- get_children(Pattern) ],
-  erase({'@pattern_map@',?OID(Pattern)}),
+    % update children
+    [ remove_field(ChildID,Field) || ChildID <- get_children(Pattern) ]
+  end),
 
-  % Update the schema
-  edit_map(Pattern, Map2).
+  ok.
 
 %%=================================================================
 %%	Ecomet object behaviour
@@ -231,11 +243,13 @@ on_create(Object)->
   check_handler(Object),
   set_parents(Object),
   inherit_fields(Object),
+  update_behaviour(Object),
   ok.
 
 on_edit(Object)->
   check_parent(Object),
   check_handler(Object),
+  update_behaviour(Object),
   ok.
 
 on_delete(Object)->
@@ -253,20 +267,24 @@ check_parent(Object)->
 check_handler(Object)->
   case ecomet:field_changes(Object,<<"behaviour_module">>) of
     none->ok;
+    {none,_}->ok;
     {NewHandler,_}->
-      check_handler_module(NewHandler),
-
-      ParentID=get_parent(Object),
-      ParentHandlers=get_behaviours(ParentID),
-      update_behaviour(Object,ParentHandlers)
+      check_handler_module(NewHandler)
   end.
+
+update_behaviour(Object)->
+  ParentID=get_parent(Object),
+  ParentHandlers=get_behaviours(ParentID),
+  update_behaviour(Object,ParentHandlers),
+  ok.
+
 
 check_handler_module(Module)->
   case ?PIPE([
-    fun(_)->true = ecomet_lib:module_exists(Module) end,
-    fun(_)->true = erlang:function_exported(Module,on_create,1) end,
-    fun(_)->true = erlang:function_exported(Module,on_edit,1) end,
-    fun(_)->true = erlang:function_exported(Module,on_delete,1) end
+    fun(_)->true = ecomet_lib:module_exists(Module), ok end,
+    fun(_)->true = erlang:function_exported(Module,on_create,1), ok end,
+    fun(_)->true = erlang:function_exported(Module,on_edit,1), ok end,
+    fun(_)->true = erlang:function_exported(Module,on_delete,1), ok end
   ],none) of
     {ok,_}->ok;
     {error,1,_}->?ERROR(invalid_module);
@@ -282,8 +300,12 @@ update_behaviour(Pattern,ParentHandlers)->
       {ok,none}->ParentHandlers;
       {ok,Module}->[Module|ParentHandlers]
     end,
-  set_behaviours(Object,Handlers),
-  [ update_behaviour(ChildID,Handlers) || ChildID <- get_children(Object) ].
+  case get_behaviours(Object) of
+    Handlers->ok;
+    _->
+      set_behaviours(Object,Handlers),
+      [ update_behaviour(ChildID,Handlers) || ChildID <- get_children(Object) ]
+  end.
 
 set_parents(Object)->
   Parent = get_parent(Object),
@@ -294,7 +316,12 @@ set_parents(Object)->
 inherit_fields(Object)->
   ParentID = get_parent(Object),
   ParentFields = get_fields(ParentID),
-  inherit_fields(?OID(Object),ParentFields).
+
+  PatternID = ?OID(Object),
+  wrap_transaction(PatternID,fun(_)->
+    inherit_fields(PatternID,ParentFields)
+  end),
+  ok.
 
 
 %%=================================================================
@@ -314,12 +341,13 @@ inherit_fields(PatternID,ParentFields)->
        ok = ecomet:edit_object(Field,Child2);
      _->
        % CASE 2. The field is not defined in the child yet, create a new one
-      ecomet:create_object(Parent#{
+      Parent1 = ecomet_field:from_schema(Parent),
+      ecomet:create_object(Parent1#{
         <<".name">>=>Name,
         <<".folder">>=>PatternID,
         <<".pattern">>=>{?PATTERN_PATTERN,?FIELD_PATTERN}
       })
-   end || {Name, Parent} <- maps:to_list(ParentFields)],
+   end || {Name, Parent} <- ordsets:from_list(maps:to_list(ParentFields)) ],
   ok.
 
 get_indexed(Map)->
@@ -334,6 +362,14 @@ get_indexed(Map)->
         end
     end,#{}, get_fields(Map) ),
   maps:keys(Types).
+
+
+
+
+
+
+
+
 
 
 

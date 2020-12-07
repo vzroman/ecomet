@@ -247,9 +247,9 @@ get_changes([{Name,Value}|Rest],Map,Storages)->
 get_changes([],_Map,Result)->Result.
 
 % Merge unchanged values into changed storages
-merge_storages([{Storage,Fields}|Rest],Loaded,OID,{Merged,Changes})->
+merge_storages([{Storage,Fields}|Rest],PreLoaded,OID,{Merged,Changes})->
   OldFields=
-    case Loaded of
+    case PreLoaded of
       #{ Storage := none }-> #{};
       #{ Storage := StorageFields } -> StorageFields;
       _->
@@ -286,8 +286,8 @@ merge_storages([{Storage,Fields}|Rest],Loaded,OID,{Merged,Changes})->
           _->Merged#{Storage=>ClearedFields}
         end
     end,
-  merge_storages(Rest,Loaded,OID,{StorageResult,StorageChanges++Changes});
-merge_storages([],_Loaded,_OID,Result)->Result.
+  merge_storages(Rest,PreLoaded,OID,{StorageResult,StorageChanges++Changes});
+merge_storages([],_PreLoaded,_OID,Result)->Result.
 
 % Dump fields storages
 dump_storages([{Type,Fields}|Rest],OID)->
@@ -343,7 +343,7 @@ field_changes(Map,Project,OID,Name)->
         New->none;
         Old->{New,Old}
       end;
-    error->none
+    _->none
   end.
 
 %%=================================================================

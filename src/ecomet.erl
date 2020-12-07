@@ -36,7 +36,6 @@
 -export([
   is_transaction/0,
   transaction/1,
-  sync_transaction/1,
   start_transaction/0,
   commit_transaction/0,
   rollback_transaction/0,
@@ -101,10 +100,7 @@ is_transaction()->
   ecomet_transaction:get_type()=/=none.
 
 transaction(Fun)->
-  ecomet_backend:transaction(Fun).
-
-sync_transaction(Fun)->
-  ecomet_backend:sync_transaction(Fun).
+  ecomet_transaction:internal(Fun).
 
 start_transaction()->
   ecomet_transaction:start().
