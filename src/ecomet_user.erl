@@ -30,7 +30,8 @@
   get_usergroups/0,
   on_init_state/0,
   is_admin/0,
-  get_state/0,put_state/1
+  get_state/0,put_state/1,
+  get_salt/0
 ]).
 
 %%===========================================================================
@@ -111,6 +112,8 @@ get_state()->
 put_state(State)->
   put(?CONTEXT,State).
 
+get_salt()->
+  list_to_binary(ecomet_lib:guid()).
 
 %%=================================================================
 %%	Ecomet object behaviour

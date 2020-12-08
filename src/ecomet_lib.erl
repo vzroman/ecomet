@@ -28,7 +28,8 @@
   to_object/1,to_object/2,to_object/3,to_object_system/1,
   to_oid/1,
   pipe/2,
-  module_exists/1
+  module_exists/1,
+  guid/0
 ]).
 
 dt_to_string(DT)->
@@ -101,3 +102,22 @@ module_exists(Module)->
         {error,_}->false
       end
   end.
+
+guid() ->
+  lists:foldl(fun (I, Acc) ->
+    B = rand:uniform(256) - 1,
+    S =
+      if
+        I == 7 ->
+          B1 = B band 16#0f bor 16#40,
+          io_lib:format("~2.16.0b", [B1]);   %% The last 0 in 2.16.0 means fill with leading 0 if necessay
+        I == 9 -> %% multiplexed variant type (2 bits)
+          B1 = B band 16#3f bor 16#80,
+          io_lib:format("~2.16.0b", [B1]);
+        I == 4; I == 6; I == 8; I == 10 ->
+          io_lib:format("~2.16.0b-", [B]);
+        true ->
+          io_lib:format("~2.16.0b", [B])
+      end,
+    Acc ++ S
+  end,[],lists:seq(1, 16)).
