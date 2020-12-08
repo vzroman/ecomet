@@ -64,9 +64,10 @@
 get_map(Map) when is_map(Map)->
   Map;
 get_map(Pattern)->
-  case ecomet_transaction:dict_get({'@pattern_map@',Pattern},undefined) of
+  PatternID = ?OID(Pattern),
+  case ecomet_transaction:dict_get({'@pattern_map@',PatternID},undefined) of
     undefined->
-      case ecomet_schema:get_pattern(?OID(Pattern)) of
+      case ecomet_schema:get_pattern(PatternID) of
         Value when is_map(Value)->Value;
         _->#{}
       end;
@@ -242,14 +243,18 @@ remove_field(Pattern,Field)->
 on_create(Object)->
   check_handler(Object),
   set_parents(Object),
-  inherit_fields(Object),
-  update_behaviour(Object),
+  wrap_transaction(?OID(Object),fun(_)->
+    inherit_fields(Object),
+    update_behaviour(Object)
+  end),
   ok.
 
 on_edit(Object)->
   check_parent(Object),
   check_handler(Object),
-  update_behaviour(Object),
+  wrap_transaction(?OID(Object),fun(_)->
+    update_behaviour(Object)
+  end),
   ok.
 
 on_delete(Object)->
@@ -316,11 +321,7 @@ set_parents(Object)->
 inherit_fields(Object)->
   ParentID = get_parent(Object),
   ParentFields = get_fields(ParentID),
-
-  PatternID = ?OID(Object),
-  wrap_transaction(PatternID,fun(_)->
-    inherit_fields(PatternID,ParentFields)
-  end),
+  inherit_fields(?OID(Object),ParentFields),
   ok.
 
 
