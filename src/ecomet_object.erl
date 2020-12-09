@@ -55,7 +55,16 @@
   get_oid/1,
   check_rights/1
 ]).
+%%====================================================================
+%%		Test API
+%%====================================================================
+-ifdef(TEST).
 
+-export([
+  new_id/2
+]).
+
+-endif.
 %%===========================================================================
 %% Behaviour API
 %%===========================================================================
@@ -564,7 +573,7 @@ get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
   % Define the key
   DB = get_db_name(OID),
   Type=ecomet_pattern:get_storage(Map),
-  Key = ecomet_transaction:lock_key(DB,object,Type,{OID,backtag}),
+  Key = ecomet_transaction:lock_key(DB,?DATA,Type,{OID,backtag}),
 
   % Set lock on main backtag storage
   case ecomet_transaction:lock(Key,Lock,Timeout) of
@@ -580,7 +589,7 @@ get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
 get_lock_key(OID,Map)->
   DB = get_db_name(OID),
   Type=ecomet_pattern:get_storage(Map),
-  ecomet_transaction:lock_key(DB,object,Type,{OID,backtag}).
+  ecomet_transaction:lock_key(DB,?DATA,Type,{OID,backtag}).
 
 % Fast object open, only for system dirty read
 construct(OID)->
