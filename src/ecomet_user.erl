@@ -121,11 +121,13 @@ get_salt()->
 on_create(Object)->
   check_pass(Object),
   check_groups(Object),
+  check_rights(Object),
   ok.
 
 on_edit(Object)->
   check_pass(Object),
   check_groups(Object),
+  check_rights(Object),
   ok.
 
 on_delete(_Object)->
@@ -147,6 +149,13 @@ check_groups(Object)->
       ecomet:edit_object(Object,#{<<"usergroups">>=>[]})
   end.
 
+check_rights(Object)->
+  {ok,Rights}=ecomet:read_field(Object,<<".writegroups">>,[]),
+  case lists:member(?OID(Object),Rights) of
+    true->ok;
+    _->
+      ok = ecomet:edit_object(Object,#{ <<".writegroups">>=>[?OID(Object)|Rights] })
+  end.
 
 %%=================================================================
 %%	Internal helpers
