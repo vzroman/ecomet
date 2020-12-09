@@ -131,7 +131,7 @@ reset_bit(Bit,BitsValue)->
     {Offset,Value}->
       {NewOffset,NewValue}=
         if
-          Bit<Offset -> {Bit,(Value bsl (Offset-Bit)) bor 1};
+          Bit<Offset -> {Offset,Value};
           true -> {Offset,Value band (Value bxor (1 bsl (Bit-Offset)))}
         end,
       if
@@ -238,7 +238,7 @@ delete(Bit,{LSB,MSB,Value})->
     {true,true}->[];
     %Bit is right most
     {true,false}->
-      NewLSB=lsb({LSB,Value},LSB+1),
+      NewLSB=lsb({LSB,Value},LSB),
       [{NewLSB,MSB,Value bsr (NewLSB-LSB)}];
     %Bit is left most
     {false,true}->

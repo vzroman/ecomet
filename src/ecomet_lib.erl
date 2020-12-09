@@ -26,8 +26,10 @@
   dt_to_string/1,dt_to_string/2,
   log_ts/0,
   to_object/1,to_object/2,to_object/3,to_object_system/1,
+  to_oid/1,
   pipe/2,
-  module_exists/1
+  module_exists/1,
+  guid/0
 ]).
 
 dt_to_string(DT)->
@@ -49,26 +51,32 @@ to_object(ID,Lock)->
   to_object(ID,Lock,none).
 to_object(<<"/root",_/binary>> =Path,Lock,Timeout)->
   {ok,OID}=ecomet:path2oid(Path),
-  ecomet:open(OID,Lock,Timeout);
+  ecomet_object:open(OID,Lock,Timeout);
 to_object(ID, Lock,Timeout)->
-  case ecomet:is_object(ID) of
+  case ecomet_object:is_object(ID) of
     true when Lock=:=none->
       ID;
-    true when Lock=/=none->
+    true->
       % The object is already opened, but we still may need to upgrade the lock
-      ecomet:open(?OID(ID),Lock,Timeout);
-    _->
-      % The ID is supposed to be an OID
-      ecomet:open(ID,Lock,Timeout)
+      ecomet_object:open(?OID(ID),Lock,Timeout)
   end.
 to_object_system(<<"/root",_/binary>> =Path)->
   {ok,OID}=ecomet:path2oid(Path),
   ecomet_object:construct(OID);
 to_object_system(ID)->
-  case ecomet:is_object(ID) of
+  case ecomet_object:is_object(ID) of
     true->ID;
     _->
       ecomet_object:construct(ID)
+  end.
+
+to_oid(<<"/root",_/binary>> =Path)->
+  {ok,OID}=ecomet:path2oid(Path),
+  OID;
+to_oid(ID)->
+  case ecomet_object:is_oid(ID) of
+    true->ID;
+    _->ecomet:get_oid(?OBJECT(ID))
   end.
 
 pipe(Pipe,Acc)->
@@ -94,3 +102,22 @@ module_exists(Module)->
         {error,_}->false
       end
   end.
+
+guid() ->
+  lists:foldl(fun (I, Acc) ->
+    B = rand:uniform(256) - 1,
+    S =
+      if
+        I == 7 ->
+          B1 = B band 16#0f bor 16#40,
+          io_lib:format("~2.16.0b", [B1]);   %% The last 0 in 2.16.0 means fill with leading 0 if necessay
+        I == 9 -> %% multiplexed variant type (2 bits)
+          B1 = B band 16#3f bor 16#80,
+          io_lib:format("~2.16.0b", [B1]);
+        I == 4; I == 6; I == 8; I == 10 ->
+          io_lib:format("~2.16.0b-", [B]);
+        true ->
+          io_lib:format("~2.16.0b", [B])
+      end,
+    Acc ++ S
+  end,[],lists:seq(1, 16)).

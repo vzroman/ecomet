@@ -55,8 +55,8 @@ all()->
     {group,build_backtag},
     {group,merge_backtag},
     {group,dump_log},
-    unchanged
-%%    {group,concurrent}
+    unchanged,
+    {group,concurrent}
   ].
 
 groups()->[
@@ -88,7 +88,7 @@ groups()->[
     [                   % Cases:
       {build,  % Building index
         [parallel],
-        [concurrent_build||_<-lists:seq(1,4000)]
+        [concurrent_build||_<-lists:seq(1,10)]
       },
       concurrent_check
     ]
@@ -314,10 +314,10 @@ datetime_index(_Config)->
     <<"no_index">> => <<"not indexed field">>,
     <<"simple">> => <<"simple index">>,
     <<".pattern">> => {2,3},
-    <<"datetime">> => <<"12345000">>,
-    <<"datetime_list">> => [<<"12345000">>,<<"512345000">>,<<"5012345000">>]
+    <<"datetime">> => 1607345670454000,
+    <<"datetime_list">> => [1607345670454000,1607345680454000,1607345690454000]
   }),
-
+  ecomet_lib:parse_dt(1607345670454000),
   % Create back tag structure
   BackTags=ecomet_index:build_back_tags(maps:to_list(Fields),FieldsMap),
   %%  Returns :

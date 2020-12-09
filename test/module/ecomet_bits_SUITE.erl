@@ -356,9 +356,13 @@ bubles_add_test(_Config) ->
 %--------------------------------------------------------------
 bubbles_remove_test(_Config) ->
   % Remove bit from second bubble
-  [{3,5,2#101},{1000,1000,2#1}]=ecomet_bits:bubbles_remove([{3,5,2#101},{1000,1000,2#1}],1005),
+  [{3,5,2#101}]=ecomet_bits:bubbles_remove([{3,5,2#101},{1000,1000,2#1}],1000),
   % Remove bit, that not set
   [{3,5,2#101},{1000,1000,2#1}]=ecomet_bits:bubbles_remove([{3,5,2#101},{1000,1000,2#1}],1005),
+  % Remove bit from first bubble
+  [{4,5,2#11},{1000,1000,2#1}]=ecomet_bits:bubbles_remove([{3,5,2#111},{1000,1000,2#1}],3),
+  % Remove bit from first bubble
+  [{3,5,2#101},{1000,1000,2#1}]=ecomet_bits:bubbles_remove([{3,5,2#111},{1000,1000,2#1}],4),
   % Remove bit from first bubble
   [{5,5,2#1},{1000,1000,2#1}]=ecomet_bits:bubbles_remove([{3,5,2#101},{1000,1000,2#1}],3),
   % Remove first bubble

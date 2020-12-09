@@ -93,4 +93,24 @@
   Wait(Wait,Timeout)
 end)()).
 
+-define(PROCESSLOG(PID,Record),PID!{'_LOG_',Record}).
+-define(PROCESSLOG(Record),?PROCESSLOG(self(),Record)).
+
+-define(GETLOG,fun()->
+  Receive
+    =fun(R,Acc)->
+    receive
+      {'_LOG_',Record}->R(R,[Record|Acc])
+    after
+      100->lists:reverse(Acc)
+    end
+     end,
+  Receive(Receive,[])
+               end).
+
+-else.
+
+-define(PROCESSLOG(PID,Record),ok).
+-define(PROCESSLOG(Record),ok).
+
 -endif.

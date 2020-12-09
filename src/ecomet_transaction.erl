@@ -27,8 +27,7 @@
   lock/3,
   release_lock/1,
   find_lock/1,
-  dict_get/1,
-  dict_get/2,
+  dict_get/1,dict_get/2,
   dict_put/1,
   dict_remove/1,
   queue_commit/1,
@@ -256,11 +255,13 @@ dict_get(Key,Default)->
     #state{dict=Dict}->maps:get(Key,Dict,Default)
   end.
 
-dict_put(KeyValueList)->
+dict_put(KeyValueList) when is_list(KeyValueList)->
+  dict_put(maps:from_list(KeyValueList));
+dict_put(KeyValueMap) when is_map(KeyValueMap)->
   case get(?TKEY) of
     undefined->?ERROR(no_transaction);
     State->
-      Dict=maps:merge(State#state.dict,maps:from_list(KeyValueList)),
+      Dict=maps:merge(State#state.dict,KeyValueMap),
       put(?TKEY,State#state{dict=Dict})
   end.
 
