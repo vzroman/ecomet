@@ -55,11 +55,14 @@
     end
     end,
   F(F)
-                                    end)).
+ end)).
 
 -define(SUITE_PROCESS_STOP(PID),PID!stop).
 
 -define(SUITE_PROCESS_EXECUTE(PID,Fun),PID!{execute,Fun}).
+
+-define(PROCESSLOG(PID,Record),PID!{'_LOG_',Record}).
+-define(PROCESSLOG(Record),?PROCESSLOG(self(),Record)).
 
 -define(BACKEND_INIT(),
   begin
