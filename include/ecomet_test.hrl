@@ -67,7 +67,7 @@
     ?STOP_DEPENDENCIES,
 
     mnesia:delete_schema([node()]),
-    application:set_env(mnesia, dir,?GET(priv_dir,Config)++"/DB_"++atom_to_list(?MODULE)),
+    application:set_env(mnesia, dir,?config(priv_dir,Config)++"/DB_"++atom_to_list(?MODULE)),
 
     ?START_DEPENDENCIES,
 
