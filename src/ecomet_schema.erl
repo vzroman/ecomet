@@ -61,17 +61,7 @@
   terminate/2,
   code_change/3
 ]).
-%%====================================================================
-%%		Test API
-%%====================================================================
--ifdef(TEST).
 
--export([
-  register_type/2
-]).
-
--endif.
-%%====================================================================
 
 -define(DEFAULT_SCHEMA_CYCLE, 1000).
 -define(WAIT_SCHEMA_TIMEOUT,5000).
@@ -123,6 +113,23 @@
 -define(NODE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] },
   <<"is_ready">>=>#{ type => bool, index=> [simple] }
+}).
+
+%-------------USER PATTERNS--------------------------------------------
+-define(USER_SCHEMA,#{
+  <<"password">>=>#{ type => string, required => true },
+  <<"usergroups">>=>#{ type => list, subtype => link, index=> [simple] }
+  }).
+-define(USERGROUP_SCHEMA,#{
+  % No additional fields
+}).
+-define(SESSION_SCHEMA,#{
+  <<".name">>=>#{ type => string, autoincrement => true },
+  <<".ts">> =>#{ type => integer, index=> [simple,datetime] },
+  <<"close">>=>#{ type => integer, index=> [simple,datetime] },
+  <<"node">>=>#{ type => atom, index=> [simple] },
+  <<"PID">>=>#{ type => term, index=> [simple] },
+  <<"info">> =>#{ type => term }
 }).
 
 % Database indexing
@@ -696,7 +703,9 @@ init_tree(FolderID,Items)->
   [ begin
       ItemID=
         case ecomet_folder:find_object_system(FolderID,Name) of
-          {ok,OID}->OID;
+          {ok,OID}->
+            % TODO. Edit flag
+            OID;
           _->
             Fields = maps:get(fields,Params),
             Object = ecomet:create_object(Fields#{
