@@ -45,13 +45,29 @@
     application:stop(D)
   end|| D <- lists:reverse(?DEPENDENCIES) ]).
 
+-define(SUITE_PROCESS_START(),spawn(fun()->
+  F=fun(R)->
+    receive
+      stop->ok;
+      {execute,Fun}->
+        Fun(),
+        R(R)
+    end
+    end,
+  F(F)
+                                    end)).
+
+-define(SUITE_PROCESS_STOP(PID),PID!stop).
+
+-define(SUITE_PROCESS_EXECUTE(PID,Fun),PID!{execute,Fun}).
+
 -define(BACKEND_INIT(),
   begin
 
     ?STOP_DEPENDENCIES,
 
     mnesia:delete_schema([node()]),
-    application:set_env(mnesia, dir,?config(priv_dir,Config)++"/DB_"++atom_to_list(?MODULE)),
+    application:set_env(mnesia, dir,?GET(priv_dir,Config)++"/DB_"++atom_to_list(?MODULE)),
 
     ?START_DEPENDENCIES,
 

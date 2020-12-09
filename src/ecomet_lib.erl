@@ -37,6 +37,7 @@ dt_to_string(DT)->
 dt_to_string(DT,Unit)->
   unicode:characters_to_binary(calendar:system_time_to_rfc3339(DT,[{unit,Unit},{offset,"Z"}])).
 
+parse_dt(DT) when is_integer(DT)-> DT;
 parse_dt(DT) when is_binary(DT)->
   parse_dt(unicode:characters_to_list(DT));
 parse_dt(DT) when is_list(DT)->
