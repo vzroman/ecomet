@@ -115,6 +115,23 @@
   <<"is_ready">>=>#{ type => bool, index=> [simple] }
 }).
 
+%-------------USER PATTERNS--------------------------------------------
+-define(USER_SCHEMA,#{
+  <<"password">>=>#{ type => string, required => true },
+  <<"usergroups">>=>#{ type => list, subtype => link, index=> [simple] }
+  }).
+-define(USERGROUP_SCHEMA,#{
+  % No additional fields
+}).
+-define(SESSION_SCHEMA,#{
+  <<".name">>=>#{ type => string, autoincrement => true },
+  <<".ts">> =>#{ type => integer, index=> [simple,datetime] },
+  <<"close">>=>#{ type => integer, index=> [simple,datetime] },
+  <<"node">>=>#{ type => atom, index=> [simple] },
+  <<"PID">>=>#{ type => term, index=> [simple] },
+  <<"info">> =>#{ type => term }
+}).
+
 % Database indexing
 -record(dbId,{k}).
 -record(dbName,{k}).
@@ -686,7 +703,9 @@ init_tree(FolderID,Items)->
   [ begin
       ItemID=
         case ecomet_folder:find_object_system(FolderID,Name) of
-          {ok,OID}->OID;
+          {ok,OID}->
+            % TODO. Edit flag
+            OID;
           _->
             Fields = maps:get(fields,Params),
             Object = ecomet:create_object(Fields#{
