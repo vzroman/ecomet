@@ -25,13 +25,10 @@
 -export([
   build_new/2,
   merge/3,
-  map_delete/2,
-  field_names/1,
   get_type/2,
   get_storage/2,
   get_index/2,
   fields_storages/1,
-  merge_storages/4,
   save_changes/4,
   delete_object/2,
   is_required/2
@@ -43,9 +40,7 @@
 -export([
   get_value/3,get_value/4,
   lookup_storage/3,
-  field_changes/4,
-  get_changes/3,
-  dump_storages/2
+  field_changes/4
 ]).
 
 %%=================================================================
@@ -66,6 +61,17 @@
   on_edit/1,
   on_delete/1
 ]).
+
+%%====================================================================
+%%		Test API
+%%====================================================================
+-ifdef(TEST).
+-export([
+  get_changes/3,
+  merge_storages/4,
+  dump_storages/2
+]).
+-endif.
 
 -define(DEFAULT_DESCRIPTION,#{
   type => string,
@@ -104,19 +110,6 @@ build_description(Params)->
   maps:map(fun(K,Default)->
     maps:get(K,Params,Default)
   end,?DEFAULT_DESCRIPTION).
-
-% Get list of all fields in the object
-field_names(Description)->
-  maps:fold(
-    fun
-      (Name, _Spec, Fields) when is_atom(Name) ->
-        Fields;
-      (FieldName, _Spec, Fields) ->
-        [FieldName|Fields]
-    end,
-    [],
-    Description
-  ).
 
 inherit(Child,Parent)->
   % Update extent critical params.
@@ -164,23 +157,6 @@ check_parent(Child,Parent)->
   case ordsets:subtract(ParentIndex,ChildIndex) of
     []->ok;
     _->?ERROR(parent_index)
-  end.
-
-map_delete(Description, FieldName)->
-  FieldSpec = maps:get(FieldName,Description),
-  DescriptionStripped = maps:remove(FieldName, Description),
-  case maps:get(index, FieldSpec) of
-    none ->
-      DescriptionStripped;
-    _ ->
-      Storages = maps:get(index_storage, Description),
-      Storage=maps:get(storage, FieldSpec),
-      ReadyStorages=
-        case lists:delete(FieldName,proplists:get_value(Storage,Storages)) of
-          []->lists:keydelete(Storage,1,Storages);
-          RestFields->lists:keyreplace(Storage,1,Storages,{Storage,RestFields})
-        end,
-      maps:put(index_storage,ReadyStorages,DescriptionStripped)
   end.
 
 % Get type of storage for the field
@@ -291,9 +267,9 @@ get_changes([{Name,Value}|Rest],Map,Storages)->
 get_changes([],_Map,Result)->Result.
 
 % Merge unchanged values into changed storages
-merge_storages([{Storage,Fields}|Rest],Pre,OID,{Merged,Changes})->
+merge_storages([{Storage,Fields}|Rest],PreLoaded,OID,{Merged,Changes})->
   OldFields=
-    case Pre of
+    case PreLoaded of
       #{ Storage := none }-> #{};
       #{ Storage := StorageFields } -> StorageFields;
       _->
@@ -328,21 +304,17 @@ merge_storages([{Storage,Fields}|Rest],Pre,OID,{Merged,Changes})->
           _->Merged#{Storage=>ClearedFields}
         end
     end,
-  merge_storages(Rest,Pre,OID,{StorageResult,StorageChanges++Changes});
-merge_storages([],_Pre,_OID,Result)->Result.
+  merge_storages(Rest,PreLoaded,OID,{StorageResult,StorageChanges++Changes});
+merge_storages([],_PreLoaded,_OID,Result)->Result.
 
 % Dump fields storages
 dump_storages([{Type,Fields}|Rest],OID)->
   case maps:size(Fields)>0 of
-    true ->
-      ecomet_object:save_storage(OID,Type,fields,Fields),
-      ecomet_object:load_storage(OID,Type);
-    false ->
-      ecomet_object:delete_storage(OID,Type,fields)
+    true->ecomet_object:save_storage(OID,Type,fields,Fields);
+    false->ecomet_object:delete_storage(OID,Type,fields)
   end,
   dump_storages(Rest,OID);
-dump_storages([],_OID)->
-  ok.
+dump_storages([],_OID)->ok.
 
 delete_object(Map,OID)->
   % TODO. Each storage is to lookup for the database name by OID, we can optimize it
@@ -398,7 +370,7 @@ field_changes(Map,Project,OID,Name)->
         New->none;
         Old->{New,Old}
       end;
-    error->none
+    _->none
   end.
 
 %%=================================================================

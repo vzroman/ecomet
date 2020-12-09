@@ -602,10 +602,6 @@ helpers(_Config)->
     <<"disc">> => field_description(string,none,[simple],false,disc,none,false),
     <<"default">> => field_description(string,none,none,false,ramdisc,<<"default_string">>,false)
   },
-  % names
-  Names=ecomet_field:field_names(ObjectDescription),
-  []=lists:subtract([<<"simple">>,<<"list">>,<<"required">>,<<"disc">>,<<"default">>],Names),
-  []=lists:subtract(Names,[<<"simple">>,<<"list">>,<<"required">>,<<"disc">>,<<"default">>]),
   % type
   {ok,string}=ecomet_field:get_type(ObjectDescription,<<"simple">>),
   {ok,{list,string}}=ecomet_field:get_type(ObjectDescription,<<"list">>),
@@ -666,17 +662,17 @@ autoinc_list(Description, Count) ->
 increment1(_Config)->
   lists:foreach(fun(_)->
     erlang:unique_integer([positive])
-                end,lists:seq(1,1000000)).
+  end,lists:seq(1,1000000)).
 
 increment2(_Config)->
   lists:foreach(fun(_)->
     erlang:unique_integer([positive,monotonic])
-                end,lists:seq(1,1000000)).
+  end,lists:seq(1,1000000)).
 
 increment3(_Config)->
   lists:foreach(fun(_)->
     ecomet_schema:local_increment(test_key)
-                end,lists:seq(1,1000000)).
+  end,lists:seq(1,1000000)).
 
 field_description(Type, Subtype, Index, Required, Storage, Default, Inc) ->
   #{
