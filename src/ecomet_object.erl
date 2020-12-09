@@ -542,17 +542,17 @@ edit_rights(Object)->
 %   the IDHIGH the same way as we do with the NodeID: IDHIGH = IDHIGH bsl 8 + MountID.
 % The final IDHIGH is:
 %   <IDHIGH,NodeID:16,DB:8>
-new_id(FolderID,?ObjectID(_,PatternID))->
+new_id(FolderID, ?ObjectID(_, ObjectID))->
   NodeID = ecomet_node:get_unique_id(),
-  DB = ecomet_folder:get_db_id( FolderID ),
-  ID= ecomet_schema:local_increment({id,PatternID}),
+  DB = ecomet_folder:get_db_id(FolderID),
+  ID = ecomet_schema:local_increment({id, ObjectID}),
   % We can get id that is unique for this node. Unique id for entire system is too expensive.
   % To resolve the problem we mix NodeId (it's unique for entire system) into IDH.
   % IDH format - <IDH,NodeID:16>
   IDH=ID div ?BITSTRING_LENGTH,
   IDL=ID rem ?BITSTRING_LENGTH,
   IDH1 = ((IDH bsl 16) + NodeID) bsl 8 + DB,
-  { PatternID, IDH1 * ?BITSTRING_LENGTH + IDL }.
+  { ObjectID, IDH1 * ?BITSTRING_LENGTH + IDL }.
 
 get_db_id(?ObjectID(_,ID))->
   IDH=ID div ?BITSTRING_LENGTH,
