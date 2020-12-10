@@ -38,7 +38,7 @@
   get_children/1,get_children_recursive/1,
   get_fields/1,get_fields/2,
   is_empty/1,
-  index_storages/1
+  get_storage_types/1
 ]).
 
 %%=================================================================
@@ -171,9 +171,9 @@ is_empty(Pattern)->
   DBs=ecomet_db:get_databases(),
   0 =:= ecomet_query:system(DBs,[count],{<<".pattern">>,'=',OID}).
 
-index_storages(Pattern)->
-  #{index := Index} = get_map(Pattern),
-  Index.
+get_storage_types(Pattern)->
+  #{storage_types := Types} = get_map(Pattern),
+  Types.
 
 %%=================================================================
 %%	Schema API
@@ -202,7 +202,9 @@ append_field(Pattern,Field,Config)->
 
     % Update the map
     Map1 = Map#{Field => Config},
-    Map2 = Map1#{ index => get_indexed(Map1) },
+    Map2 = Map1#{
+      storage_types => update_storage_types(Map1)
+    },
 
     edit_map(Pattern,Map2),
 
@@ -227,7 +229,9 @@ remove_field(Pattern,Field)->
 
     % Update the map
     Map1 = maps:remove(Field,Map),
-    Map2 = Map1#{ index => get_indexed(Map1) },
+    Map2 = Map1#{
+      storage_types => update_storage_types(Map1)
+    },
 
     edit_map(Pattern,Map2),
 
@@ -351,16 +355,11 @@ inherit_fields(PatternID,ParentFields)->
    end || {Name, Parent} <- ordsets:from_list(maps:to_list(ParentFields)) ],
   ok.
 
-get_indexed(Map)->
+update_storage_types(Map)->
   Types=
     maps:fold(fun(Name,_Config, Acc)->
-        case ecomet_field:get_index(Map,Name) of
-          {ok, Index} when is_list(Index)->
-            {ok,Storage}=ecomet_field:get_storage(Map,Name),
-            Acc#{Storage=>true};
-          _->
-            Acc
-        end
+      {ok,Storage}=ecomet_field:get_storage(Map,Name),
+      Acc#{Storage=>true}
     end,#{}, get_fields(Map) ),
   maps:keys(Types).
 

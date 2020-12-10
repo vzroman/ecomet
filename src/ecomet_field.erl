@@ -30,7 +30,6 @@
   get_index/2,
   fields_storages/1,
   save_changes/4,
-  delete_object/2,
   is_required/2
 ]).
 
@@ -68,8 +67,7 @@
 -ifdef(TEST).
 -export([
   get_changes/3,
-  merge_storages/4,
-  dump_storages/2
+  merge_storages/4
 ]).
 -endif.
 
@@ -254,10 +252,8 @@ save_changes(Map,Project,Loaded,OID)->
   % 1. Group project by storages
   Changed=get_changes(maps:to_list(Project),Map,#{}),
   % 2. Merge existing values into changed storages
-  {Merged,ChangedFields}=merge_storages(maps:to_list(Changed),Loaded,OID,{#{},[]}),
-  % 3. Save storages
-  dump_storages(maps:to_list(Merged),OID),
-  ChangedFields.
+  {_Merged,_ChangedFields}=merge_storages(maps:to_list(Changed),Loaded,OID,{#{},[]}).
+
 
 % Build storage changes from project
 get_changes([{Name,Value}|Rest],Map,Storages)->
@@ -273,10 +269,8 @@ merge_storages([{Storage,Fields}|Rest],PreLoaded,OID,{Merged,Changes})->
       #{ Storage := none }-> #{};
       #{ Storage := StorageFields } -> StorageFields;
       _->
-        case ecomet_object:load_storage(OID,Storage) of
-          none->#{};
-          Loaded->Loaded
-        end
+        % Storage did not exists
+        #{}
     end,
   StorageChanges=
     maps:fold(fun(Field,Value,ChangesList)->
@@ -293,7 +287,7 @@ merge_storages([{Storage,Fields}|Rest],PreLoaded,OID,{Merged,Changes})->
       []->Merged;
       _->
         MergedFields=maps:merge(OldFields,Fields),
-        ClearedFields=maps:filter(fun(_,Value)-> Value/=none end,MergedFields),
+        ClearedFields=maps:filter(fun(_,Value)-> Value=/=none end,MergedFields),
         case {maps:size(OldFields),maps:size(ClearedFields)} of
           % Storage did not exist and nothing to save now
           {0,0}->Merged;
@@ -307,19 +301,6 @@ merge_storages([{Storage,Fields}|Rest],PreLoaded,OID,{Merged,Changes})->
   merge_storages(Rest,PreLoaded,OID,{StorageResult,StorageChanges++Changes});
 merge_storages([],_PreLoaded,_OID,Result)->Result.
 
-% Dump fields storages
-dump_storages([{Type,Fields}|Rest],OID)->
-  case maps:size(Fields)>0 of
-    true->ecomet_object:save_storage(OID,Type,fields,Fields);
-    false->ecomet_object:delete_storage(OID,Type,fields)
-  end,
-  dump_storages(Rest,OID);
-dump_storages([],_OID)->ok.
-
-delete_object(Map,OID)->
-  % TODO. Each storage is to lookup for the database name by OID, we can optimize it
-  [ ecomet_object:delete_storage(OID,Type,fields) || Type <- fields_storages(Map) ],
-  ok.
 
 % Check if field is required
 is_required(Description, FieldName) ->

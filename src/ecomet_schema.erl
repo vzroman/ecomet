@@ -708,7 +708,7 @@ init_default_users()->
             [ { Name, #{ edit => true, fields=> ecomet_field:from_schema(Config)} }
              || { Name, Config } <- [
                 {<<".name">>,#{ autoincrement => true } },
-                { <<".ts">> , #{ index=> [ datetime ] }}
+                { <<".ts">> , #{ index=> [ simple, datetime ] }}
             ]] ++ init_pattern_fields(?SESSION_SCHEMA)
         }},
         % SUBSCRIPTION

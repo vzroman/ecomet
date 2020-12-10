@@ -29,8 +29,6 @@
 %%=================================================================
 -export([
   load_storage/2,
-  delete_storage/3,
-  save_storage/4,
   commit/2,
   get_db_id/1,
   get_db_name/1,
@@ -117,7 +115,7 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields)->
       Fields2=ecomet_field:build_new(Map,Fields1),
       % Generate new ID for the object
       OID=new_id(FolderID,PatternID),
-      Object=#object{oid=OID,edit=true,map=Map},
+      Object=#object{ oid=OID, edit=true, map=Map, db=get_db_name(OID) },
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
         % Put empty storages to dict. Trick for no real lookups
@@ -305,67 +303,66 @@ check_rights(Read,Write)->
 % 2. If object is not locked, then it's dirty read. We can use cache, it may be as heavy as real lookup, but next dirty
 %		lookup (read next field value) will be fast
 load_storage(OID,Type)->
-  % Check transaction storage first. If object is locked it may there
-  case ecomet_transaction:dict_get({OID,Type,fields},undefined) of
+  % Check transaction storage first. If object is locked it may be there
+  case ecomet_transaction:dict_get({OID,Type},undefined) of
     % Storage not loaded yet
     undefined->
       % Check lock on the object, if no, then it is dirty operation and we can use cache to boost reading
-      UseCache=
+      { UseCache, DB }=
         case ecomet_transaction:dict_get({OID,object},none) of
           % Object can not be locked, if it is not contained in the dict
-          none->true;
+          none->{ true, get_db_name(OID) };
           % Check lock
-          #object{map=Map}->
+          #object{map=Map,db= DBName }->
             LockKey=get_lock_key(OID,Map),
             case ecomet_transaction:find_lock(LockKey) of
               % No lock, boost by cache
-              none->true;
+              none->{ true, DBName };
               % Strict reading
-              _->false
+              _->{ false, DBName }
             end
         end,
-      DB=get_db_name(OID),
       Storage=
-        case ecomet_backend:dirty_read(DB,?DATA,Type,{OID,fields},UseCache) of
+        case ecomet_backend:dirty_read(DB,?DATA,Type,OID,UseCache) of
           not_found->none;
           Loaded->Loaded
         end,
       % If object is locked (we do not use cache), then save storage to transaction dict
       if
         UseCache->ok;
-        true-> ecomet_transaction:dict_put([{{OID,Type,fields},Storage}])
+        true-> ecomet_transaction:dict_put(#{ {OID,Type} =>Storage })
       end,
-      Storage;
+      maps:get(fields,Storage);
     % Storage is already loaded
-    TStorage->
+    #{fields := TStorage}->
       TStorage
   end.
 
-% Save object storage
-save_storage(OID,Type,Key,Value)->
-  DB=get_db_name(OID),
-  ecomet_backend:write(DB,?DATA,Type,{OID,Key},Value).
-
-delete_storage(OID,Type,Key)->
-  DB=get_db_name(OID),
-  ecomet_backend:delete(DB,?DATA,Type,{OID,Key}).
+%%% Save object storage
+%%save_storage(OID,Type,Key,Value)->
+%%  DB=get_db_name(OID),
+%%  ecomet_backend:write(DB,?DATA,Type,{OID,Key},Value).
+%%
+%%delete_storage(OID,Type,Key)->
+%%  DB=get_db_name(OID),
+%%  ecomet_backend:delete(DB,?DATA,Type,{OID,Key}).
 
 % Save object changes to the storage
 commit(OID,Dict)->
   % Retrieve the object from the transaction dictionary
   Object=maps:get({OID,object},Dict),
-  Map=Object#object.map,
-  % Load backtags that are not loaded yet
-  BackTags=load_backtags(Object,Dict),
+
+  #object{ map=Map, db=DB }=Object,
+  % Load storage types that are not loaded yet
+  Storages=load_storage_types(Object,Dict),
+  BackTags = get_backtags(Storages),
   if
     Object#object.deleted->
       %----------Delete procedure--------------------------
-      % Purge object fields
-      ecomet_field:delete_object(Map,OID),
       % Purge object indexes
       {[],Tags}= ecomet_index:delete_object(OID,BackTags),
-      % Purge object backtags
-      delete_backtags(Object),
+      % Purge object storage
+      [ ok = ecomet_backend:delete(DB,?DATA,Type,OID) || Type <- maps:keys(Storages) ],
       % The log record
       #ecomet_log{
         oid=OID,
@@ -380,28 +377,26 @@ commit(OID,Dict)->
       % Step 1. Fields
       Fields = maps:get({OID,fields},Dict),
       % Get loaded fields grouped by storage types
-      LoadedFields=
-        lists:foldl(fun(Storage,Acc)->
-          case maps:find({OID,Storage,fields},Dict) of
-            {ok,StorageFields}->Acc#{Storage=>StorageFields};
-            error->Acc
-          end
-        end,#{},ecomet_field:fields_storages(Map)),
-      % Dump fields changes
-      ChangedFields=ecomet_field:save_changes(Map,Fields,LoadedFields,OID),
+      LoadedFields=get_fields(Storages),
+      % Get fields changes
+      {UpdatedFields,ChangedFields}=ecomet_field:save_changes(Map,Fields,LoadedFields,OID),
 
       % Step 2. Indexes
       % Update the object indexes and get changes
       {Add,Unchanged,Del,UpdatedBackTags}= ecomet_index:build_index(OID,Map,ChangedFields,BackTags),
-      % Update the backtags
-      save_backtags(maps:to_list(UpdatedBackTags),OID),
-      % TODO. We need to know fields types when exporting values.
-      % Is there a better solution?
-      TypedFields=
-        [ begin
-            {ok,Type}=ecomet_field:get_type(Map,Field),
-            { Field, {Type,Value} }
-          end || { Field, Value } <- ChangedFields ],
+
+      % Dump storage
+      FieldsStorage = [ { Type, #{ fields=>S } } || { Type, S } <-UpdatedFields , maps:size(S)>0 ],
+      TagStorage = [ { Type, #{ tags=>S } } || { Type, S } <-UpdatedBackTags , maps:size(S)>0 ],
+      StorageTypes =
+        lists:foldl(fun({T,S},Acc)->
+          case Acc of
+            #{T := SAcc }->Acc#{ T => maps:merge(SAcc,S) };
+            _->Acc#{T=>S}
+          end
+        end,#{},FieldsStorage ++ TagStorage),
+      [ ok = ecomet_backend:write(DB,?DATA,Type,OID,Storage) || {Type,Storage} <- maps:to_list(StorageTypes) ],
+
       % The log record
       #ecomet_log{
         oid=OID,
@@ -409,10 +404,15 @@ commit(OID,Dict)->
         addtags=Add,
         deltags=Del,
         tags=Unchanged,
-        fields=TypedFields
+        fields=ChangedFields
       }
   end.
 
+get_backtags(Storage)->
+  maps:from_list([ { Type, Tags } || { Type, #{ tags := Tags} } <- Storage ]).
+
+get_fields(Storage)->
+  maps:from_list([ { Type, Fields } || { Type, #{ fields := Fields} } <- Storage ]).
 %%=====================================================================
 %% Behaviour handlers
 %%=====================================================================
@@ -577,7 +577,7 @@ new_id(FolderID,?ObjectID(_,PatternID))->
 
 get_db_id(?ObjectID(_,ID))->
   IDH=ID div ?BITSTRING_LENGTH,
-  IDH rem 8.
+  IDH rem 1 bsl 8.
 
 get_db_name(OID)->
   ID = get_db_id(OID),
@@ -594,15 +594,15 @@ get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
   % Define the key
   DB = get_db_name(OID),
   Type=ecomet_pattern:get_storage(Map),
-  Key = ecomet_transaction:lock_key(DB,?DATA,Type,{OID,backtag}),
+  Key = ecomet_transaction:lock_key(DB,?DATA,Type,OID),
 
   % Set lock on main backtag storage
   case ecomet_transaction:lock(Key,Lock,Timeout) of
-    {ok,BackTag}->
+    {ok,Storage}->
       % Put object and loaded storage to dict
       ecomet_transaction:dict_put([
         {{OID,object},Object},
-        {{OID,Type,backtag},BackTag}
+        {{OID,Type},Storage}
       ]);
     { error, Error }->?ERROR(Error)
   end.
@@ -610,43 +610,43 @@ get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
 get_lock_key(OID,Map)->
   DB = get_db_name(OID),
   Type=ecomet_pattern:get_storage(Map),
-  ecomet_transaction:lock_key(DB,?DATA,Type,{OID,backtag}).
+  ecomet_transaction:lock_key(DB,?DATA,Type,OID).
 
 % Fast object open, only for system dirty read
 construct(OID)->
   PatternID=get_pattern_oid(OID),
   Map=ecomet_pattern:get_map(PatternID),
-  #object{oid=OID,edit=false,map=Map}.
+  DB = get_db_name(OID),
+  #object{oid=OID,edit=false,map=Map,db=DB}.
 
 put_empty_storages(OID,Map)->
-  BackTags= [{{OID,Storage,backtag},none} || Storage<-ecomet_pattern:index_storages(Map) ],
-  Fields = [{{OID,Storage,fields},none} || Storage<-ecomet_field:fields_storages(Map)],
-  ecomet_transaction:dict_put(BackTags ++ Fields).
+  StorageTypes = [{{OID,Storage},none} || Storage<-ecomet_pattern:get_storage_types(Map) ],
+  ecomet_transaction:dict_put(StorageTypes).
 
 % Backtag handlers for commit routine
-load_backtags(#object{oid=OID,map=Map},Dict)->
-  DB = get_db_name(OID),
+load_storage_types(#object{oid=OID,map=Map,db=DB},Dict)->
   List=
-    [ case maps:find({OID,Type,backtag},Dict) of
+    [ case maps:find({OID,Type},Dict) of
         {ok, none} -> { Type, #{} };
         {ok, Loaded} -> { Type, Loaded };
         error->
-          case ecomet_backend:dirty_read(DB,?DATA,Type,{OID,backtag}) of
+          case ecomet_backend:dirty_read(DB,?DATA,Type,OID) of
             not_found -> { Type, #{} };
             Loaded -> { Type, Loaded }
           end
-      end || Type <- ecomet_pattern:index_storages(Map) ],
+      end || Type <- ecomet_pattern:get_storage_types(Map) ],
   maps:from_list(List).
 
-save_backtags([{Storage,Tags}|Rest],OID)->
-  save_storage(OID,Storage,backtag,Tags),
-  save_backtags(Rest,OID);
-save_backtags([],_OID)->ok.
-
-delete_backtags(#object{oid=OID,map=Map})->
-  DB=get_db_name(OID),
-  [ ok = ecomet_backend:delete(DB,?DATA,Type,{OID,backtag}) || Type <- ecomet_pattern:index_storages(Map)],
-  ok.
+% TODO. Delete
+%%save_backtags([{Storage,Tags}|Rest],OID)->
+%%  save_storage(OID,Storage,backtag,Tags),
+%%  save_backtags(Rest,OID);
+%%save_backtags([],_OID)->ok.
+%%
+%%delete_backtags(#object{oid=OID,map=Map})->
+%%  DB=get_db_name(OID),
+%%  [ ok = ecomet_backend:delete(DB,?DATA,Type,{OID,backtag}) || Type <- ecomet_pattern:get_storage_types(Map)],
+%%  ok.
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet
 save(#object{oid=OID,map=Map}=Object,Fields,Handler)->
