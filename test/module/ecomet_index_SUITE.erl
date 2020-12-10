@@ -945,7 +945,6 @@ concurrent_build(Config)->
   OIDList=
     lists:foldl(fun(_,OIDs)->
       %io:format("create"),
-      %ID=ets:update_counter(index_concurrent,id,1),
       ID=erlang:unique_integer([positive,monotonic]),
       ID1 = ID rem (1 bsl 16),
       OID={10005,ID1},
