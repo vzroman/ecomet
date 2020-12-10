@@ -57,7 +57,7 @@ to_object(ID, Lock,Timeout)->
   case ecomet_object:is_object(ID) of
     true when Lock=:=none->
       ID;
-    true->
+    _->
       % The object is already opened, but we still may need to upgrade the lock
       ecomet_object:open(?OID(ID),Lock,Timeout)
   end.
