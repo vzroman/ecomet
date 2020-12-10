@@ -437,9 +437,22 @@ on_edit(Object)->
     none->ok;
     _->?ERROR(can_not_change_ts)
   end,
+  case ecomet:field_changes(Object,<<".name">>) of
+    none->ok;
+    {_New, Old}->
+      case is_system(Old) of
+        true->?ERROR(system_object);
+        _->ok
+      end
+  end,
   edit_rights(Object).
 
-on_delete(_Object)->ok.
+on_delete(Object)->
+  case is_system(Object) of
+    true->?ERROR(system_oject);
+    _->ok
+  end,
+  ok.
 
 check_storage_type(Object)->
   {ok,FolderID}=ecomet:read_field(Object,<<".folder">>),
@@ -523,6 +536,14 @@ edit_rights(Object)->
       });
     true -> ok
   end.
+
+is_system(<<".",_/binary>> = _Name)->
+  true;
+is_system(Name) when is_binary(Name)->
+  false;
+is_system(Object)->
+  {ok,Name}=ecomet:read_field(Object,<<".name">>),
+  is_system(Name).
 
 %%============================================================================
 %%	Internal helpers
