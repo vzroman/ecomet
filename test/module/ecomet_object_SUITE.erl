@@ -91,6 +91,7 @@ init_per_suite(Config)->
   end),
   FolderOID={2,1000},
   PatternOID={3,1000},
+
   % {name,type,subtype,index,required,storage,default,autoincrement}
   Object=#{
     <<".name">>=>#{ type=> string, subtype=>none, index=>[simple], required=>true, storage=>ramdisc, default=>none, autoincrement=>false},
@@ -261,6 +262,7 @@ new_id(_Config)->
   }),
   ct:pal("Folder1: ~p", [Folder1]),    %% FOLDER 1 Object   OID = {2,3}
   {?FOLDER_PATTERN,ID1} = ecomet_object:get_oid(Folder1),
+  IDL1 = ID1 rem ?BITSTRING_LENGTH,
 
 %% FOLDER 2
   Folder2 = ecomet:create_object(#{
@@ -272,7 +274,7 @@ new_id(_Config)->
   ct:pal("Folder2: ~p", [Folder2]),     %% FOLDER 1 Object   OID = {2,4}
   {?FOLDER_PATTERN,ID2} = ecomet_object:get_oid(Folder2),
   IDH2 = ID2 div ?BITSTRING_LENGTH,
-  6 = ID2 rem ?BITSTRING_LENGTH, %% It is the low id which is incremnt for local pattern
+  1 = ID2 rem ?BITSTRING_LENGTH - IDL1, %% It is the low id which is increment for local pattern
   0 = IDH2 rem (1 bsl 8),      %% to find the id of DB
   0 = ( IDH2 bsr 8 ) rem (1 bsl 16 ),   %% to find the id of Node
   IDHIGH2 = IDH2 bsr 24,
@@ -288,7 +290,7 @@ new_id(_Config)->
   {?FOLDER_PATTERN,ID3}=ecomet_object:new_id({?FOLDER_PATTERN,ID2},{?PATTERN_PATTERN,?FOLDER_PATTERN}),
   ct:pal("Folder3: ~p", [{?FOLDER_PATTERN,ID3}]),     %% FOLDER 3 Object   OID = {2,65541}
   IDH3 = ID3 div ?BITSTRING_LENGTH,
-  7 = ID3 rem ?BITSTRING_LENGTH,   %% It is the low id which is incremnt for local pattern
+  2 = ID3 rem ?BITSTRING_LENGTH - IDL1,   %% It is the low id which is incremnt for local pattern
 %%  ct:pal("IDD: ~p", [IDD]),
   1 = IDH3 rem (1 bsl 8),      %% to find the id of DB, as we've added a new db it is incremented by 1
   0 = ( IDH3 bsr 8 ) rem (1 bsl 16 ),   %% to find the id of Node
@@ -302,7 +304,7 @@ new_id(_Config)->
   {?FOLDER_PATTERN,ID4}=ecomet_object:new_id({?FOLDER_PATTERN,ID2},{?PATTERN_PATTERN,?FOLDER_PATTERN}),
   ct:pal("Folder4: ~p", [{?FOLDER_PATTERN,ID4}]),    %% FOLDER 4 which have to have a new node_id
   IDH4 = ID4 div ?BITSTRING_LENGTH,
-  8 = ID4 rem ?BITSTRING_LENGTH,   %% It is the low id which is incremnt for local pattern
+  3 = ID4 rem ?BITSTRING_LENGTH - IDL1,   %% It is the low id which is incremnt for local pattern
   1 = IDH4 rem (1 bsl 8),      %% to find the id of DB, as we've added a new db it is incremented by 1
   1 = ( IDH4 bsr 8 ) rem (1 bsl 16 ),   %% to find the id of Node
   IDHIGH4 = IDH4 bsr 24,
@@ -350,45 +352,44 @@ create(Config)->
   % Fields
   %---------------------------------------------
   % Ramdisc
-  RamDiscFields =ecomet_backend:dirty_read(DB,?DATA,ramdisc,{OID,fields}),
+  #{fields:=RamDiscFields} =ecomet_backend:dirty_read(DB,?DATA,ramdisc,OID),
   3=maps:size(RamDiscFields),
   <<"test_object1">>=maps:get(<<".name">>,RamDiscFields),
   FolderOID=maps:get(<<".folder">>,RamDiscFields),
   PatternOID=maps:get(<<".pattern">>,RamDiscFields),
   % Ram
-  RamFields=ecomet_backend:dirty_read(DB,?DATA,ram,{OID,fields}),
+  #{fields:=RamFields}=ecomet_backend:dirty_read(DB,?DATA,ram,OID),
   1=maps:size(RamFields),
   <<"ram_value">>=maps:get(<<"ram_field">>,RamFields),
   % Disc
-  DiscFields=ecomet_backend:dirty_read(DB,?DATA,disc,{OID,fields}),
+  #{fields:=DiscFields}=ecomet_backend:dirty_read(DB,?DATA,disc,OID),
   1=maps:size(DiscFields),
   <<"disc_value">>=maps:get(<<"disc_field">>,DiscFields),
   %---------------------------------------------
   % Backtags
   %---------------------------------------------
   % Ramdisc
-  RamDiscBacktags=ecomet_backend:dirty_read(DB,?DATA,ramdisc,{OID,backtag}),
+  #{tags:=RamDiscBacktags}=ecomet_backend:dirty_read(DB,?DATA,ramdisc,OID),
   3=maps:size(RamDiscBacktags),
   RamBackTagsName = maps:get(<<".name">>,RamDiscBacktags),
   RamBackTagsFolder = maps:get(<<".folder">>,RamDiscBacktags),
   maps:get(<<".pattern">>,RamDiscBacktags),
   ct:pal("RamBackTagsName: ~p,RamBackTagsFolder: ~p", [RamBackTagsName,RamBackTagsFolder]),
   % Ram
-  RamBacktags=ecomet_backend:dirty_read(DB,?DATA,ram,{OID,backtag}),
+  #{tags:=RamBacktags}=ecomet_backend:dirty_read(DB,?DATA,ram,OID),
   1=maps:size(RamBacktags),
   maps:get(<<"ram_field">>,RamBacktags),
   % Disc
-  DiscBacktags=ecomet_backend:dirty_read(DB,?DATA,disc,{OID,backtag}),
+  #{tags:=DiscBacktags}=ecomet_backend:dirty_read(DB,?DATA,disc,OID),
   1=maps:size(DiscBacktags),
   maps:get(<<"disc_field">>,DiscBacktags),
   %Cleaning
   ecomet_object:delete(Object),
-  not_found=ecomet_backend:dirty_read(DB,?DATA,ramdisc,{OID,fields}),
-  not_found=ecomet_backend:dirty_read(DB,?DATA,ram,{OID,fields}),
-  not_found=ecomet_backend:dirty_read(DB,?DATA,disc,{OID,fields}),
-  not_found=ecomet_backend:dirty_read(DB,?DATA,ramdisc,{OID,backtag}),
-  not_found=ecomet_backend:dirty_read(DB,?DATA,ram,{OID,backtag}),
-  not_found=ecomet_backend:dirty_read(DB,?DATA,disc,{OID,backtag}).
+  not_found=ecomet_backend:dirty_read(DB,?DATA,ramdisc,OID),
+  not_found=ecomet_backend:dirty_read(DB,?DATA,ram,OID),
+  not_found=ecomet_backend:dirty_read(DB,?DATA,disc,OID),
+
+  ok.
 
 construct(Config)->
   ecomet_user:on_init_state(),
@@ -429,6 +430,7 @@ dirty_open(Config)->
     <<"ram_field">>=><<"ram_value">>,
     <<"disc_field">>=><<"disc_value">>
   }),
+  ct:pal("CreatedObject ~p",[CreatedObject]),
 
   OID=ecomet_object:get_oid(CreatedObject),
   Object=ecomet_object:open(OID,none),
@@ -441,10 +443,11 @@ dirty_open(Config)->
   DB = ecomet_object:get_db_name(OID),
 
   % Check new value is saved
-  RamFields=ecomet_backend:dirty_read(DB,?DATA,ram,{OID,fields}),
+  #{fields:=RamFields}=ecomet_backend:dirty_read(DB,?DATA,ram,OID),
   1=maps:size(RamFields),
   <<"ram_value_new">>=maps:get(<<"ram_field">>,RamFields),
 
+  ct:pal("Folder ~p",[ecomet_object:read_field(CreatedObject,<<".folder">>)]),
   ecomet_object:delete(CreatedObject),
   ok.
 
@@ -507,7 +510,7 @@ read_lock(Config)->
 
 
   % Check new value is saved
-  RamFields=ecomet_backend:dirty_read(DB,?DATA,ram,{OID,fields}),
+  #{fields:=RamFields}=ecomet_backend:dirty_read(DB,?DATA,ram,OID),
   1=maps:size(RamFields),
   <<"ram_value_new">>=maps:get(<<"ram_field">>,RamFields),
 

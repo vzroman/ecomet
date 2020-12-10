@@ -252,7 +252,7 @@ save_changes(Map,Project,Loaded,OID)->
   % 1. Group project by storages
   Changed=get_changes(maps:to_list(Project),Map,#{}),
   % 2. Merge existing values into changed storages
-  {_Merged,_ChangedFields}=merge_storages(maps:to_list(Changed),Loaded,OID,{#{},[]}).
+  {_Merged,_ChangedFields}=merge_storages(maps:to_list(Changed),Loaded,OID,{Loaded,[]}).
 
 
 % Build storage changes from project
