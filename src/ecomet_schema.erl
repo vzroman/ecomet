@@ -134,12 +134,20 @@
   % No additional fields
 }).
 -define(SESSION_SCHEMA,#{
-  <<".name">>=>#{ type => string, autoincrement => true },
-  <<".ts">> =>#{ type => integer, index=> [simple,datetime] },
   <<"close">>=>#{ type => integer, index=> [simple,datetime] },
   <<"node">>=>#{ type => atom, index=> [simple] },
   <<"PID">>=>#{ type => term, index=> [simple] },
   <<"info">> =>#{ type => term }
+}).
+-define(SUBSCRIPTION_SCHEMA,#{
+  <<"PID">>=>#{ type => term, required => true, index=> [simple], storage => ?RAMLOCAL },
+  <<"session_PID">>=>#{ type => term, required => true, storage => ?RAMLOCAL },
+  <<"rights">>=>#{ type => list, subtype => link, required => true,index=> [simple], storage => ?RAMLOCAL },
+  <<"is_admin">>=>#{ type => bool, subtype => none, index=> [simple], storage => ?RAMLOCAL },
+  <<"reper_tags">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
+  <<"query_tags">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
+  <<"fields">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
+  <<"feedback">>=>#{ type => bool, subtype => none, index=> [simple], storage => ?RAMLOCAL }
 }).
 
 % Database indexing
@@ -671,12 +679,83 @@ init_storage_objects()->
 
 init_default_users()->
 
-  Tree = [
-
+  PatternsTree = [
+    { <<".patterns">>, #{
+      children=>[
+        % USER
+        { <<".user">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN},
+            <<"behaviour_module">>=>ecomet_user
+          },
+          children=>init_pattern_fields(?USER_SCHEMA)
+        }},
+        % USERGROUP
+        { <<".usergroup">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
+          }
+        }},
+        % SESSION
+        { <<".session">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
+          },
+          children=>
+            [ { Name, #{ edit => true, fields=> ecomet_field:from_schema(Config)} }
+             || { Name, Config } <- [
+                {<<".name">>,#{ autoincrement => true } },
+                { <<".ts">> , #{ index=> [ datetime ] }}
+            ]] ++ init_pattern_fields(?SESSION_SCHEMA)
+        }},
+        % SUBSCRIPTION
+        { <<".subscription">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
+          },
+          children=>
+          [ begin
+              { Name, #{ edit => true, fields=> ecomet_field:from_schema(#{ storage=>?RAMLOCAL })} }
+            end || Name <- maps:keys(?OBJECT_SCHEMA)]
+          ++ init_pattern_fields(?SUBSCRIPTION_SCHEMA)
+        }}
+      ]
+    }}
   ],
+  init_tree({?FOLDER_PATTERN,?ROOT_FOLDER}, PatternsTree),
 
-  init_tree({?FOLDER_PATTERN,?ROOT_FOLDER}, Tree),
-
+  % .administrators usergroup
+  init_tree({?FOLDER_PATTERN,?ROOT_FOLDER},[
+    { <<".usergroups">>, #{
+      fields=>#{ <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN} },
+      children=>[
+        { <<".administrators">>, #{
+          fields=>#{
+            <<".pattern">>=>?OID(<<"/root/.patterns/.usergroup">>)
+          }
+        }}
+      ]
+    }}
+  ]),
+  % system user
+  init_tree({?FOLDER_PATTERN,?ROOT_FOLDER},[
+    { <<".users">>, #{
+      fields=>#{ <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN} },
+      children=>[
+        { <<"system">>, #{
+          fields=>#{
+            <<".pattern">>=>?OID(<<"/root/.patterns/.user">>),
+            <<"usergroups">>=>[?OID(<<"/root/.usergroups/.administrators">>)],
+            <<"password">>=><<"111111">>
+          }
+        }}
+      ]
+    }}
+  ]),
   ok.
 
 table_exists(Table)->
@@ -710,11 +789,18 @@ new_node_id(_Other,Id)->
   Id + 1.
 
 init_tree(FolderID,Items)->
-  [ begin
+  [
+    begin
       ItemID=
         case ecomet_folder:find_object_system(FolderID,Name) of
           {ok,OID}->
-            % TODO. Edit flag
+            case Params of
+              #{ edit := true }->
+                Fields = maps:get(fields,Params),
+                Object = ecomet:open(OID,none),
+                ok = ecomet:edit_object(Object,Fields);
+              _->ok
+            end,
             OID;
           _->
             Fields = maps:get(fields,Params),
