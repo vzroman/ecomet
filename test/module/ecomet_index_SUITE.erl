@@ -790,9 +790,9 @@ delete_object(_Config)->
     },
   Fields1=ecomet_field:build_new(FieldsMap1,#{
     <<"field1">>=><<"value1">>,
-    <<"field2">>=><<"value2">>,
+    <<"field2">>=><<"value2 new">>,
     <<"field3">>=><<"value3">>,
-    <<"field4">>=><<"value4">>
+    <<"field4">>=><<"value4 new">>
   }),
   %% Returns:
   %%  #{<<"field1">>=><<"value1">>,
@@ -814,12 +814,12 @@ delete_object(_Config)->
     },
   Fields2=ecomet_field:build_new(FieldsMap2,#{
     <<"field1">>=><<"value1">>,
-    <<"field2">>=><<"value2 new">>,
+    <<"field2">>=><<"value2">>,
     <<"field3">>=><<"value3">>,
-    <<"field4">>=><<"value4 new">>
+    <<"field4">>=><<"value4">>
   }),
   OID2={10000,3},
-  Db2 = ecomet_object:get_db_name(OID2),
+  DB = ecomet_object:get_db_name(OID2),
 
   Tags2=ecomet_index:build_back_tags(maps:to_list(Fields2),FieldsMap2),
 
@@ -830,10 +830,10 @@ delete_object(_Config)->
 
   % Delete OID1
   ecomet:transaction(fun()-> ecomet_index:delete_object(OID1,Tags1) end),
-  check_tag(Value1Tag,Db2,[ram],[OID2]),
-  check_tag(Value2Tag,Db2,[ram],[OID2]),
-  check_tag(Value3Tag,Db2,[ramdisc],[OID2]),
-  check_tag(Value4Tag,Db2,[disc],[OID2]),
+  check_tag(Value1Tag,DB,[ram],[OID2]),
+  check_tag(Value2Tag,DB,[ram],[OID2]),
+  check_tag(Value3Tag,DB,[ramdisc],[OID2]),
+  check_tag(Value4Tag,DB,[disc],[OID2]),
 
 
   % Delete OID2
@@ -947,7 +947,8 @@ concurrent_build(Config)->
       %io:format("create"),
       %ID=ets:update_counter(index_concurrent,id,1),
       ID=erlang:unique_integer([positive,monotonic]),
-      OID={10000,ID},
+      ID1 = ID rem (1 bsl 16),
+      OID={10005,ID1},
       Fields=ecomet_field:build_new(FieldsMap,#{
         <<"field1">>=><<"value1">>,
         <<"field2">>=>[<<"value2">>,<<"unique_value_",UInt/binary>>],
