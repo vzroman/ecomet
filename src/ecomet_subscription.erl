@@ -62,3 +62,25 @@ notify(_Log)->
 %%		notify_clusters(ClusterID,Log,Query)
 %%	end).
   dummy.
+
+add()->
+
+%%  % Fields
+%%  ReadMap=read_map(Fields),
+%%  StorageFields=
+%%    maps:fold(fun(_,#field{value = #get{args = Args}},Acc)->
+%%      ordsets:union(Args,Acc)
+%%  end,[],Read),
+%%
+%%  RowFieldsFunList=
+%%    [field_read_fun(maps:get(ID,Read))||ID<-ordsets:from_list(maps:keys(Read))],
+%%
+%%
+%%  % Result set
+%%  {Built,Direct}=build_conditions(Patterned,element(3,Patterned)),
+%%  Normal=normalize(Built),
+
+
+
+
+  ok.
