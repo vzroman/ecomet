@@ -399,18 +399,8 @@ object_edit(_Config)->
     disc=>none
   },
   object_edit(OID,ObjectDescription,Preloaded),
-  %-----------------------------------------------------------
-  % Scenario 2. Storages is dumped, nothing is preloaded
-  %-----------------------------------------------------------
-  {ok, _} = ecomet_transaction:internal(
-    fun() ->
-      Pre = maps:to_list(maps:remove(disc,Preloaded)),
-      ecomet_field:dump_storages(Pre, OID)
-    end
-  ),
-  object_edit(OID,ObjectDescription,#{}),
-  % Cleaning
-  {ok, _} = ecomet_transaction:internal(fun()->ecomet_field:delete_object(ObjectDescription,OID) end).
+
+  ok.
 
 
 object_edit(OID,ObjectDescription,Preloaded)->
@@ -500,40 +490,47 @@ dump_storages(_Config)->
   Changes=ecomet_field:get_changes(maps:to_list(Fields),ObjectDescription,#{}),
   {Storages,_}=ecomet_field:merge_storages(maps:to_list(Changes),#{},OID,{#{},[]}),
   2=maps:size(Storages),
-  {ok, _} = ecomet_transaction:internal(fun()->ecomet_field:dump_storages(maps:to_list(Storages),OID) end),
-  % Ram
-  DB = ecomet_object:get_db_name(OID),
-  ct:pal("DB Name = ~p", [DB]),
-  Ram=ecomet_backend:dirty_read(DB,data,ram,{OID,fields},false),
-  io:format("Ram: ~p",[Ram]),
-  1=maps:size(Ram),
-  <<"ram_value1">> =maps:get(<<"ram_field1">>,Ram),
-  % Ramdisc, no fields
-  not_found=ecomet_backend:dirty_read(DB,data,ramdisc,{OID,fields},false),
-  % Disc
-  Disc=ecomet_backend:dirty_read(DB,data,disc,{OID,fields},false),
-  2=maps:size(Disc),
-  <<"disc_value1">> =maps:get(<<"disc_field1">>,Disc),
-  <<"disc_value2">> =maps:get(<<"disc_field2">>,Disc),
 
-  % lookup_value checks
-  <<"ram_value1">> =ecomet_field:lookup_storage(ram,OID,<<"ram_field1">>),
-  none=ecomet_field:lookup_storage(ram,OID,<<"ram_field2">>),
-  none=ecomet_field:lookup_storage(ramdisc,OID,<<"ramdisc_field">>),
-  <<"disc_value1">> =ecomet_field:lookup_storage(disc,OID,<<"disc_field1">>),
-
-  % get_value checks
-  {ok,<<"ram_value1">>}=ecomet_field:get_value(ObjectDescription,OID,<<"ram_field1">>),
-  {ok,none}=ecomet_field:get_value(ObjectDescription,OID,<<"ramdisc_field">>),
-  {ok,none}=ecomet_field:get_value(ObjectDescription,OID,<<"ram_field2">>),
-
-  {error,undefined_field}=ecomet_field:get_value(ObjectDescription,OID,<<"invalid_field">>),
-
-  % Delete object
-  {ok, _} = ecomet_transaction:internal(fun()->ecomet_field:delete_object(ObjectDescription,OID) end),
-  not_found=ecomet_backend:dirty_read(DB,data,ram,{OID,fields},false),
-  not_found=ecomet_backend:dirty_read(DB,data,ramdisc,{OID,fields},false),
-  not_found=ecomet_backend:dirty_read(DB,data,disc,{OID,fields},false).
+  %-----------------------------------------------------------------------------------------------------
+  % The dumping is not any more performed by the ecomet_field module,
+  % it is totally under ecomet_object control now.
+  % The following is a legacy code. It is going to be purged soon
+  %-----------------------------------------------------------------------------------------------------
+%%  {ok, _} = ecomet_transaction:internal(fun()->ecomet_field:dump_storages(maps:to_list(Storages),OID) end),
+%%  % Ram
+%%  DB = ecomet_object:get_db_name(OID),
+%%  ct:pal("DB Name = ~p", [DB]),
+%%  Ram=ecomet_backend:dirty_read(DB,data,ram,{OID,fields},false),
+%%  io:format("Ram: ~p",[Ram]),
+%%  1=maps:size(Ram),
+%%  <<"ram_value1">> =maps:get(<<"ram_field1">>,Ram),
+%%  % Ramdisc, no fields
+%%  not_found=ecomet_backend:dirty_read(DB,data,ramdisc,{OID,fields},false),
+%%  % Disc
+%%  Disc=ecomet_backend:dirty_read(DB,data,disc,{OID,fields},false),
+%%  2=maps:size(Disc),
+%%  <<"disc_value1">> =maps:get(<<"disc_field1">>,Disc),
+%%  <<"disc_value2">> =maps:get(<<"disc_field2">>,Disc),
+%%
+%%  % lookup_value checks
+%%  <<"ram_value1">> =ecomet_field:lookup_storage(ram,OID,<<"ram_field1">>),
+%%  none=ecomet_field:lookup_storage(ram,OID,<<"ram_field2">>),
+%%  none=ecomet_field:lookup_storage(ramdisc,OID,<<"ramdisc_field">>),
+%%  <<"disc_value1">> =ecomet_field:lookup_storage(disc,OID,<<"disc_field1">>),
+%%
+%%  % get_value checks
+%%  {ok,<<"ram_value1">>}=ecomet_field:get_value(ObjectDescription,OID,<<"ram_field1">>),
+%%  {ok,none}=ecomet_field:get_value(ObjectDescription,OID,<<"ramdisc_field">>),
+%%  {ok,none}=ecomet_field:get_value(ObjectDescription,OID,<<"ram_field2">>),
+%%
+%%  {error,undefined_field}=ecomet_field:get_value(ObjectDescription,OID,<<"invalid_field">>),
+%%
+%%  % Delete object
+%%  {ok, _} = ecomet_transaction:internal(fun()->ecomet_field:delete_object(ObjectDescription,OID) end),
+%%  not_found=ecomet_backend:dirty_read(DB,data,ram,{OID,fields},false),
+%%  not_found=ecomet_backend:dirty_read(DB,data,ramdisc,{OID,fields},false),
+%%  not_found=ecomet_backend:dirty_read(DB,data,disc,{OID,fields},false).
+  ok.
 
 
 %%--------------------------------------------------------------
@@ -578,17 +575,8 @@ merge(_Config)->
     required_field,
     ecomet_field:merge(ObjectDescription, Fields, #{<<"ram_required">> => none})
   ),
-  % Save object
-  OID={<<"sys">>,10000},
-  ecomet_transaction:internal(fun()->ecomet_field:save_changes(ObjectDescription,Merged,#{},OID) end),
 
-  % Check values
-  {ok,<<"ram_value_new">>}=ecomet_field:get_value(ObjectDescription,OID,<<"ram_field">>),
-  {ok,<<"required_value_new">>}=ecomet_field:get_value(ObjectDescription,OID,<<"ram_required">>),
-  {ok,<<"ramdisc_value">>}=ecomet_field:get_value(ObjectDescription,OID,<<"ramdisc_field">>),
-  {ok,<<"disc_value1">>}=ecomet_field:get_value(ObjectDescription,OID,<<"disc_field1">>),
-
-  ecomet_transaction:internal(fun()->ecomet_field:delete_object(ObjectDescription,OID) end).
+  ok.
 
 %%--------------------------------------------------------------
 %%  Helper functions
