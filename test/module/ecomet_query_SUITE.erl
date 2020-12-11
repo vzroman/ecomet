@@ -75,14 +75,22 @@
   set/1
 ]).
 
+%% parse
+-export([
+  parse_get/1,
+  parse_set/1,
+  parse_insert/1,
+  parse_delete/1
+]).
 
 all()->
   [
-    %{group,optimized_seacrh},
-    %{group,get_util},
-    %{group,get_util_grouping},
-    %{group,search},
-    set
+    {group,optimized_seacrh},
+    {group,get_util},
+    {group,get_util_grouping},
+    {group,search},
+    set,
+    {group, parse}
   ].
 
 groups()->
@@ -126,6 +134,15 @@ groups()->
         grouping_sorting_page,
         aggregate,
         query_get
+      ]
+    },
+    {parse,
+      [parallel],
+      [
+        parse_get,
+        parse_set,
+        parse_insert,
+        parse_delete
       ]
     }
   ].
@@ -2037,3 +2054,107 @@ set(_Config)->
   % Return
   Count=ecomet_query:set([root],#{<<"integer">> => {fun([V])->V-5 end,[<<"integer">>]}},{<<"string1">>,'=',<<"value1">>}),
   {_,[SumBefore]}=ecomet_query:get([root],[{sum,<<"integer">>}],{<<"string1">>,'=',<<"value1">>}).
+
+parse_get(_Config) ->
+  TestSpecs = [
+    {
+      "get foo AS 'alias' where AND ( buz :> 123 )",
+      {get, [{<<"alias">>, <<"foo">>}], {'AND', [{<<"buz">>, ':>', 123}]}, []}
+    },
+    {
+      "get foo1, foo2 where OR ( buz :LIKE 'f', bar = -42 )",
+      {get, [<<"foo1">>, <<"foo2">>], {'OR', [{<<"buz">>, ':LIKE', <<"f">>}, {<<"bar">>, '=', -42}]}, []}
+    },
+    {
+      "get foo where ANDNOT (buz := 45.5, bar :< 4) order by foo3 DESC",
+      {get, [<<"foo">>], {'ANDNOT', {<<"buz">>, ':=', 45.5},{<<"bar">>, ':<', 4}}, [{order, [{<<"foo3">>, 'DESC'}]}]}
+    },
+    {
+      "get foo where AND (buz := 1) page 5:10",
+      {get, [<<"foo">>], {'AND', [{<<"buz">>, ':=', 1}]}, [{page, {5, 10}}]}
+    },
+    {
+      "get foo where AND (bar :< 4) page 5:10 lock read lock write",
+      {get, [<<"foo">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{page, {5, 10}},{lock, read},{lock, write}]}
+    },
+    {
+      "get foo1 where AND (bar :< 4) group by foo2, buz2 order by foo3, buz3 DESC",
+      {get, [<<"foo1">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{group, [<<"foo2">>, <<"buz2">>]}, {order, [{<<"foo3">>, 'ASC'}, {<<"buz3">>,'DESC'}]}]}
+    },
+    {
+      "get foo1 where AND (bar :< 4) group by 1 order by 2 DESC",
+      {get, [<<"foo1">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{group, [1]},{order, [{2, 'DESC'}]}]}
+    },
+    {
+      "get $concat(foo), $string(buz) AS 'fun' where AND (bar :< 4)",
+      {get,[{fun ecomet_query:concat/1, [<<"foo">>]}, {<<"fun">>, {fun ecomet_query:string/1, [<<"buz">>]}}], {'AND', [{<<"bar">>, ':<', 4}]}, []}
+    }
+  ],
+  lists:foreach(
+    fun({Input, ExpOutput}) ->
+      ?assertEqual([ExpOutput], ecomet_query:parse(Input))
+    end,
+    TestSpecs
+  ),
+  ok.
+
+parse_set(_Config) ->
+  TestSpecs = [
+    {
+      "set foo=$hello where AND (bar :< 1) lock write",
+      {set, [{<<"foo">>, hello}], {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}
+    },
+    {
+      "set foo=$concat(buz) where OR (bar :> 1) lock read",
+      {set,[{<<"foo">>,{fun ecomet_query:concat/1,[<<"buz">>]}}], {'OR',[{<<"bar">>,':>',1}]}, [{lock,read}]}
+    },
+    {
+      "set foo1=123, foo2=$string(buz) where AND (bar :LIKE '1')",
+      {set, [{<<"foo1">>, 123}, {<<"foo2">>, {fun ecomet_query:string/1, [<<"buz">>]}}], {'AND', [{<<"bar">>, ':LIKE', <<"1">>}]}, []}
+    }
+  ],
+  lists:foreach(
+    fun({Input, ExpOutput}) ->
+      ?assertEqual([ExpOutput], ecomet_query:parse(Input))
+    end,
+    TestSpecs
+  ),
+  ok.
+
+parse_insert(_Config) ->
+  TestSpecs = [
+    {
+      "insert foo1=123, foo2=$string(buz)",
+      {insert, [{<<"foo1">>, 123}, {<<"foo2">>, {fun ecomet_query:string/1, [<<"buz">>]}}]}
+    }
+  ],
+  lists:foreach(
+    fun({Input, ExpOutput}) ->
+      ?assertEqual([ExpOutput], ecomet_query:parse(Input))
+    end,
+    TestSpecs
+  ),
+  ok.
+
+parse_delete(_Config) ->
+  TestSpecs = [
+    {
+      "delete where AND (bar :< 1) lock write",
+      {delete, {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}
+    },
+    {
+      "delete where OR (bar :> 1.0) lock read",
+      {delete, {'OR', [{<<"bar">>, ':>', 1.0}]}, [{lock, read}]}
+    },
+    {
+      "delete where ANDNOT (bar :LIKE '1', buz := $foo)",
+      {delete, {'ANDNOT', {<<"bar">>, ':LIKE', <<"1">>}, {<<"buz">>, ':=', foo}}, []}
+    }
+  ],
+  lists:foreach(
+    fun({Input, ExpOutput}) ->
+      ?assertEqual([ExpOutput], ecomet_query:parse(Input))
+    end,
+    TestSpecs
+  ),
+  ok.
