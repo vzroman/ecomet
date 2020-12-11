@@ -78,10 +78,10 @@
 
 all()->
   [
-    {group,optimized_seacrh},
-    {group,get_util},
-    {group,get_util_grouping},
-    {group,search},
+    %{group,optimized_seacrh},
+    %{group,get_util},
+    %{group,get_util_grouping},
+    %{group,search},
     set
   ].
 
@@ -1694,44 +1694,44 @@ grouping_sorting_page(Config)->
   LocalResult1=Map1(RS),
   [
     {<<"value0_value0">>,[
-      {PatternID1,[{_,_,_}]},
-      {PatternID2,[{_,_,_}]}
+      {PatternID1,[{_,_}]},
+      {PatternID2,[{_,_}]}
     ]},
     {<<"value1_value0">>,[
-      {PatternID1,[{_,_,_}]},
-      {PatternID2,[{_,_,_}]}
+      {PatternID1,[{_,_}]},
+      {PatternID2,[{_,_}]}
     ]},
     {<<"value2_value0">>,[
-      {PatternID1,[{_,_,_}]},
-      {PatternID2,[{_,_,_}]}
+      {PatternID1,[{_,_}]},
+      {PatternID2,[{_,_}]}
     ]},
     {<<"value3_value0">>,[
-      {PatternID1,[{_,_,_}]},
-      {PatternID2,[{_,_,_}]}
+      {PatternID1,[{_,_}]},
+      {PatternID2,[{_,_}]}
     ]},
     {<<"value4_value0">>,[
-      {PatternID1,[{_,_,_}]},
-      {PatternID2,[{_,_,_}]}
+      {PatternID1,[{_,_}]},
+      {PatternID2,[{_,_}]}
     ]},
     {<<"value5_value1">>,[
-      {PatternID1,[{_,_,_}]},
-      {PatternID2,[{_,_,_}]}
+      {PatternID1,[{_,_}]},
+      {PatternID2,[{_,_}]}
     ]},
     {<<"value6_value1">>,[
-      {PatternID1,[{_,_,_}]},
-      {PatternID2,[{_,_,_}]}
+      {PatternID1,[{_,_}]},
+      {PatternID2,[{_,_}]}
     ]},
     {<<"value7_value1">>,[
-      {PatternID1,[{_,_,_}]},
-      {PatternID2,[{_,_,_}]}
+      {PatternID1,[{_,_}]},
+      {PatternID2,[{_,_}]}
     ]},
     {<<"value8_value1">>,[
-      {PatternID1,[{_,_,_}]},
-      {PatternID2,[{_,_,_}]}
+      {PatternID1,[{_,_}]},
+      {PatternID2,[{_,_}]}
     ]},
     {<<"value9_value1">>,[
-      {PatternID1,[{_,_,_}]},
-      {PatternID2,[{_,_,_}]}
+      {PatternID1,[{_,_}]},
+      {PatternID2,[{_,_}]}
     ]}
   ]=LocalResult1,
 
@@ -2021,10 +2021,10 @@ set(_Config)->
   {_,[Count,SumBefore]}=ecomet_query:get([root],[count,{sum,<<"integer">>}],{<<"string1">>,'=',<<"value1">>}),
 
   % Update
-  SetFields=[
-    {<<"atom">>,test_set_value},
-    {<<"integer">>,{fun([V])->V+5 end,[<<"integer">>]}}
-  ],
+  SetFields=#{
+    <<"atom">> => test_set_value,
+    <<"integer">> => {fun([V])->V+5 end,[<<"integer">>]}
+  },
   Count=ecomet_query:set([root],SetFields,{<<"string1">>,'=',<<"value1">>}),
 
   % Check after update
@@ -2035,5 +2035,5 @@ set(_Config)->
   [test_set_value]=ordsets:union(Rows),
 
   % Return
-  Count=ecomet_query:set([root],[{<<"integer">>,{fun([V])->V-5 end,[<<"integer">>]}}],{<<"string1">>,'=',<<"value1">>}),
+  Count=ecomet_query:set([root],#{<<"integer">> => {fun([V])->V-5 end,[<<"integer">>]}},{<<"string1">>,'=',<<"value1">>}),
   {_,[SumBefore]}=ecomet_query:get([root],[{sum,<<"integer">>}],{<<"string1">>,'=',<<"value1">>}).

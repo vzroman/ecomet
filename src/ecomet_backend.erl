@@ -42,7 +42,7 @@
   delete/4,delete/5,dirty_delete/4
 ]).
 
--define(NAME(N,S,T),list_to_atom("ecomet_"++atom_to_list(N)++"_"++atom_to_list(S)++"_"++atom_to_list(T))).
+-define(NAME(N,S,T), list_to_atom("ecomet_"++atom_to_list(N)++"_"++atom_to_list(S)++"_"++atom_to_list(T))).
 
 -define(DB,[
   { ?RAMLOCAL, #{ type => ?RAM, local => true } },
@@ -103,8 +103,9 @@ read(DB,Storage,Type,Key)->
 read(DB,Storage,Type,Key,Lock)->
   dlss:read(?NAME(DB,Storage,Type), Key, Lock).
 
-dirty_read(DB,Storage,Type,Key)->
-  dlss:dirty_read( ?NAME(DB,Storage,Type), Key ).
+dirty_read(DB,Storage,Type,Key) ->
+  dlss:dirty_read(?NAME(DB,Storage,Type), Key ).
+
 dirty_read(DB,Storage,Type,Key,_Cache)->
   % TODO. Implement the cache
   dirty_read(DB,Storage,Type,Key).

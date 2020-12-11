@@ -69,8 +69,8 @@
 -ifdef(TEST).
 
 -export([
-  register_type/2,
-  object_schema/0
+  object_schema/0,
+  register_type/2
 ]).
 
 -endif.
