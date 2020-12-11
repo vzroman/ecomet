@@ -18,6 +18,16 @@
 -module(ecomet).
 
 %%=================================================================
+%%	Authentication
+%%=================================================================
+-export([
+  login/2, login/3,
+  logout/0,
+  get_user/0,
+  is_admin/0
+]).
+
+%%=================================================================
 %%	Object-level CRUD
 %%=================================================================
 -export([
@@ -52,6 +62,24 @@
   path2oid/1,
   is_object/1
 ]).
+
+%%=================================================================
+%%	Authentication
+%%=================================================================
+login(User,Password)->
+  ecomet_user:login(User,Password).
+
+login(User,Password,Info)->
+  ecomet_user:login(User,Password,Info).
+
+logout()->
+  ecomet_user:logout().
+
+get_user()->
+  ecomet_user:get_user().
+
+is_admin()->
+  ecomet_user:is_admin().
 
 %%=================================================================
 %%	Object-level CRUD

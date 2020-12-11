@@ -325,13 +325,11 @@ compile_map_reduce(get,Fields,Params)->
 
 compile_map_reduce(set,Fields,Params)->
   Updates=
-    lists:map(fun({Field,Value})->
-      case Value of
-        {Fun,ArgList} when is_function(Fun,1) and is_list(ArgList)->
-          {Field,read_fun(Value)};
-        _->{Field,Value}
-      end
-    end,Fields),
+    [case Value of
+       {Fun,ArgList} when is_function(Fun,1) and is_list(ArgList)->
+         {Field,read_fun(Value)};
+       _->{Field,Value}
+     end || {Field,Value} <- maps:to_list(Fields) ],
   % Fun to read object fields from storage, default lock is none (check rights is performed)
   ReadUp=read_up(proplists:get_value(lock,Params,none)),
   ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
@@ -345,7 +343,7 @@ compile_map_reduce(set,Fields,Params)->
               #get{value = Fun}->Fun(ObjectMap);
               _->Value
             end}||{Name,Value}<-Updates],
-        ecomet_object:edit(maps:get(object,ObjectMap),NewValues),
+        ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues)),
         Acc+1
       end,0,RS)
     end,
