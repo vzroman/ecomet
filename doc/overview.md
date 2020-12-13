@@ -54,9 +54,8 @@ undefined
 2> FS = #{type => string, subtype => none, index => none, required => false, storage => ram, default => none, autoincrement => false}.  #{autoincrement => false,default => none,index => none,
   required => false,storage => ram,subtype => none,
   type => string}
-> % add new field <<"field">> with field type spec to object pattern {8, 1001}
-3> ecomet:transaction(fun() -> ecomet_pattern:append_field({8, 1001},<<"field">>, FS) end).
-{ok,ok}                
+> % low level API for pattern creation (pattern OID should be {3, X})
+3> ecomet_schema:register_type({3, 42}, Obj#{<<"str">> => FS}).             
 ```
 Edit pattern and update all affected objects - TBD 
 
@@ -64,10 +63,10 @@ Edit pattern and update all affected objects - TBD
 
 ```erlang
 6> % create new DB object based on existing pattern
-6> f(NewObj), NewObj = #{<<".name">> => <<"testName">>, <<".folder">> => {2, 999}, <<".pattern">> => {8, 1001}, <<"field">> => <<"value1">>}.
+6> f(NewObj), NewObj = #{<<".name">> => <<"testName">>, <<".folder">> => {2, 999}, <<".pattern">> => {3, 42}, <<"field">> => <<"value1">>}.
 #{<<".folder">> => {2,999},
   <<".name">> => <<"testName">>,
-  <<".pattern">> => {8,1001},
+  <<".pattern">> => {4,42},
   <<"field">> => <<"value1">>}
 7> % create new ecomet object
 7> EcometObj = ecomet:create_object(NewObj).
@@ -97,4 +96,62 @@ ok
 Iterations over objects in single folder - TBD
 
 # Basic queries
-TBD 
+
+```erlang
+% low level API
+1> Results = ecomet_query:get([root], [<<".name">>, <<".pattern">>, <<"string1">>], {<<"string1">>,'=',<<"value1">>}).
+{[<<".name">>,<<".pattern">>,<<"string1">>],
+          [[<<"test1">>,{3,1001},<<"value1">>],
+           [<<"test101">>,{3,1001},<<"value1">>],
+           [<<"test201">>,{3,1001},<<"value1">>],
+           [<<"test301">>,{3,1001},<<"value1">>],
+           [<<"test401">>,{3,1001},<<"value1">>],
+           [<<"test501">>,{3,1001},<<"value1">>],
+           [<<"test601">>,{3,1001},<<"value1">>],
+           [<<"test701">>,{3,1001},<<"value1">>],
+           [<<"test801">>,{3,1001},<<"value1">>],
+           [<<"test901">>,{3,1001},<<"value1">>],
+           [<<"test1">>,{3,1002},<<"value1">>],
+           [<<"test101">>,{3,1002},<<"value1">>],
+           [<<"test201">>,{3,1002},<<"value1">>],
+           [<<"test301">>,{3,1002},<<"value1">>],
+           [<<"test401">>,{3,1002},<<"value1">>],
+           [<<"test501">>,{3,1002},<<"value1">>],
+           [<<"test601">>,{3,1002},<<"value1">>],
+           [<<"test701">>,{3,1002},<<"value1">>],
+           [<<"test801">>,{3,1002},<<"value1">>],
+           [<<"test901">>,{3,1002},<<"value1">>]]}
+% JSON adapter is high level API
+2> ecomet_json:encode(Results).
+#{
+  <<"field_names">> => [<<".name">>,<<".pattern">>,<<"string1">>],
+  <<"results">> => [
+    #{
+      <<".name">> => <<"test1">>,
+      <<"test">> => <<"{3,1001}">>,
+      <<"string1">> => <<"value1">>
+    },
+    ...
+    #{
+      <<".name">> => <<"test901">>,
+      <<"test">> => <<"{3,1002}">>,
+      <<"string1">> => <<"value1">>
+    }
+  ]
+}
+```
+
+## Datatype conversion
+
+| ecomet types       | Json Types     | Notes     |
+| :------------- | :----------: | -----------: |
+| Erlang binary e.g. <<123, 54>> | "ezY=" | base64 encoded JSON string |
+| Erlang string e.g. "123" | "123" | JSON string |
+| Erlang atom e.g. '@deleted' | "'@deleted'" | stringified JSON string |
+| Erlang special atoms e.g. `true` or `false` or `null` | `true` or `false` or `null` | JSON primitives |
+| Erlang numeric e.g. -1, 0.4 | -1, 0.4 | Just Json numeric |
+| Erlang map of anything e.g. #{1 => <<"123">>, atom => "123"}| {1: "MTIz", "atom": "123"} | JSON object with recursive application of rules above |
+| Erlang tuple e.g. {1, "hello", atom} | "{1, \"hello\", atom}" | stringified JSON string |
+| Erlang list e.g. [1, "hello", atom] | "{1, \"hello\", atom}" | stringified JSON string |
+
+ 
