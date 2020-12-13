@@ -24,7 +24,7 @@
 -export([
   parse_dt/1,
   dt_to_string/1,dt_to_string/2,
-  log_ts/0,
+  ts/0,log_ts/0,
   to_object/1,to_object/2,to_object/3,to_object_system/1,
   to_oid/1,
   pipe/2,
@@ -33,7 +33,14 @@
 ]).
 
 dt_to_string(DT)->
-  dt_to_string(DT,millisecond).
+  DT1 =
+    if
+      DT> 33164590891940 -> % 3020-12-11T10:21:31.940Z
+        % The DT might be in nano_second
+        DT div 1000000 ;
+      true -> DT
+    end,
+  dt_to_string(DT1,millisecond).
 dt_to_string(DT,Unit)->
   unicode:characters_to_binary(calendar:system_time_to_rfc3339(DT,[{unit,Unit},{offset,"Z"}])).
 
@@ -43,6 +50,8 @@ parse_dt(DT) when is_binary(DT)->
 parse_dt(DT) when is_list(DT)->
   calendar:rfc3339_to_system_time(DT,[{unit,millisecond}]).
 
+ts()->
+  erlang:system_time(millisecond).
 log_ts()->
   erlang:system_time(nano_seconds).
 

@@ -391,6 +391,8 @@ init([])->
 
   ok = init_default_users(),
 
+  ok = ecomet_session:on_start_node(node()),
+
   Cycle=?ENV(schema_server_cycle,?DEFAULT_SCHEMA_CYCLE),
 
   {ok,#state{cycle = Cycle}}.
@@ -780,7 +782,7 @@ init_default_users()->
           fields=>#{
             <<".pattern">>=>?OID(<<"/root/.patterns/.user">>),
             <<"usergroups">>=>[?OID(<<"/root/.usergroups/.administrators">>)],
-            <<"password">>=><<"111111">>
+            <<"password">>=>?ENV(password,<<"111111">>)
           }
         }}
       ]

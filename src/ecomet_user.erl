@@ -26,11 +26,11 @@
 %%=================================================================
 -export([
   login/2,login/3,
+  logout/0,
   get_user/0,
   get_usergroups/0,
   on_init_state/0,
   is_admin/0,
-  get_state/0,put_state/1,
   get_salt/0
 ]).
 
@@ -59,18 +59,37 @@ login(Login,Pass,Info)->
       ?PIPE([
         fun(_)->ecomet:read_field(User,<<"password">>) end,
         fun(CodedPass)->
-          case <<CodedPass/binary,(maps:get(<<"salt">>,Info,<<>>))/binary>> of
-            Pass->ok;
-            _->error
+          case Info of
+            #{<<"salt">>:=Salt}->
+              % If the salt is defined then we consider the pass is given as coded and salted already.
+              % Add the salt to the original password to be able to compare values
+              case code_pass(<<CodedPass/binary,Salt/binary>>) of
+                Pass->ok;
+                _->error
+              end;
+            _->
+              % If the salt is not defined the we consider the password is given as is.
+              % Code it to be able compare
+              case code_pass(Pass) of
+                CodedPass->ok;
+                _->error
+              end
           end
         end,
-        fun(_)->create_session(Info) end,
-        fun(PID)->set_state(User,PID) end
+        fun(_)->set_context(User) end,
+        fun(_)->create_session(Info) end
       ],none)
     end
   ],none) of
     {ok,_}->ok;
     _->error
+  end.
+
+logout()->
+  case erase(?CONTEXT) of
+    #state{session = PID} when is_pid(PID)->
+      ecomet_session:stop(PID,logout);
+    _->ok
   end.
 
 %% Get OID of current user
@@ -105,12 +124,6 @@ is_admin()->
     undefined->{error,user_undefined};
     #state{is_admin=IsAdmin}->{ok,IsAdmin}
   end.
-
-% Helpers, used to clone state to child processes
-get_state()->
-  get(?CONTEXT).
-put_state(State)->
-  put(?CONTEXT,State).
 
 get_salt()->
   list_to_binary(ecomet_lib:guid()).
@@ -164,16 +177,22 @@ code_pass(Pass)->
   %% Converts real password to storage format
   base64:encode(erlang:md5(Pass)).
 
-create_session(_Info)->
-  % TODO
+create_session(Info)->
+  Context = get(?CONTEXT),
+
+  {ok,PID} = ecomet_session:start_link(fun()->
+    put(?CONTEXT,Context)
+  end,Info),
+
+  put(?CONTEXT,Context#state{session = PID}),
   ok.
 
-set_state(User,Session)->
+set_context(User)->
   {ok,UserGroups} = ecomet:read_field(User,<<"usergroups">>),
   IsAdmin=is_admin(UserGroups),
   put(?CONTEXT,#state{
     uid=?OID(User),
-    session=Session,
+    session=none,
     is_admin=IsAdmin,
     groups=UserGroups
   }),

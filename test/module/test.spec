@@ -8,5 +8,6 @@
     ,ecomet_index_SUITE
     ,ecomet_query_SUITE
     ,ecomet_resultset_SUITE
+    ,ecomet_transaction_SUITE
 ]}.
 
