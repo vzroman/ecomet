@@ -36,7 +36,7 @@
 -define(MAX_NODES,65535).
 
 -record(kv,{key,value}).
--record(ecomet_log,{oid,ts,handler,addtags,deltags,tags,fields}).
+-record(ecomet_log,{object,ts,handler,addtags,deltags,tags,fields}).
 
 -define(ERROR(Error),erlang:error(Error)).
 

@@ -247,7 +247,7 @@ is_object(#object{})->
 is_object(_Other)->
   false.
 
-is_oid(?ObjectID(_,_))->
+is_oid(?ObjectID(P,I)) when is_integer(P),is_integer(I)->
   true;
 is_oid(_Invalid)->
   false.
@@ -360,7 +360,7 @@ commit(OID,Dict)->
       [ ok = ecomet_backend:delete(DB,?DATA,Type,OID) || Type <- maps:keys(Storages) ],
       % The log record
       #ecomet_log{
-        oid=OID,
+        object = #{ <<".oid">> => OID },
         ts=ecomet_lib:log_ts(),
         addtags=[],
         deltags=Tags,
@@ -399,14 +399,22 @@ commit(OID,Dict)->
       % Dump new/updated storages
       [ ok = ecomet_backend:write(DB,?DATA,Type,OID,Storage) || {Type,Storage} <- maps:to_list(NewStorages) ],
 
+      % Build the version of the object
+      LogObject = maps:fold(fun
+         ( _Type ,#{ fields := Fields}, Acc)->
+           maps:merge(Acc,Fields);
+         (_Type,_Empty,Acc)->
+           Acc
+      end,#{},NewStorages),
+
       % The log record
       #ecomet_log{
-        oid=OID,
+        object = LogObject#{ <<".oid">> => OID },
         ts=ecomet_lib:log_ts(),
         addtags=Add,
         deltags=Del,
         tags=Unchanged,
-        fields=ChangedFields
+        fields=ordsets:from_list([Name||{Name,_}<-ChangedFields])
       }
   end.
 

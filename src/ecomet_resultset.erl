@@ -25,7 +25,7 @@
 %% API functions
 %% ====================================================================
 -export([
-	prepare/1,
+	prepare/1,prepare_subscribe/1,
 	normalize/1,
 	new/0,
   new_branch/0,
@@ -82,6 +82,88 @@ prepare(Conditions)->
 			optimize(Normal);
 		true->Built
 	end.
+
+prepare_subscribe(Conditions)->
+	% Standard preparation procedure
+	Patterned=define_patterns(Conditions),
+	{Built,_Direct}=build_conditions(Patterned,element(3,Patterned)),
+	% Normalization
+	Normal=normalize(Built),
+	% Extract tags
+	SubscriptionTags =
+		[{
+			[ Tag || {'TAG',Tag,_} <- AND ], 							% 1. And tags
+			[ Tag || {'TAG',Tag,_Config} <- ANDNOT ],			% 2. Andnot tags
+			[ Tag || {'DIRECT',Tag,_Config} <- DAND] ,		% 3. And direct conditions
+			[ Tag || {'DIRECT',Tag,_Config} <- DANDNOT]		% 4. Andnot direct conditions
+		}
+			|| {'NORM',{{{'AND',AND,_},{'OR',ANDNOT,_}}, {{'AND',DAND,_},{'OR',DANDNOT,_}}}, _} <- Normal ],
+
+	% Exclude direct conditions from indexing
+	IndexedTags= [ {AND,ANDNOT} || {AND,ANDNOT,_,_ } <- SubscriptionTags ],
+	SortedTags= [{
+		ordsets:from_list(AND),
+		ordsets:from_list(ANDNOT),
+		ordsets:from_list(DAND),
+		ordsets:from_list(DANDNOT)
+	} || {AND,ANDNOT,DAND,DANDNOT} <- SubscriptionTags ],
+
+	CheckFun =
+		fun(Tags,Fields)->
+			reverse_check(SortedTags,Tags,Fields)
+		end,
+
+	{IndexedTags, CheckFun}.
+
+reverse_check([{And,AndNot,DAnd,DAndNot}|Rest],Tags,Fields)->
+	Result=
+		case ordsets:subtract(And,Tags) of
+			[]->
+				case ordsets:intersection(AndNot,Tags) of
+					[]->
+						case direct_and(DAnd,Fields) of
+							true->
+								case direct_or(DAndNot,Fields) of
+									false->
+										true;
+									_->
+										false
+								end;
+							_->
+								false
+						end;
+					_->
+						false
+				end;
+			_->
+				false
+		end,
+	if
+		Result -> Result;
+		true ->
+			reverse_check(Rest,Tags,Fields)
+	end;
+reverse_check([],_Tags,_Fields)->
+	true.
+
+direct_and([{Oper,Field,Value}|Rest],Fields)->
+	FieldValue = maps:get(Field,Fields,none),
+	case direct_compare(Oper,Value,FieldValue) of
+		false->false;
+		_->direct_and(Rest,Fields)
+	end;
+direct_and([],_Fields)->
+	true.
+
+direct_or([{Oper,Field,Value}|Rest],Fields)->
+	FieldValue = maps:get(Field,Fields,none),
+	case direct_compare(Oper,Value,FieldValue) of
+		true->true;
+		_->direct_or(Rest,Fields)
+	end;
+direct_or([],_Fields)->
+	false.
+
 %%
 %% Define conditions on patterns
 %%
@@ -721,16 +803,19 @@ check_direct([],_Oper,_Object,Result)->Result.
 check_condition({'DIRECT',{Oper,Field,Value},_},Object)->
 	case ecomet_object:read_field(Object,Field) of
 		{ok,FieldValue}->
-			case Oper of
-				':='->FieldValue==Value;
-				':>'->FieldValue>Value;
-				':>='->FieldValue>=Value;
-				':<'->FieldValue<Value;
-				':=<'->FieldValue=<Value;
-				':LIKE'->direct_like(FieldValue,Value);
-				':<>'->FieldValue/=Value
-			end;
+			direct_compare(Oper,Value,FieldValue);
 		{error,_}->false
+	end.
+
+direct_compare(Oper,Value,FieldValue)->
+	case Oper of
+		':='->FieldValue==Value;
+		':>'->FieldValue>Value;
+		':>='->FieldValue>=Value;
+		':<'->FieldValue<Value;
+		':=<'->FieldValue=<Value;
+		':LIKE'->direct_like(FieldValue,Value);
+		':<>'->FieldValue/=Value
 	end.
 
 direct_like(String,Pattern) when (is_binary(Pattern) and is_binary(String))->

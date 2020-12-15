@@ -29,6 +29,7 @@
   parse/1,
   run_statements/1,
   get/3,get/4,
+  subscribe/4,
   set/3,
   delete/2,delete/3,
   execute/2,execute/3,
@@ -171,6 +172,54 @@ system(DBs,Fields,Conditions)->
     reduce = Reduce
   },
   execute(Compiled,DBs,{'OR',ecomet_resultset:new()}).
+
+%%=====================================================================
+%%	SUBSCRIBE
+%%=====================================================================
+% Fields = [
+%   <<"field1">>,                   - name of field
+%   {<<"alias">>,<<"field2">>},     - alias for field
+%   {fun,[Fields]},                 - fun on fields
+%   {<<"alias">>,{fun,[Fields]}}    - alias for fun
+% ]
+subscribe(ID,DBs,Fields,Conditions)->
+
+  %----------Compile fields---------------------------
+  % Per object reading plan
+  ReadMap=read_map(Fields),
+  % Fields to read from storage
+  DependFields=
+    maps:fold(fun(_,#field{value = #get{args = Args}},Acc)->
+      ordsets:union(Args,Acc)
+    end,[],ReadMap),
+  % Compile the function for building query fields
+  Read=
+    fun(Changed,Object)->
+      maps:fold(fun(ID,#field{value = #get{args = Args,value=Fun}},Acc)->
+        case ordsets:intersection(Changed,Args) of
+          []->
+            % If the changes are not among the function arguments list the the field is not affected
+            Acc;
+          _->
+            % The value has to be recalculated
+            Acc#{ID=>Fun(Object)}
+        end
+      end,#{},ReadMap)
+    end,
+
+  %----------Prepare conditions----------------------
+  {Tags, CheckFun}=ecomet_resultset:prepare_subscribe(Conditions),
+
+  %--------Register the subscription-----------------
+  ok = ecomet_subscription:add(#{
+    id=>ID,
+    databases=>DBs,
+    fields=>DependFields,
+    read=>Read,
+    tags=>Tags,
+    conditions=>Conditions,
+    check=>CheckFun
+  }).
 
 %%=====================================================================
 %%	SET
@@ -736,6 +785,29 @@ is_aggregate([],Result)->Result.
 
 
 read_up(dirty)->
+  % GET .name, $SUM(price), .folder, to_path(archive), binary_field WHERE GROUP BY .pattern
+
+  % [
+  %   [{3,4},[
+  %     [ <<"item1">>,34]
+  %     [ <<"item3">>,48]
+  %   ]]
+  %   [{3,7},[
+  %     [<<"item1">>,34],
+  %     [<<"item1">>,34]
+  %   ]]
+  % ]
+  % [
+  %   [ {3,87}, <<"ITEM1">>, 45, {3,7}, {4,5}, <<5,6,8>>  ]
+  %   [ {3,88}, <<"ITEM1">>, 45, {3,7}, {4,5}, <<5,6,8>>  ]
+
+  % ]
+  % [ <<"ITEM1">>, 45, {3,7}, {gas,5}, <<5,6,8>> ]
+  %
+  %
+  % fun([{Type,Value},{Type,Value2}])-> end,
+  %
+  %
   fun(OID,Fields)->
     Object=ecomet_object:construct(OID),
     read_up(Fields,Object,#{<<".oid">>=>OID,object=>Object})
