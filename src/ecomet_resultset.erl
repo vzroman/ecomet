@@ -101,6 +101,8 @@ prepare_subscribe(Conditions)->
 
 	% Exclude direct conditions from indexing
 	IndexedTags= [ {AND,ANDNOT} || {AND,ANDNOT,_,_ } <- SubscriptionTags ],
+
+	% Build the list of normalized tags for fast checking an object against the conditions
 	SortedTags= [{
 		ordsets:from_list(AND),
 		ordsets:from_list(ANDNOT),
@@ -108,6 +110,7 @@ prepare_subscribe(Conditions)->
 		ordsets:from_list(DANDNOT)
 	} || {AND,ANDNOT,DAND,DANDNOT} <- SubscriptionTags ],
 
+	% The function for performing the reverse check
 	CheckFun =
 		fun(Tags,Fields)->
 			reverse_check(SortedTags,Tags,Fields)
@@ -119,12 +122,16 @@ reverse_check([{And,AndNot,DAnd,DAndNot}|Rest],Tags,Fields)->
 	Result=
 		case ordsets:subtract(And,Tags) of
 			[]->
+				% The object satisfies all the ANDs
 				case ordsets:intersection(AndNot,Tags) of
 					[]->
+						% The object does not have any ANDNOTs
 						case direct_and(DAnd,Fields) of
 							true->
+								% The object satisfies all the Direct ANDs
 								case direct_or(DAndNot,Fields) of
 									false->
+										% The object does not have any Direct ANDNOTs
 										true;
 									_->
 										false

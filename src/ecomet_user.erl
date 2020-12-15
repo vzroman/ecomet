@@ -29,6 +29,7 @@
   logout/0,
   get_user/0,
   get_usergroups/0,
+  get_session/0,
   on_init_state/0,
   is_admin/0,
   get_salt/0
@@ -107,6 +108,15 @@ get_usergroups()->
         none->{ok,[]};
         _->{ok,Groups}
       end
+  end.
+
+get_session()->
+  case get(?CONTEXT) of
+    undefined->{error,user_undefined};
+    #state{session = PID} when is_pid(PID)->
+      {ok,PID};
+    _->
+      {error,invalid_session}
   end.
 
 % Set user context for master init procedure

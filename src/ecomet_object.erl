@@ -414,7 +414,7 @@ commit(OID,Dict)->
         addtags=Add,
         deltags=Del,
         tags=Unchanged,
-        fields=ordsets:from_list([Name||{Name,_}<-ChangedFields])
+        fields=[Name||{Name,_}<-ChangedFields]
       }
   end.
 

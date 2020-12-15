@@ -30,6 +30,7 @@
   run_statements/1,
   get/3,get/4,
   subscribe/4,
+  unsubscribe/1,
   set/3,
   delete/2,delete/3,
   execute/2,execute/3,
@@ -211,7 +212,7 @@ subscribe(ID,DBs,Fields,Conditions)->
   {Tags, CheckFun}=ecomet_resultset:prepare_subscribe(Conditions),
 
   %--------Register the subscription-----------------
-  ok = ecomet_subscription:add(#{
+  ok = ecomet_session:add_subscription(#{
     id=>ID,
     databases=>DBs,
     fields=>DependFields,
@@ -220,6 +221,9 @@ subscribe(ID,DBs,Fields,Conditions)->
     conditions=>Conditions,
     check=>CheckFun
   }).
+
+unsubscribe(ID)->
+  ok = ecomet_session:remove_subscription(ID).
 
 %%=====================================================================
 %%	SET
