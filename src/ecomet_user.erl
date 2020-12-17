@@ -103,10 +103,10 @@ get_user()->
 get_usergroups()->
   case get(?CONTEXT) of
     undefined->{error,user_undefined};
-    #state{groups=Groups}->
-      case Groups of
-        none->{ok,[]};
-        _->{ok,Groups}
+    #state{uid=UID,groups=Groups}->
+      if
+        is_list(Groups) -> ordsets:from_list([UID|Groups]) ;
+        true -> [UID]
       end
   end.
 

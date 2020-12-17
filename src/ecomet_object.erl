@@ -279,10 +279,7 @@ check_rights(Read,Write)->
     {error,Error}->?ERROR(Error);
     {ok,true}->write;
     {ok,false}->
-      {ok,UID}=ecomet_user:get_user(),
-      {ok,UGroups}=ecomet_user:get_usergroups(),
-      UserGroups=ordsets:from_list([UID|UGroups]),
-
+      {ok,UserGroups}=ecomet_user:get_usergroups(),
       WriteGroups=if is_list(Write)->Write; true->[] end,
       case ordsets:intersection(UserGroups,WriteGroups) of
         []->
@@ -362,10 +359,9 @@ commit(OID,Dict)->
       #ecomet_log{
         object = #{ <<".oid">> => OID },
         ts=ecomet_lib:log_ts(),
-        addtags=[],
-        deltags=Tags,
-        tags=[],
-        fields=[]
+        tags={[],[],Tags},
+        rights = {[],[],[ V || {<<".readgroups">>,V,_} <-Tags]},
+        fields=maps:keys(ecomet_pattern:get_fields(Map))
       };
     true->
       %----------Create/Edit procedure-----------------------
@@ -401,8 +397,8 @@ commit(OID,Dict)->
 
       % Build the version of the object
       LogObject = maps:fold(fun
-         ( _Type ,#{ fields := Fields}, Acc)->
-           maps:merge(Acc,Fields);
+         ( _Type ,#{ fields := F}, Acc)->
+           maps:merge(Acc,F);
          (_Type,_Empty,Acc)->
            Acc
       end,#{},NewStorages),
@@ -411,9 +407,12 @@ commit(OID,Dict)->
       #ecomet_log{
         object = LogObject#{ <<".oid">> => OID },
         ts=ecomet_lib:log_ts(),
-        addtags=Add,
-        deltags=Del,
-        tags=Unchanged,
+        tags={ Add, Unchanged, Del},
+        rights={
+          [ V || {<<".readgroups">>,V,_} <-Add],
+          [ V || {<<".readgroups">>,V,_} <-Unchanged],
+          [ V || {<<".readgroups">>,V,_} <-Del]
+        },
         fields=[Name||{Name,_}<-ChangedFields]
       }
   end.

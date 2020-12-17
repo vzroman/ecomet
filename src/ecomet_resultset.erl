@@ -21,14 +21,14 @@
 -include("ecomet.hrl").
 -include("ecomet_schema.hrl").
 
-%% ====================================================================
+%%====================================================================
 %% API functions
-%% ====================================================================
+%%====================================================================
 -export([
-	prepare/1,prepare_subscribe/1,
+	prepare/1,
 	normalize/1,
 	new/0,
-  new_branch/0,
+	new_branch/0,
 	execute/5,
 	execute_local/4,
 	remote_call/6,
@@ -38,7 +38,18 @@
 	foldl/3,
 	foldl/4,
 	fold/5
-	]).
+]).
+
+%%====================================================================
+%% Subscriptions API
+%%====================================================================
+-export([
+	subscription_prepare/1,
+	subscription_fields/1,
+	subscription_indexes/1,
+	subscription_tags/1,
+	subscription_match_function/1
+]).
 
 %%====================================================================
 %%		Test API
@@ -58,8 +69,9 @@
 -endif.
 
 -define(TIMEOUT,30000).
+
 %%=====================================================================
-%%	Preparing query
+%%	query compilation
 %%=====================================================================
 %% For search process we need info about storages for indexes. It's contained in patterns. Next variants are possible:
 %% 1. Patterns are defined by query conditions. Example:
@@ -83,40 +95,62 @@ prepare(Conditions)->
 		true->Built
 	end.
 
-prepare_subscribe(Conditions)->
+%%=====================================================================
+%%	Subscriptions API
+%%=====================================================================
+subscription_prepare(Conditions)->
+
 	% Standard preparation procedure
 	Patterned=define_patterns(Conditions),
 	{Built,_Direct}=build_conditions(Patterned,element(3,Patterned)),
 	% Normalization
 	Normal=normalize(Built),
+
 	% Extract tags
-	SubscriptionTags =
-		[{
-			[ Tag || {'TAG',Tag,_} <- AND ], 							% 1. And tags
-			[ Tag || {'TAG',Tag,_Config} <- ANDNOT ],			% 2. Andnot tags
-			[ Tag || {'DIRECT',Tag,_Config} <- DAND] ,		% 3. And direct conditions
-			[ Tag || {'DIRECT',Tag,_Config} <- DANDNOT]		% 4. Andnot direct conditions
+	[{
+			[ Tag || {'TAG',Tag,_} <- AND ], 				% 1. And tags
+			[ Tag || {'TAG',Tag,_} <- ANDNOT ],			% 2. Andnot tags
+			[ Tag || {'DIRECT',Tag,_} <- DAND] ,		% 3. And direct conditions
+			[ Tag || {'DIRECT',Tag,_} <- DANDNOT]		% 4. Andnot direct conditions
 		}
-			|| {'NORM',{{{'AND',AND,_},{'OR',ANDNOT,_}}, {{'AND',DAND,_},{'OR',DANDNOT,_}}}, _} <- Normal ],
+	|| {'NORM',{{{'AND',AND,_},{'OR',ANDNOT,_}}, {{'AND',DAND,_},{'OR',DANDNOT,_}}}, _} <- Normal ].
 
-	% Exclude direct conditions from indexing
-	IndexedTags= [ {AND,ANDNOT} || {AND,ANDNOT,_,_ } <- SubscriptionTags ],
+subscription_fields(Subscription)->
+	Fields=
+		[
+			[ F || {F, _, _ } <- AND ] ++
+			[ F || {F, _, _ } <- ANDNOT ] ++
+			[ F || {_, F, _ } <- DAND ] ++
+			[ F || {_, F, _ } <- DANDNOT ]
+		||{ AND, ANDNOT, DAND, DANDNOT} <- Subscription ],
+	ordsets:from_list(lists:append(Fields)).
 
-	% Build the list of normalized tags for fast checking an object against the conditions
-	SortedTags= [{
-		ordsets:from_list(AND),
-		ordsets:from_list(ANDNOT),
-		ordsets:from_list(DAND),
-		ordsets:from_list(DANDNOT)
-	} || {AND,ANDNOT,DAND,DANDNOT} <- SubscriptionTags ],
+subscription_indexes(Subscription)->
+	Index=
+		[case AND of
+			 [T1,T2,T3|_] ->[{T1,1},{T2,2},{T3,3}];
+			 [T1,T2]			->[{T1,1},{T2,2},{none,3}];
+			 [T1]					->[{T1,1},{none,2},{none,3}]
+		end ||{ AND, _ANDNOT, _DAND, _DANDNOT} <- Subscription ],
+	ordsets:from_list(lists:append(Index)).
 
-	% The function for performing the reverse check
-	CheckFun =
-		fun(Tags,Fields)->
-			reverse_check(SortedTags,Tags,Fields)
-		end,
+subscription_tags(Tags)->
+	Tags1=
+		[[{T,1},{T,2},{T,3}]|| T <- Tags],
+	[{none,2},{none,3}|lists:append(Tags1)].
 
-	{IndexedTags, CheckFun}.
+subscription_match_function(Subscription)->
+	Ordered=
+		[{
+			ordsets:from_list(AND),
+			ordsets:from_list(ANDNOT),
+			ordsets:from_list(DAND),
+			ordsets:from_list(DANDNOT)
+		} || { AND, ANDNOT, DAND, DANDNOT} <- Subscription ],
+
+	fun(Tags,Fields)->
+		reverse_check(Ordered,Tags,Fields)
+	end.
 
 reverse_check([{And,AndNot,DAnd,DAndNot}|Rest],Tags,Fields)->
 	Result=
@@ -171,6 +205,9 @@ direct_or([{Oper,Field,Value}|Rest],Fields)->
 direct_or([],_Fields)->
 	false.
 
+%%=====================================================================
+%%	Compilation utilities
+%%=====================================================================
 %%
 %% Define conditions on patterns
 %%

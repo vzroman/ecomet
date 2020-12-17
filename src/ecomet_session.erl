@@ -26,8 +26,10 @@
 %%=================================================================
 -export([
   on_start_node/1,
-
-  add_subscription/1,
+  %-------Subscriptions---------------
+  register_subscription/1,
+  run_subscription/2,
+  on_subscription/3,
   remove_subscription/1
 ]).
 
@@ -47,26 +49,47 @@
 
 -define(STOP_TIMEOUT,5000).
 
--record(state,{ instance, pattern, subs, user, rights, is_admin }).
+-record(state,{ instance, pattern, subs, user }).
 
 %%=================================================================
 %%	Service API
 %%=================================================================
 on_start_node(Node)->
-  ecomet_query:set([?ROOT],#{<<"close">> => ecomet_lib:ts()},{'AND',[
+
+  NotClosed = ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
     {<<".pattern">>,'=',?OID(<<"/root/.patterns/.session">>)},
     {<<"node">>,'=',Node},
     {<<"close">>,'=',-1}
   ]}),
+
+  [ try
+      ecomet_query:delete([?ROOT],{<<".folder">>,'=',OID}),
+      Object=ecomet:open(OID,none),
+      ecomet:edit_object(Object,#{<<"close">> => ecomet_lib:ts()})
+    catch
+      _:Error->
+        ?LOGERROR("error closing session ~p, error ~p",[OID,Error])
+    end|| OID <- NotClosed],
   ok.
 
-add_subscription(Params)->
+register_subscription(Params)->
   case ecomet_user:get_session() of
     {ok,PID}->
-      gen_server:call(PID,{add_subscription,Params});
+      gen_server:call(PID,{register_subscription,Params});
     {error,Error}->
       ?ERROR(Error)
   end.
+
+run_subscription(ID,Match)->
+  case ecomet_user:get_session() of
+    {ok,PID}->
+      gen_server:call(PID,{run_subscription,ID,Match});
+    {error,Error}->
+      ?ERROR(Error)
+  end.
+
+on_subscription(PID,ID,Log)->
+  gen_server:cast(PID,{on_subscription,ID,Log}).
 
 remove_subscription(ID)->
   case ecomet_user:get_session() of
@@ -75,9 +98,6 @@ remove_subscription(ID)->
     {error,Error}->
       ?ERROR(Error)
   end.
-
-notify(Log)->
-  ok.
 
 %%=================================================================
 %%	OTP
@@ -89,8 +109,12 @@ stop(Session,Reason)->
   gen_server:stop(Session,Reason,?STOP_TIMEOUT).
 
 init([Context,Info])->
+
   % Obtain the user context
   Context(),
+
+  % We need to trap_exit to run the disconnect process before dieing
+  process_flag(trap_exit,true),
 
   % Register the session
   {ok,UserID} = ecomet_user:get_user(),
@@ -116,101 +140,88 @@ init([Context,Info])->
   {ok,State}.
 
 
-handle_call({add_subscription,#{
-  id:=ID,
-  databases:=DBs,
-  fields:=Fields,
-  read:=Read,
-  tags:=Tags,
-  conditions:=Conditions,
-  check:=CheckFun
-}}, From, #state{
+handle_call({register_subscription,Params}, _From, #state{
   user = User ,
   subs = Subs,
   pattern = PatternID,
   instance = Instance
 } = State) ->
-  ?LOGDEBUG("add subscription ~ts for user ~ts, tags ~p, fields ~p",[ ID,User,Tags,Fields ]),
 
-  {ok,IsAdmin}=ecomet_user:is_admin(),
-  Rights =
-    if
-      IsAdmin -> none;
-      true ->
-        {ok,UserID} = ecomet:get_user(),
-        {ok,UserGroups} = ecomet_user:get_usergroups(),
-        [UserID|UserGroups]
-    end,
+  ID = maps:get(<<".name">>,Params),
+  ?LOGDEBUG("register subscription ~ts for user ~ts",[ ID,User ]),
+  {ok,_} = ecomet:create_object(Params#{
+    <<".folder">>=>?OID(Instance),
+    <<".pattern">>=>PatternID,
+    <<"PID">>=>self()
+  }),
 
-  % tags is a list of tuples:
-  % [
-  %   { [T1,T2,...] = And, [T1,T2,...] = AndNot },
-  %   ...
-  % ]
-  { ReperTags, QueryTags }=
-    lists:foldl(fun({AND,ANDNOT},{RAcc,TAcc})->
-      RAcc1=
-        case AND of
-          [T1,T2,T3|_]->
-            RAcc#{{1,T1}=>true,{2,T2} =>true, {3,T3}=>true };
-          [T1,T2]->
-            RAcc#{{1,T1}=>true,{2,T2} =>true };
-          [T1]->
-            RAcc#{{1,T1}=>true }
-        end,
-      TAcc1=
-        lists:foldl(fun(T,Acc)->
-          Acc#{T=>true}
-        end,TAcc,AND++ANDNOT),
+  {reply,ok,State#state{subs = Subs#{ID=>[]}}};
 
-      { RAcc1, TAcc1 }
-    end,{#{},#{}},Tags),
+handle_call({run_subscription,ID,Match}, _From, #state{
+  user = User ,
+  subs = Subs
+} = State) ->
 
-  State1=
-    try
-        Subscription = ecomet:create_object(#{
-          <<".name">> => ID,
-          <<".folder">> => ?OID(Instance),
-          <<".pattern">> => PatternID,
-          <<"DBs">> => DBs,
-          <<"is_admin">> => IsAdmin,
-          <<"rights">> => Rights,
-          <<"fields">> => Fields,
-          <<"reper_tags">>=>ReperTags,
-          <<"query_tags">>=>QueryTags,
-          <<"feedback">> => false % TODO. Support no_feedback subscriptions
-        })
-    catch
-        _:Error->
-          gen_server:reply(From,{error,Error}),
-          State
-    end,
+  % Run the buffer
+  [ Match(Log) ||Log <- lists:reverse(maps:get(ID,Subs)) ],
 
-  {noreply,State};
+  ?LOGDEBUG("run subscription ~ts for user ~ts",[ ID,User ]),
 
-handle_call({remove_subscription, ID}, From, #state{ user = User,subs = Subs} = State) ->
+  {reply,ok,State#state{subs = Subs#{ID=>Match}}};
+
+handle_call({remove_subscription, ID}, _From, #state{
+  user = User,
+  subs = Subs,
+  pattern = PatternID,
+  instance = Instance
+} = State) ->
+
   ?LOGDEBUG("remove subscription ~ts for user ~p",[ ID,User ]),
-  gen_server:reply(From,ok),
-  {noreply,State#state{subs = maps:remove(ID,Subs)}};
+  ecomet_query:delete([?ROOT],{'AND',[
+    {<<".pattern">>,'=',PatternID},
+    {<<".folder">>,'=',?OID(Instance)},
+    {<<".name">>,'=',ID}
+  ]}),
+
+  {reply,ok,State#state{subs = maps:remove(ID,Subs)}};
 
 handle_call(Request, From, State) ->
   ?LOGWARNING("ecomet session got an unexpected call resquest ~p from ~p , state ~p",[Request,From, State]),
   {noreply,State}.
 
 
-handle_cast(#ecomet_log{}=_Log,State)->
-  % TODO
+handle_cast({on_subscription,ID,Log},#state{subs = Subs,user = User}=State)->
+  Subs1=
+    case Subs of
+      #{ID:=Match} when is_function(Match)->
+        % The subscription is activated, run log matching
+        try Match(Log) catch
+          _:Error->?LOGERROR("subscription ~ts matching error, user ~ts, error ~p",[ID,User,Error])
+        end,
+        Subs;
+      #{ID:=Buffer} when is_list(Buffer)->
+        % The subscription is not started yet, stockpile the logs
+        Subs#{ID=>[Log|Buffer]};
+      _->
+        ?LOGWARNING("received on_subscription event for not registered subscription ~ts, user ~ts",[ID,User]),
+        Subs
+    end,
+  {noreply,State#state{subs = Subs1}};
+
+handle_cast(Request,State)->
+  ?LOGWARNING("ecomet session got an unexpected cast resquest ~p, state ~p",[Request, State]),
   {noreply,State}.
 
-%%============================================================================
-%%	The loop
-%%============================================================================
 handle_info(Message,State)->
   ?LOGWARNING("ecomet_session got an unexpected message ~p, state ~p",[Message,State]),
   {noreply,State}.
 
-terminate(Reason,#state{instance = Session,user = Name})->
+terminate(Reason,#state{instance = Session,pattern = PatternID,user = Name})->
   ?LOGINFO("terminating session for user ~p, reason ~p",[Name ,Reason]),
+  ecomet_query:delete([?ROOT],{'AND',[
+    {<<".pattern">>,'=',PatternID},
+    {<<".folder">>,'=',?OID(Session)}
+  ]}),
   ok = ecomet:edit_object(Session,#{ <<"close">> => ecomet_lib:ts() }),
   ok.
 

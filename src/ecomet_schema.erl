@@ -141,13 +141,11 @@
 }).
 -define(SUBSCRIPTION_SCHEMA,#{
   <<"PID">>=>#{ type => term, required => true, index=> [simple], storage => ?RAMLOCAL },
-  <<"rights">>=>#{ type => list, subtype => link, required => true,index=> [simple], storage => ?RAMLOCAL },
-  <<"is_admin">>=>#{ type => bool, subtype => none, index=> [simple], storage => ?RAMLOCAL },
-  <<"DBs">>=>#{ type => list, subtype => atom, required => true,index=> [simple], storage => ?RAMLOCAL },
-  <<"reper_tags">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
-  <<"query_tags">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
-  <<"fields">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
-  <<"feedback">>=>#{ type => bool, subtype => none, storage => ?RAMLOCAL }
+  <<"rights">>=>#{ type => list, subtype => term, required => true,index=> [simple], storage => ?RAMLOCAL },
+  <<"databases">>=>#{ type => list, subtype => atom, required => true,index=> [simple], storage => ?RAMLOCAL },
+  <<"index">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
+  <<"dependencies">>=>#{ type => list, subtype => strings, required => true, index=> [simple], storage => ?RAMLOCAL },
+  <<"no_feedback">>=>#{ type => bool, subtype => none, storage => ?RAMLOCAL }
 }).
 
 % Database indexing

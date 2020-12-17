@@ -360,7 +360,7 @@ on_commit(Log,OnCommits)->
 
 % Run notifications
 run_notifications([Log|Rest])->
-  ecomet_subscription:notify(Log),
+  ecomet_query:on_commit(Log),
   run_notifications(Rest);
 run_notifications([])->ok.
 
