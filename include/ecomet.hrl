@@ -38,11 +38,12 @@
 -record(kv,{key,value}).
 -record(ecomet_log,{
   object,
+  db,
   ts,
   handler,
   tags,
   rights,
-  fields
+  changes
 }).
 
 -define(ERROR(Error),erlang:error(Error)).

@@ -358,10 +358,11 @@ commit(OID,Dict)->
       % The log record
       #ecomet_log{
         object = #{ <<".oid">> => OID },
+        db = DB,
         ts=ecomet_lib:log_ts(),
         tags={[],[],Tags},
         rights = {[],[],[ V || {<<".readgroups">>,V,_} <-Tags]},
-        fields=maps:keys(ecomet_pattern:get_fields(Map))
+        changes = maps:keys(ecomet_pattern:get_fields(Map))
       };
     true->
       %----------Create/Edit procedure-----------------------
@@ -406,6 +407,7 @@ commit(OID,Dict)->
       % The log record
       #ecomet_log{
         object = LogObject#{ <<".oid">> => OID },
+        db = DB,
         ts=ecomet_lib:log_ts(),
         tags={ Add, Unchanged, Del},
         rights={
@@ -413,7 +415,7 @@ commit(OID,Dict)->
           [ V || {<<".readgroups">>,V,_} <-Unchanged],
           [ V || {<<".readgroups">>,V,_} <-Del]
         },
-        fields=[Name||{Name,_}<-ChangedFields]
+        changes = [Name||{Name,_}<-ChangedFields]
       }
   end.
 

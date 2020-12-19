@@ -202,9 +202,9 @@ system(DBs,Fields,Conditions)->
 %
 % SEARCH. The goal is optimization. At this step we try to narrow the
 % scope as much as possible. The search is based on premise:
-% 1. An object may satisfy a subscription if it has at least 3 tags of the AND in ANY cortege.
+% 1. An object MAY satisfy a subscription if it has at least 3 tags of the AND in ANY cortege.
 % 		if AND contains less than 3 tags, the tail is filled with 'none'
-% 2. The changed fields MUST include at least ONE field attending either in conditions or
+% 2. The changed fields MUST include at least ONE field involved either in conditions or
 % 		in the requested fields
 % 3. An object MUST satisfy at least ONE tag among the rights.
 % 4. An object MUST belong to ONE of the requested databases
@@ -310,7 +310,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
         end
     end,
 
-  % The FINAL MATCH
+  %--------------FINAL MATCH-----------------------------------------------
   Self=self(),
   Match=
     fun
@@ -322,7 +322,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
         object = #{<<".oid">>:=OID} = Object,
         tags = { TNew, TOld, TDel },
         rights = { RNew, ROld, RDel },
-        fields = Changes
+        changes = Changes
       })->
         case match_log( TNew, TOld, TDel, fun(Tags)->TagsMatch(Tags,Object) end ) of
           false->false;
@@ -336,9 +336,9 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
                   TagsResult =:= add;RightsResult=:=add ->
                     Self!{ create, OID, Read(Deps,Object) };
                   TagsResult =:= del;RightsResult=:=del ->
-                    Self!{ delete, OID};
+                    Self!{ delete, OID };
                   true ->
-                    Self!{edit, OID, Read(Changes,Object)}
+                    Self!{ update, OID, Read(Changes,Object)}
                 end
             end
         end
@@ -381,42 +381,62 @@ init_subscription_state(DBs,Fields,Conditions,Read)->
     TS
   end,-1,Objects).
 
-on_commit(_Log)->
-  % The SEARCH phase
-  % TODO
-  %%	Query={'ANDNOT',
-%%		{'AND',[
-%%			{<<".pattern">>,get_pattern_id(),[<<"ramlocal">>]},
-%%			{<<"domains">>,ecomet_object:get_domain(Log#ecomet_log.oid),[<<"ramlocal">>]},
-%%			{'OR',lists:append([
-%%				[{<<"reper_tags">>,AddTag,[<<"ramlocal">>]}||AddTag<-Log#ecomet_log.addtags],
-%%				[{<<"reper_tags">>,DelTag,[<<"ramlocal">>]}||DelTag<-Log#ecomet_log.deltags],
-%%				[{<<"reper_tags">>,Tag,[<<"ramlocal">>]}||Tag<-Log#ecomet_log.tags]
-%%			])},
-%%			{'OR',lists:append([
-%%				%[{<<"rights">>,AddRight,[<<"ramlocal">>]}||AddRight<-Log#ecomet_log.addrights],
-%%				%[{<<"rights">>,DelRight,[<<"ramlocal">>]}||DelRight<-Log#ecomet_log.delrights],
-%%				%[{<<"rights">>,Right,[<<"ramlocal">>]}||Right<-Log#ecomet_log.rights],
-%%				[{<<"is_admin">>,true,[<<"ramlocal">>]}]
-%%			])},
-%%			{'OR',lists:append([
-%%				lists:append([
-%%					[{<<"query_tags">>,AddTag,[<<"ramlocal">>]}||AddTag<-Log#ecomet_log.addtags],
-%%					[{<<"query_tags">>,DelTag,[<<"ramlocal">>]}||DelTag<-Log#ecomet_log.deltags]
-%%				]),
-%%				[{<<"fields">>,FieldName,[<<"ramlocal">>]}||FieldName<-element(1,Log#ecomet_log.fields)],
-%%				[{<<"fields">>,<<".all">>,[<<"ramlocal">>]},{<<"fields">>,<<".none">>,[<<"ramlocal">>]}]
-%%			])}
-%%		]},
-%%		{<<".deleted">>,true,[<<"ramlocal">>]}
-%%	},
-%%	{ok,ClusterID}=ecomet_node:get_cluster(ecomet_node:get_local_oid()),
-%%	% Send notification to other nodes
-%%	spawn(fun()->
-%%		notify_neighbors(ClusterID,Log,Query),
-%%		notify_clusters(ClusterID,Log,Query)
-%%	end).
+on_commit(#ecomet_log{
+  db = DB,
+  tags = {TAdd, TOld, TDel},
+  rights = { RAdd, ROld, RDel },
+  changes = Changes
+} = Log)->
+
+  %-----------------------The SEARCH phase-------------------------------------
+  Tags = TAdd ++ TOld ++ TDel,
+  Index = {'AND',[
+    {'OR',[ {T,1} || T<-Tags ]},
+    {'OR',[ {T,2} || T<-[none|Tags] ]},
+    {'OR',[ {T,3} || T<-[none|Tags] ]}
+  ]},
+
+  Rights =
+    {'OR',[{<<"rights">>,'=',T} || T <- RAdd ++ ROld ++ RDel ]},
+
+  Changes =
+    {'OR',[{<<"dependencies">>,'=',F} || F <- Changes]},
+
+  Query = ecomet_resultset:prepare({'AND',[
+    Index,
+    Rights,
+    Changes,
+    {<<"databases">>,'=',DB}
+  ]}),
+
+  % Run the search on the other nodes
+  [ rpc:cast( N,?MODULE,notify,[ Query, Log ]) || N <-ecomet_node:get_ready_nodes() -- [node()] ],
+
+  % Local search
+  notify( Query, Log ),
+
   ok.
+
+notify( Query, Log )->
+  Self = self(),
+  ecomet_resultset:execute_local([?ROOT],Query, fun(RS)->
+    ecomet_resultset:foldl(fun(OID)->
+      Object = ecomet_object:construct(OID),
+      #{
+        <<".name">>:=ID,
+        <<"PID">>:=PID,
+        <<"no_feedback">>:=NoFeedback
+      } = ecomet:read_fields(Object,[<<"PID">>,<<"no_feedback">>]),
+
+      % TODO. More selective sort out the author of the changes
+      if
+        NoFeedback, PID=:=Self-> ok;
+        true ->
+          % Run the second (FINAL MATCH) phase
+          ecomet_session:on_subscription( PID, ID, Log )
+      end
+    end,none,RS)
+  end, {'OR',ecomet_resultset:new()}).
 
 
 %%=====================================================================
