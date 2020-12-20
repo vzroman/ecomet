@@ -149,7 +149,7 @@ handle_call({register_subscription,Params}, _From, #state{
 
   ID = maps:get(<<".name">>,Params),
   ?LOGDEBUG("register subscription ~ts for user ~ts",[ ID,User ]),
-  {ok,_} = ecomet:create_object(Params#{
+  ecomet:create_object(Params#{
     <<".folder">>=>?OID(Instance),
     <<".pattern">>=>PatternID,
     <<"PID">>=>self()

@@ -63,6 +63,9 @@
   end)()
 ).
 
+-define(SUBSCRIPTION(ID,Action,OID,Fields),{ecomet, ID, Action, OID, Fields }).
+-define(SUBSCRIPTION(ID,Action,OID),{ecomet, ID, Action, OID }).
+
 -define(A2B(Atom),unicode:characters_to_binary(atom_to_list(Atom))).
 
 -define(LOGERROR(Text),lager:error(Text)).

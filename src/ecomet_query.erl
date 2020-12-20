@@ -237,7 +237,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
   ReadMap=read_map(Fields),
 
   % Fields dependencies
-  FieldsDeps=ordsets:union([field_args(F)|| {_,F}<-ReadMap ]),
+  FieldsDeps=ordsets:union([field_args(F)|| {_,F}<-maps:to_list(ReadMap) ]),
 
   % Compile the subscription constraints
   CompiledSubscription = ecomet_resultset:subscription_prepare(Conditions),
@@ -290,7 +290,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
   % perform a traditional search for what is already satisfies the conditions
   StartTS=
     if
-      not Stateless -> init_subscription_state(DBs,Deps,Conditions,Read);
+      not Stateless -> init_subscription_state(ID,DBs,Deps,Conditions,Read);
       true -> -1
     end,
 
@@ -334,11 +334,11 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
                   TagsResult =:= add,RightsResult=:=del->false ;
                   TagsResult =:= del,RightsResult=:=add->false ;
                   TagsResult =:= add;RightsResult=:=add ->
-                    Self!{ create, OID, Read(Deps,Object) };
+                    Self!?SUBSCRIPTION(ID,create,OID,Read(Deps,Object));
                   TagsResult =:= del;RightsResult=:=del ->
-                    Self!{ delete, OID };
+                    Self!?SUBSCRIPTION(ID,delete,OID);
                   true ->
-                    Self!{ update, OID, Read(Changes,Object)}
+                    Self!?SUBSCRIPTION(ID,update,OID,Read(Changes,Object))
                 end
             end
         end
@@ -365,14 +365,14 @@ match_log( New, Old, Del, Match )->
     true -> false
   end.
 
-init_subscription_state(DBs,Fields,Conditions,Read)->
+init_subscription_state(ID,DBs,Deps,Conditions,Read)->
   F=
     fun([OID|Values])->
-      Object = maps:from_list(lists:zip(Fields,Values)),
-      { create, OID, Read(Object) }
+      Object = maps:from_list(lists:zip(Deps,Values)),
+      ?SUBSCRIPTION(ID,create,OID,Read(Deps,Object))
     end,
-  Fields = [<<"ts">>|{F, [<<".oid">>|Fields]}],
-  {_Header, Objects}=ecomet_query:get(DBs,Fields,Conditions,[{order,[{<<"ts">>,'ASC'}]}]),
+  Fields = [<<".ts">>,{F, [<<".oid">>|Deps]}],
+  {_Header, Objects}=ecomet_query:get(DBs,Fields,Conditions,[{order,[{<<".ts">>,'ASC'}]}]),
 
   % Send the results
   Self=self(),
@@ -388,8 +388,12 @@ on_commit(#ecomet_log{
   changes = ChangedFields
 } = Log)->
 
+  %-----------------------Sorting----------------------------------------------
+  [ TAdd1, TOld1, TDel1, RAdd1, ROld1, RDel1, ChangedFields1]=
+    [ordsets:from_list(I)||I<-[ TAdd, TOld, TDel, RAdd, ROld, RDel, ChangedFields] ],
+
   %-----------------------The SEARCH phase-------------------------------------
-  Tags = TAdd ++ TOld ++ TDel,
+  Tags = TAdd1 ++ TOld1 ++ TDel1,
   Index = {'AND',[
     {'OR',[ {<<"index">>,'=',{T,1}}  || T<-Tags ]},
     {'OR',[ {<<"index">>,'=',{T,2}} || T<-[none|Tags] ]},
@@ -397,10 +401,10 @@ on_commit(#ecomet_log{
   ]},
 
   Rights =
-    {'OR',[{<<"rights">>,'=',T} || T <- RAdd ++ ROld ++ RDel ]},
+    {'OR',[{<<"rights">>,'=',T} || T <- [is_admin|RAdd1 ++ ROld1 ++ RDel1] ]},
 
   Changes =
-    {'OR',[{<<"dependencies">>,'=',F} || F <- ChangedFields]},
+    {'OR',[{<<"dependencies">>,'=',F} || F <- ChangedFields1]},
 
   Query = ecomet_resultset:prepare({'AND',[
     Index,
@@ -409,24 +413,31 @@ on_commit(#ecomet_log{
     {<<"databases">>,'=',DB}
   ]}),
 
+  % Log with sorted items
+  Log1=Log#ecomet_log{
+    tags = {TAdd1, TOld1, TDel1},
+    rights = { RAdd1, ROld1, RDel1 },
+    changes = ChangedFields1
+  },
+
   % Run the search on the other nodes
-  [ rpc:cast( N,?MODULE,notify,[ Query, Log ]) || N <-ecomet_node:get_ready_nodes() -- [node()] ],
+  [ rpc:cast( N,?MODULE,notify,[ Query, Log1 ]) || N <-ecomet_node:get_ready_nodes() -- [node()] ],
 
   % Local search
-  notify( Query, Log ),
+  notify( Query, Log1 ),
 
   ok.
 
 notify( Query, Log )->
   Self = self(),
   ecomet_resultset:execute_local(?ROOT,Query, fun(RS)->
-    ecomet_resultset:foldl(fun(OID)->
+    ecomet_resultset:foldl(fun(OID,Acc)->
       Object = ecomet_object:construct(OID),
       #{
         <<".name">>:=ID,
         <<"PID">>:=PID,
         <<"no_feedback">>:=NoFeedback
-      } = ecomet:read_fields(Object,[<<"PID">>,<<"no_feedback">>]),
+      } = ecomet:read_fields(Object,[<<".name">>,<<"PID">>,<<"no_feedback">>]),
 
       % TODO. More selective sort out the author of the changes
       if
@@ -434,7 +445,8 @@ notify( Query, Log )->
         true ->
           % Run the second (FINAL MATCH) phase
           ecomet_session:on_subscription( PID, ID, Log )
-      end
+      end,
+      Acc
     end,none,RS)
   end, {'OR',ecomet_resultset:new()}).
 

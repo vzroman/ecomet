@@ -105,8 +105,9 @@ get_usergroups()->
     undefined->{error,user_undefined};
     #state{uid=UID,groups=Groups}->
       if
-        is_list(Groups) -> ordsets:from_list([UID|Groups]) ;
-        true -> [UID]
+        is_list(Groups) ->
+          {ok, ordsets:from_list([UID|Groups])};
+        true -> {ok,[UID]}
       end
   end.
 
@@ -209,7 +210,7 @@ set_context(User)->
   ok.
 
 is_admin([GID|Rest])->
-  case ecomet_field:lookup_storage(ramdisc,GID,<<".name">>)  of
+  case ecomet_field:lookup_storage(disc,GID,<<".name">>)  of
     <<".administrators">>->true;
     _->is_admin(Rest)
   end;

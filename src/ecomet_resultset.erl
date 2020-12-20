@@ -103,8 +103,9 @@ subscription_prepare(Conditions)->
 	% Standard preparation procedure
 	Patterned=define_patterns(Conditions),
 	{Built,_Direct}=build_conditions(Patterned,element(3,Patterned)),
+
 	% Normalization
-	Normal=normalize(Built),
+	{'OR',Normal,_}=normalize(Built),
 
 	% Extract tags
 	[{
@@ -113,7 +114,7 @@ subscription_prepare(Conditions)->
 			[ Tag || {'DIRECT',Tag,_} <- DAND] ,		% 3. And direct conditions
 			[ Tag || {'DIRECT',Tag,_} <- DANDNOT]		% 4. Andnot direct conditions
 		}
-	|| {'NORM',{{{'AND',AND,_},{'OR',ANDNOT,_}}, {{'AND',DAND,_},{'OR',DANDNOT,_}}}, _} <- Normal ].
+	|| {'NORM',{ {{'AND',AND,_},{'OR',ANDNOT,_}}, {DAND, DANDNOT} }, _} <- Normal ].
 
 subscription_fields(Subscription)->
 	Fields=
@@ -185,7 +186,7 @@ reverse_check([{And,AndNot,DAnd,DAndNot}|Rest],Tags,Fields)->
 			reverse_check(Rest,Tags,Fields)
 	end;
 reverse_check([],_Tags,_Fields)->
-	true.
+	false.
 
 direct_and([{Oper,Field,Value}|Rest],Fields)->
 	FieldValue = maps:get(Field,Fields,none),

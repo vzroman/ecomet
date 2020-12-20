@@ -503,7 +503,7 @@ check_path(Object)->
           case ecomet_folder:find_object_system(FolderID,Name) of
             {error,not_found}->ok;
             {ok,OID}->ok;
-            _->{error,{not_unique,Name}}
+            _->?ERROR({not_unique,Name})
           end;
         _->?ERROR("the '/' symbol is not allowed in names")
       end;
