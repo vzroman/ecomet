@@ -385,22 +385,22 @@ on_commit(#ecomet_log{
   db = DB,
   tags = {TAdd, TOld, TDel},
   rights = { RAdd, ROld, RDel },
-  changes = Changes
+  changes = ChangedFields
 } = Log)->
 
   %-----------------------The SEARCH phase-------------------------------------
   Tags = TAdd ++ TOld ++ TDel,
   Index = {'AND',[
-    {'OR',[ {T,1} || T<-Tags ]},
-    {'OR',[ {T,2} || T<-[none|Tags] ]},
-    {'OR',[ {T,3} || T<-[none|Tags] ]}
+    {'OR',[ {<<"index">>,'=',{T,1}}  || T<-Tags ]},
+    {'OR',[ {<<"index">>,'=',{T,2}} || T<-[none|Tags] ]},
+    {'OR',[ {<<"index">>,'=',{T,3}} || T<-[none|Tags] ]}
   ]},
 
   Rights =
     {'OR',[{<<"rights">>,'=',T} || T <- RAdd ++ ROld ++ RDel ]},
 
   Changes =
-    {'OR',[{<<"dependencies">>,'=',F} || F <- Changes]},
+    {'OR',[{<<"dependencies">>,'=',F} || F <- ChangedFields]},
 
   Query = ecomet_resultset:prepare({'AND',[
     Index,
@@ -419,7 +419,7 @@ on_commit(#ecomet_log{
 
 notify( Query, Log )->
   Self = self(),
-  ecomet_resultset:execute_local([?ROOT],Query, fun(RS)->
+  ecomet_resultset:execute_local(?ROOT,Query, fun(RS)->
     ecomet_resultset:foldl(fun(OID)->
       Object = ecomet_object:construct(OID),
       #{

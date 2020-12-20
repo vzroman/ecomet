@@ -144,7 +144,7 @@
   <<"rights">>=>#{ type => list, subtype => term, required => true,index=> [simple], storage => ?RAMLOCAL },
   <<"databases">>=>#{ type => list, subtype => atom, required => true,index=> [simple], storage => ?RAMLOCAL },
   <<"index">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
-  <<"dependencies">>=>#{ type => list, subtype => strings, required => true, index=> [simple], storage => ?RAMLOCAL },
+  <<"dependencies">>=>#{ type => list, subtype => string, required => true, index=> [simple], storage => ?RAMLOCAL },
   <<"no_feedback">>=>#{ type => bool, subtype => none, storage => ?RAMLOCAL }
 }).
 
