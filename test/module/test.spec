@@ -7,5 +7,6 @@
     ,ecomet_field_SUITE
     ,ecomet_index_SUITE
     ,ecomet_transaction_SUITE
+    ,ecomet_query_SUITE
 ]}.
 
