@@ -29,7 +29,7 @@
   parse/1,
   run_statements/1,
   get/3,get/4,
-  subscribe/4,
+  subscribe/4,subscribe/5,
   unsubscribe/1,
   on_commit/1,
   set/3,
@@ -381,6 +381,9 @@ init_subscription_state(ID,DBs,Deps,Conditions,Read)->
     TS
   end,-1,Objects).
 
+on_commit(#ecomet_log{ changes = [] })->
+  % No changes
+  ok;
 on_commit(#ecomet_log{
   db = DB,
   tags = {TAdd, TOld, TDel},
@@ -429,7 +432,12 @@ on_commit(#ecomet_log{
   ok.
 
 notify( Query, Log )->
-  Self = self(),
+  Session =
+    case ecomet_user:get_session() of
+      {ok,S}->S;
+      _->none
+    end,
+
   ecomet_resultset:execute_local(?ROOT,Query, fun(RS)->
     ecomet_resultset:foldl(fun(OID,Acc)->
       Object = ecomet_object:construct(OID),
@@ -441,7 +449,7 @@ notify( Query, Log )->
 
       % TODO. More selective sort out the author of the changes
       if
-        NoFeedback, PID=:=Self-> ok;
+        NoFeedback, PID=:=Session-> ok;
         true ->
           % Run the second (FINAL MATCH) phase
           ecomet_session:on_subscription( PID, ID, Log )

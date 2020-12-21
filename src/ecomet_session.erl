@@ -106,7 +106,10 @@ start_link(Context,Info)->
   gen_server:start_link(?MODULE, [Context,Info,self()], []).
 
 stop(Session,Reason)->
-  gen_server:stop(Session,Reason,?STOP_TIMEOUT).
+  case is_process_alive(Session) of
+    true->gen_server:stop(Session,Reason,?STOP_TIMEOUT);
+    _->ok
+  end.
 
 init([Context,Info,Owner])->
 
