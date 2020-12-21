@@ -246,7 +246,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
   TagsDeps = ecomet_resultset:subscription_fields(CompiledSubscription),
 
   % The total fields dependencies
-  Deps = ordsets:union(FieldsDeps,TagsDeps),
+  Deps = ordsets:union([FieldsDeps,TagsDeps,[<<".readgroups">>]]),
 
   % User rights
   Rights=
