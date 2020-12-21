@@ -44,11 +44,13 @@
 %% Subscriptions API
 %%====================================================================
 -export([
+	on_init/0,
 	subscription_prepare/1,
 	subscription_fields/1,
 	subscription_indexes/1,
 	subscription_tags/1,
-	subscription_match_function/1
+	subscription_match_function/1,
+	subscription_compile/1
 ]).
 
 %%====================================================================
@@ -98,6 +100,14 @@ prepare(Conditions)->
 %%=====================================================================
 %%	Subscriptions API
 %%=====================================================================
+on_init()->
+	% Store the subscription pattern as a persistent term for optimized access
+	PatternID = ?OID(<<"/root/.patterns/.subscription">>),
+	ID=ecomet_object:get_id(PatternID),
+	Bit=ecomet_bits:set_bit(ID,none),
+	persistent_term:put({?MODULE,subscription_pattern},Bit),
+	ok.
+
 subscription_prepare(Conditions)->
 
 	% Standard preparation procedure
@@ -152,6 +162,22 @@ subscription_match_function(Subscription)->
 	fun(Tags,Fields)->
 		reverse_check(Ordered,Tags,Fields)
 	end.
+
+subscription_compile(Query)->
+	case persistent_term:get({?MODULE,subscription_pattern},none) of
+		none->
+			% The schema is not initialized yet
+			prepare({<<"none">>,'=',none});
+		Pattern->
+			subscription_compile(Query,Pattern)
+	end.
+subscription_compile({'AND',List},Pattern)->
+	{'AND',[subscription_compile(I,Pattern)||I<-List],{Pattern,[]}};
+subscription_compile({'OR',List},Pattern)->
+	{'OR',[subscription_compile(I,Pattern)||I<-List],{Pattern,[]}};
+subscription_compile({Field,'=',Value},Pattern)->
+	{'TAG', {Field,Value,simple}, {Pattern,[{ramlocal,Pattern,[]}]}}.
+
 
 reverse_check([{And,AndNot,DAnd,DAndNot}|Rest],Tags,Fields)->
 	Result=

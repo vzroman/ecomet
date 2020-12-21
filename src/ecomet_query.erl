@@ -19,6 +19,7 @@
 -module(ecomet_query).
 
 -include("ecomet.hrl").
+-include("ecomet_schema.hrl").
 
 -record(compiled_query,{conditions,map,reduce}).
 -record(field,{alias,value}).
@@ -406,7 +407,7 @@ on_commit(#ecomet_log{
   Changes =
     {'OR',[{<<"dependencies">>,'=',F} || F <- ChangedFields1]},
 
-  Query = ecomet_resultset:prepare({'AND',[
+  Query = ecomet_resultset:subscription_compile({'AND',[
     Index,
     Rights,
     Changes,
