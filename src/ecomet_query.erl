@@ -19,7 +19,6 @@
 -module(ecomet_query).
 
 -include("ecomet.hrl").
--include("ecomet_schema.hrl").
 
 -record(compiled_query,{conditions,map,reduce}).
 -record(field,{alias,value}).

@@ -89,7 +89,7 @@ login(Login,Pass,Info)->
 logout()->
   case erase(?CONTEXT) of
     #state{session = PID} when is_pid(PID)->
-      ecomet_session:stop(PID,logout);
+      ecomet_session:stop(PID,{shutdown,logout});
     _->ok
   end.
 
@@ -199,6 +199,15 @@ create_session(Info)->
   ok.
 
 set_context(User)->
+
+  % Close the session if exists
+  case get(?CONTEXT) of
+    #state{session = PID} when is_pid(PID)->
+      ecomet_session:stop(PID,{shutdown,relogin});
+    _->ok
+  end,
+
+  % save the context
   {ok,UserGroups} = ecomet:read_field(User,<<"usergroups">>),
   IsAdmin=is_admin(UserGroups),
   put(?CONTEXT,#state{
@@ -207,6 +216,7 @@ set_context(User)->
     is_admin=IsAdmin,
     groups=UserGroups
   }),
+
   ok.
 
 is_admin([GID|Rest])->

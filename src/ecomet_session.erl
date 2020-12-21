@@ -49,7 +49,7 @@
 
 -define(STOP_TIMEOUT,5000).
 
--record(state,{ instance, pattern, subs, user }).
+-record(state,{ instance, pattern, subs, user, owner }).
 
 %%=================================================================
 %%	Service API
@@ -103,12 +103,12 @@ remove_subscription(ID)->
 %%	OTP
 %%=================================================================
 start_link(Context,Info)->
-  gen_server:start_link(?MODULE, [Context,Info], []).
+  gen_server:start_link(?MODULE, [Context,Info,self()], []).
 
 stop(Session,Reason)->
   gen_server:stop(Session,Reason,?STOP_TIMEOUT).
 
-init([Context,Info])->
+init([Context,Info,Owner])->
 
   % Obtain the user context
   Context(),
@@ -132,7 +132,8 @@ init([Context,Info])->
     instance = Session,
     pattern = ?OID(<<"/root/.patterns/.subscription">>),
     subs = #{},
-    user = Name
+    user = Name,
+    owner = Owner
   },
 
   ?LOGINFO("starting a session for user ~p",[Name]),
@@ -216,13 +217,29 @@ handle_info(Message,State)->
   ?LOGWARNING("ecomet_session got an unexpected message ~p, state ~p",[Message,State]),
   {noreply,State}.
 
-terminate(Reason,#state{instance = Session,pattern = PatternID,user = Name})->
+terminate(Reason,#state{
+  instance = Session,
+  pattern = PatternID,
+  user = Name,
+  owner = Owner
+})->
   ?LOGINFO("terminating session for user ~p, reason ~p",[Name ,Reason]),
   ecomet_query:delete([?ROOT],{'AND',[
     {<<".pattern">>,'=',PatternID},
     {<<".folder">>,'=',?OID(Session)}
   ]}),
   ok = ecomet:edit_object(Session,#{ <<"close">> => ecomet_lib:ts() }),
+
+  % If the session is closed by the normal reason
+  % then unlink the owner process before exit to avoid
+  % sending the 'exit' to the client's process
+  case Reason of
+    normal->unlink(Owner);
+    shutdown->unlink(Owner);
+    {shutdown,_}->unlink(Owner);
+    _->ok
+  end,
+
   ok.
 
 code_change(_OldVsn, State, _Extra) ->
