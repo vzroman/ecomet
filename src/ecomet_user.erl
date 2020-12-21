@@ -200,12 +200,8 @@ create_session(Info)->
 
 set_context(User)->
 
-  % Close the session if exists
-  case get(?CONTEXT) of
-    #state{session = PID} when is_pid(PID)->
-      ecomet_session:stop(PID,{shutdown,relogin});
-    _->ok
-  end,
+  % Close the session
+  logout(),
 
   % save the context
   {ok,UserGroups} = ecomet:read_field(User,<<"usergroups">>),
