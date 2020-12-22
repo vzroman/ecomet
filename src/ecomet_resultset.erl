@@ -843,7 +843,7 @@ search_type('NORM',{{AND,ANDNOT},{DAND,DANDNOT}},DB,IDP,IDH)->
 				none->none;
 				TBits->
 					element(2,ecomet_bits:foldl(fun(IDL,AccBits)->
-						Object=ecomet_object:construct({DB,IDP,IDH*?BITSTRING_LENGTH+IDL}),
+						Object=ecomet_object:construct({IDP,IDH*?BITSTRING_LENGTH+IDL}),
 						case check_direct(DAND,'AND',Object) of
 							false->ecomet_bits:reset_bit(IDL,AccBits);
 							true->

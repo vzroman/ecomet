@@ -348,6 +348,16 @@ commit(OID,Dict)->
   % Load storage types that are not loaded yet
   Storages=load_storage_types(Object,Dict),
   BackTags = get_backtags(Storages),
+
+  % Get loaded fields grouped by storage types
+  LoadedFields=get_fields(Storages),
+
+  % Build the version of the object
+  Version=
+    maps:fold(fun(_T,TFields,Acc)->
+      maps:merge(Acc,TFields)
+    end,#{},LoadedFields),
+
   if
     Object#object.deleted->
       %----------Delete procedure--------------------------
@@ -362,27 +372,26 @@ commit(OID,Dict)->
         ts=ecomet_lib:log_ts(),
         tags={[],[],Tags},
         rights = {[],[],[ V || {<<".readgroups">>,V,_} <-Tags]},
-        changes = maps:keys(ecomet_pattern:get_fields(Map))
+        changes = maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map))
       };
     true->
       %----------Create/Edit procedure-----------------------
       % Step 1. Fields
       Fields = maps:get({OID,fields},Dict),
-      % Get loaded fields grouped by storage types
-      LoadedFields=get_fields(Storages),
+
       % Get fields changes
       {UpdatedFields,ChangedFields}=ecomet_field:save_changes(Map,Fields,LoadedFields,OID),
       if
         length(ChangedFields)=:=0 ->
           % No changes. Optimization
-          #ecomet_log{ changes = [] };
+          #ecomet_log{ };
         true ->
           % Step 2. Indexes
           % Update the object indexes and get changes
           {Add,Unchanged,Del,UpdatedBackTags}= ecomet_index:build_index(OID,Map,ChangedFields,BackTags),
 
           % Step 3. Dump changes to the storage, build the new version of the object
-          Version=
+          NewVersion=
             maps:fold(fun(T,S,Acc)->
               case maps:find(T,UpdatedFields) of
                 error->
@@ -410,20 +419,20 @@ commit(OID,Dict)->
               end
             end,#{},Storages),
 
-          % Actually changed fields
-          Changes = [Name||{Name,_}<-ChangedFields],
+          % Actually changed fields with their previous values
+          Changes = maps:from_list([{Name,maps:get(Name,Version,none)}||{Name,_}<-ChangedFields]),
 
           % Log timestamp. If it is an object creation then timestamp must be the same as
           % the timestamp of the object, otherwise it is taken as the current timestamp
           TS =
-            case lists:member(<<".ts">>,Changes) of
-              true->maps:get(<<".ts">>,Version);
+            case Changes of
+              #{<<".ts">>:=none}->maps:get(<<".ts">>,NewVersion);
               _->ecomet_lib:log_ts()
             end,
 
           % The log record
           #ecomet_log{
-            object = Version#{ <<".oid">> => OID },
+            object = NewVersion#{ <<".oid">> => OID },
             db = DB,
             ts=TS,
             tags={ Add, Unchanged, Del},

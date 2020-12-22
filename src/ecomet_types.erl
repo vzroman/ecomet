@@ -73,9 +73,15 @@ parse_safe(float,Value) when is_float(Value)->
 parse_safe(float,Value) when is_integer(Value)->
   1.0*Value;
 parse_safe(float,Value) when is_binary(Value)->
-  binary_to_float(Value);
+  try binary_to_float(Value)
+  catch
+    _:_->1.0*binary_to_integer(Value)
+  end;
 parse_safe(float,Value) when is_list(Value)->
-  list_to_float(Value);
+  try list_to_float(Value)
+  catch
+    _:_->1.0*list_to_integer(Value)
+  end;
 parse_safe(float,Invalid)->
   ?ERROR(Invalid);
 %---------Bool----------------------
@@ -159,7 +165,7 @@ value_to_string(string,Value)->
 value_to_string(integer,Value)->
   integer_to_binary(Value);
 value_to_string(float,Value)->
-  float_to_binary(Value);
+  float_to_binary(1.0*Value);
 value_to_string(bool,true)->
   <<"true">>;
 value_to_string(bool,false)->
@@ -184,7 +190,7 @@ check_value(Type,Value)->
   case Type of
     string when is_binary(Value)->ok;
     integer when is_integer(Value)->ok;
-    float when is_float(Value)->ok;
+    float when is_number(Value)->ok;
     bool when is_boolean(Value)->ok;
     binary when is_binary(Value)->ok;
     atom when is_atom(Value)->ok;

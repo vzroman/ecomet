@@ -324,10 +324,11 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
         rights = { RNew, ROld, RDel },
         changes = Changes
       })->
-        case match_log( TNew, TOld, TDel, fun(Tags)->TagsMatch(Tags,Object) end ) of
+        OldObject = maps:merge(Object,Changes),
+        case match_log( TNew, TOld, TDel, Object, OldObject, TagsMatch ) of
           false->false;
           TagsResult->
-            case match_log( RNew, ROld, RDel, RightsMatch ) of
+            case match_log( RNew, ROld, RDel, Object, OldObject, fun(T,_)->RightsMatch(T) end) of
               false-> false;
               RightsResult->
                 if
@@ -338,7 +339,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
                   TagsResult =:= del;RightsResult=:=del ->
                     Self!?SUBSCRIPTION(ID,delete,OID);
                   true ->
-                    Self!?SUBSCRIPTION(ID,update,OID,Read(Changes,Object))
+                    Self!?SUBSCRIPTION(ID,update,OID,Read(ordsets:from_list(maps:keys(Changes)),Object))
                 end
             end
         end
@@ -350,14 +351,9 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
 unsubscribe(ID)->
   ok = ecomet_session:remove_subscription(ID).
 
-match_log( [], Tags, [], Match )->
-  case Match(Tags) of
-    false->false;
-    _->upd
-  end;
-match_log( New, Old, Del, Match )->
-  Now = Match(ordsets:union(New,Old)),
-  Was = Match(ordsets:union(Old,Del)),
+match_log( New, Old, Del, NewObject, OldObject, Match )->
+  Now = Match(ordsets:union(New,Old),NewObject),
+  Was = Match(ordsets:union(Old,Del),OldObject),
   if
     Now,Was -> upd ;
     Now, not Was-> add;
@@ -381,19 +377,19 @@ init_subscription_state(ID,DBs,Deps,Conditions,Read)->
     TS
   end,-1,Objects).
 
-on_commit(#ecomet_log{ changes = [] })->
+on_commit(#ecomet_log{ changes = undefined })->
   % No changes
   ok;
 on_commit(#ecomet_log{
   db = DB,
   tags = {TAdd, TOld, TDel},
   rights = { RAdd, ROld, RDel },
-  changes = ChangedFields
+  changes = Changes
 } = Log)->
 
   %-----------------------Sorting----------------------------------------------
   [ TAdd1, TOld1, TDel1, RAdd1, ROld1, RDel1, ChangedFields1]=
-    [ordsets:from_list(I)||I<-[ TAdd, TOld, TDel, RAdd, ROld, RDel, ChangedFields] ],
+    [ordsets:from_list(I)||I<-[ TAdd, TOld, TDel, RAdd, ROld, RDel, maps:keys(Changes)] ],
 
   %-----------------------The SEARCH phase-------------------------------------
   Tags = TAdd1 ++ TOld1 ++ TDel1,
@@ -406,13 +402,13 @@ on_commit(#ecomet_log{
   Rights =
     {'OR',[{<<"rights">>,'=',T} || T <- [is_admin|RAdd1 ++ ROld1 ++ RDel1] ]},
 
-  Changes =
+  Dependencies =
     {'OR',[{<<"dependencies">>,'=',F} || F <- ChangedFields1]},
 
   Query = ecomet_resultset:subscription_compile({'AND',[
     Index,
     Rights,
-    Changes,
+    Dependencies,
     {<<"databases">>,'=',DB}
   ]}),
 
@@ -420,7 +416,7 @@ on_commit(#ecomet_log{
   Log1=Log#ecomet_log{
     tags = {TAdd1, TOld1, TDel1},
     rights = { RAdd1, ROld1, RDel1 },
-    changes = ChangedFields1
+    changes = Changes
   },
 
   % Run the search on the other nodes
