@@ -79,6 +79,22 @@
   is_object/1
 ]).
 
+% @edoc ecomet object denotes map where each key is field_key()
+% and corresponding value is field_value()
+-type object() :: map().
+
+% @edoc object handler of ecomet object
+-type object_handler() :: ecomet_object:object_handler().
+
+% @edoc object identifier
+-type oid() :: {non_neg_integer(), non_neg_integer()}.
+
+% @edoc value of field is valid erlang term
+-type field_value() :: term().
+
+% @edoc field key of any field in DB is binary
+-type field_key() :: binary().
+
 %%=================================================================
 %%	Authentication
 %%=================================================================
@@ -100,42 +116,73 @@ is_admin()->
 %%=================================================================
 %%	Object-level CRUD
 %%=================================================================
+% @edoc Create new ecomet object
+-spec create_object(Fields :: object()) -> object_handler().
+
 create_object(Fields)->
   ecomet_object:create(Fields).
 
+% @edoc Return object hanler for given OID
+-spec open(ID :: oid()) -> object_handler().
+
 open(ID)->
   ecomet_lib:to_object(ID).
-open(ID,Lock)->
-  ecomet_lib:to_object(ID,Lock).
+
+open(ID, Lock)->
+  ecomet_lib:to_object(ID, Lock).
+
 open(ID,Lock,Timeout)->
-  ecomet_lib:to_object(ID,Lock,Timeout).
+  ecomet_lib:to_object(ID, Lock, Timeout).
+
 %----Legacy API---------------------------------------------------
 open_nolock(ID)->
-  open(ID,none).
+  open(ID, none).
+
 open_rlock(ID)->
-  open(ID,read).
+  open(ID, read).
+
 open_wlock(ID)->
-  open(ID,write).
+  open(ID, write).
 
-read_field(Object,Field)->
-  ecomet_object:read_field(Object,Field).
-read_field(Object,Field,Default)->
-  ecomet_object:read_field(Object,Field,Default).
-read_fields(Object,Fields)->
-  ecomet_object:read_fields(Object,Fields).
+% @edoc Return field value for given ecomet object
+-spec read_field(Object :: object_handler(), Field :: field_key()) -> field_value().
 
-field_changes(Object,Field)->
+read_field(Object, Field) ->
+  ecomet_object:read_field(Object, Field).
+
+% @edoc Return field value or default for given ecomet object
+-spec read_field(Object :: object_handler(), Field :: field_key()) -> field_value().
+
+read_field(Object, Field, Default) ->
+  ecomet_object:read_field(Object, Field, Default).
+
+% @edoc Return fields for given ecomet object
+-spec read_fields(Object :: object_handler(), Fields :: [field_key()]) -> map().
+
+read_fields(Object, Fields)->
+  ecomet_object:read_fields(Object, Fields).
+
+field_changes(Object, Field)->
   ecomet_object:field_changes(Object,Field).
 
-edit_object(Object,Fields)->
-  ecomet_object:edit(Object,Fields).
+% @edoc Deletes existing ecomet object
+-spec edit_object(Object :: object_handler(), Fields :: map()) -> ok.
+
+edit_object(Object, Fields)->
+  ecomet_object:edit(Object, Fields).
+
+% @edoc Deletes existing ecomet object
+-spec delete_object(Object :: object_handler()) -> ok.
 
 delete_object(Object)->
   ecomet_object:delete(Object).
 
-copy_object(ID,Replace)->
+% @edoc Deletes existing ecomet object
+-spec copy_object(ID :: oid(), Overwrite :: map()) -> ok.
+
+copy_object(ID, Overwrite)->
   Object = ecomet_lib:to_object(ID),
-  ecomet_object:copy(Object,Replace).
+  ecomet_object:copy(Object, Overwrite).
 
 %%=================================================================
 %%	Query API
