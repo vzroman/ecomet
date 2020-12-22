@@ -40,7 +40,6 @@
   object,
   db,
   ts,
-  handler,
   tags,
   rights,
   changes

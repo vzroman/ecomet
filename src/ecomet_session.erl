@@ -83,7 +83,7 @@ register_subscription(Params)->
 run_subscription(ID,Match)->
   case ecomet_user:get_session() of
     {ok,PID}->
-      gen_server:call(PID,{run_subscription,ID,Match});
+      gen_server:call(PID,{run_subscription,ID,Match},infinity);
     {error,Error}->
       ?ERROR(Error)
   end.

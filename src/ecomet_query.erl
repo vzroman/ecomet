@@ -314,7 +314,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
   Self=self(),
   Match=
     fun
-      (#ecomet_log{ts=TS,handler = on_create}) when TS =< StartTS->
+      (#ecomet_log{ts=TS}) when TS =< StartTS->
         % If the object is created before the TS of the last object in the initial
         % state result, the just ignore it because it is already sent
         false;

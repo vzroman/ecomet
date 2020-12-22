@@ -410,18 +410,29 @@ commit(OID,Dict)->
               end
             end,#{},Storages),
 
+          % Actually changed fields
+          Changes = [Name||{Name,_}<-ChangedFields],
+
+          % Log timestamp. If it is an object creation then timestamp must be the same as
+          % the timestamp of the object, otherwise it is taken as the current timestamp
+          TS =
+            case lists:member(<<".ts">>,Changes) of
+              true->maps:get(<<".ts">>,Version);
+              _->ecomet_lib:log_ts()
+            end,
+
           % The log record
           #ecomet_log{
             object = Version#{ <<".oid">> => OID },
             db = DB,
-            ts=ecomet_lib:log_ts(),
+            ts=TS,
             tags={ Add, Unchanged, Del},
             rights={
               [ V || {<<".readgroups">>,V,_} <-Add],
               [ V || {<<".readgroups">>,V,_} <-Unchanged],
               [ V || {<<".readgroups">>,V,_} <-Del]
             },
-            changes = [Name||{Name,_}<-ChangedFields]
+            changes = Changes
           }
       end
   end.
