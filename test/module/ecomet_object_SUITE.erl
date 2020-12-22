@@ -41,7 +41,7 @@
   dirty_open/1,
   read_lock/1,
   write_lock/1,
-  dependent/1,
+  storage/1,
   admin_rights/1,
   write_rights/1,
   read_rights/1,
@@ -54,7 +54,7 @@ all()->
     new_id,
     create,
     {group,edit},
-    dependent,
+    storage,
     {group,check_rights},
     copy,
     helpers
@@ -549,50 +549,190 @@ write_lock(Config)->
   ecomet_object:delete(CreatedObject).
 
 
-dependent(_Config)->
-%%  ecomet_user:on_init_state(),
-%%  PatternOID=?GET(pattern_id,Config),
-%%  % Handler
-%%  put({ecomet_test_behaviour1,on_create},fun(TheObject)->
-%%    case get({ecomet_test_behaviour1,on_create,oid}) of
-%%      undefined->
-%%        TheOID=ecomet_object:get_oid(TheObject),
-%%        put({ecomet_test_behaviour1,on_create,oid},test),
-%%        Dependent=ecomet_object:create(#{
-%%          <<".name">>=><<"test_object51">>,
-%%          <<".folder">>=>TheOID,
-%%          <<".pattern">>=>PatternOID,
-%%          <<"ram_field">>=><<"ram_value">>,
-%%          <<"disc_field">>=><<"disc_value">>
-%%        }),
-%%        ct:pal("Dependent ~p", [Dependent]),
-%%        put({ecomet_test_behaviour1,on_create,oid},ecomet_object:get_oid(Dependent));
-%%      _->ok
-%%    end
-%% end),
-%%  FolderOID=?GET(folder_id,Config),
-%%  Main=ecomet_object:create(#{
-%%    <<".name">>=><<"test_object5">>,
-%%    <<".folder">>=>FolderOID,
-%%    <<".pattern">>=>PatternOID,
-%%    <<"ram_field">>=><<"ram_value">>,
-%%    <<"disc_field">>=><<"disc_value">>
-%%  }),
-%%  MainOID=ecomet_object:get_oid(Main),
-%%  DependentOID=erase({ecomet_test_behaviour1,on_create,oid}),
-%%  ct:pal("DependentOID ~p", [DependentOID]),
-%%  MainObject=ecomet_object:construct(MainOID),
-%%  {ok,<<"test_object5">>}=ecomet_object:read_field(MainObject,<<".name">>),
-%%
-%%  DependentObject=ecomet_object:construct(DependentOID),
-%%  {ok,<<"test_object51">>}=ecomet_object:read_field(DependentObject,<<".name">>),
-%%
-%%  Log=?GETLOG(),
-%%  SubscriptionLog=lists:filter(fun(E)->case E of {ecomet_subscription,_}->true; _->false end end,Log),
-%%  [{ecomet_subscription,#ecomet_log{oid=MainOID}},{ecomet_subscription,#ecomet_log{oid=DependentOID}}]=SubscriptionLog,
-%%
-%%  erase({ecomet_test_behaviour1,on_create}),
-%%  erase(test_log_branch).
+storage(_Config)->
+  ecomet_user:on_init_state(),
+
+  TestPattern={?PATTERN_PATTERN,3001},
+  Map=#{
+    <<".name">>=>#{ type=> string, index=>[simple] },
+    <<".folder">>=>#{ type=> link, index=>[simple] },
+    <<".pattern">>=>#{ type=> link, index=>[simple] },
+    <<"ram_field">>=>#{ type=> string, index=>[simple], storage=>?RAM } ,
+    <<"ramdisc_field">>=>#{ type=> string, index=>[simple], storage=>?RAMDISC }
+  },
+  ecomet_schema:register_type(TestPattern,Map),
+
+  Folder = ?OID(ecomet:create_object(#{
+    <<".name">>=><<"test_storage">>,
+    <<".folder">>=>?OID(<<"/root">>),
+    <<".pattern">>=>?OID(<<"/root/.patterns/.folder">>)
+  })),
+
+  %------------Create a new object-------------------------------
+  Object1=ecomet:create_object(#{
+    <<".name">>=><<"obj1">>,
+    <<".folder">>=>Folder,
+    <<".pattern">>=>TestPattern
+  }),
+  % DISC
+  #{
+    fields:=#{
+      <<".name">>:= <<"obj1">>,
+      <<".folder">>:= Folder,
+      <<".pattern">>:= TestPattern
+    },
+    tags:=#{
+      <<".name">>:=[{<<"obj1">>,simple}],
+      <<".folder">>:=[{Folder,simple}],
+      <<".pattern">>:=[{TestPattern,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?DISC,?OID(Object1)),
+  % RAM
+  not_found = ecomet_backend:dirty_read(?ROOT,?DATA,?RAM,?OID(Object1)),
+  %RAMDISC
+  not_found = ecomet_backend:dirty_read(?ROOT,?DATA,?RAMDISC,?OID(Object1)),
+
+  %------------Edit RAM storage-------------------------------
+  ok = ecomet:edit_object(Object1,#{
+    <<"ram_field">>=><<"ram_value1">>
+  }),
+  % DISC
+  #{
+    fields:=#{
+      <<".name">>:= <<"obj1">>,
+      <<".folder">>:= Folder,
+      <<".pattern">>:= TestPattern
+    },
+    tags:=#{
+      <<".name">>:=[{<<"obj1">>,simple}],
+      <<".folder">>:=[{Folder,simple}],
+      <<".pattern">>:=[{TestPattern,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?DISC,?OID(Object1)),
+  % RAM
+  #{
+    fields:=#{
+      <<"ram_field">>:= <<"ram_value1">>
+    },
+    tags:=#{
+      <<"ram_field">>:=[{<<"ram_value1">>,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?RAM,?OID(Object1)),
+  % RAMDISC
+  not_found = ecomet_backend:dirty_read(?ROOT,?DATA,?RAMDISC,?OID(Object1)),
+
+  %------------Edit RAMDISC storage-------------------------------
+  ok = ecomet:edit_object(Object1,#{
+    <<"ramdisc_field">>=><<"ramdisc_value1">>
+  }),
+
+  % DISC
+  #{
+    fields:=#{
+      <<".name">>:= <<"obj1">>,
+      <<".folder">>:= Folder,
+      <<".pattern">>:= TestPattern
+    },
+    tags:=#{
+      <<".name">>:=[{<<"obj1">>,simple}],
+      <<".folder">>:=[{Folder,simple}],
+      <<".pattern">>:=[{TestPattern,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?DISC,?OID(Object1)),
+  % RAM
+  #{
+    fields:=#{
+      <<"ram_field">>:= <<"ram_value1">>
+    },
+    tags:=#{
+      <<"ram_field">>:=[{<<"ram_value1">>,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?RAM,?OID(Object1)),
+  % RAMDISC
+  #{
+    fields:=#{
+      <<"ramdisc_field">>:= <<"ramdisc_value1">>
+    },
+    tags:=#{
+      <<"ramdisc_field">>:=[{<<"ramdisc_value1">>,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?RAMDISC,?OID(Object1)),
+
+  %-------------------No real changes--------------------------------
+  ok = ecomet:edit_object(Object1,#{
+    <<".name">>=><<"obj1">>,
+    <<"ramdisc_field">>=><<"ramdisc_value1">>
+  }),
+  % DISC
+  #{
+    fields:=#{
+      <<".name">>:= <<"obj1">>,
+      <<".folder">>:= Folder,
+      <<".pattern">>:= TestPattern
+    },
+    tags:=#{
+      <<".name">>:=[{<<"obj1">>,simple}],
+      <<".folder">>:=[{Folder,simple}],
+      <<".pattern">>:=[{TestPattern,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?DISC,?OID(Object1)),
+  % RAM
+  #{
+    fields:=#{
+      <<"ram_field">>:= <<"ram_value1">>
+    },
+    tags:=#{
+      <<"ram_field">>:=[{<<"ram_value1">>,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?RAM,?OID(Object1)),
+  % RAMDISC
+  #{
+    fields:=#{
+      <<"ramdisc_field">>:= <<"ramdisc_value1">>
+    },
+    tags:=#{
+      <<"ramdisc_field">>:=[{<<"ramdisc_value1">>,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?RAMDISC,?OID(Object1)),
+
+  %------------Empty RAMDISC storage-------------------------------
+  ok = ecomet:edit_object(Object1,#{
+    <<"ramdisc_field">>=>none
+  }),
+  % DISC
+  #{
+    fields:=#{
+      <<".name">>:= <<"obj1">>,
+      <<".folder">>:= Folder,
+      <<".pattern">>:= TestPattern
+    },
+    tags:=#{
+      <<".name">>:=[{<<"obj1">>,simple}],
+      <<".folder">>:=[{Folder,simple}],
+      <<".pattern">>:=[{TestPattern,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?DISC,?OID(Object1)),
+  % RAM
+  #{
+    fields:=#{
+      <<"ram_field">>:= <<"ram_value1">>
+    },
+    tags:=#{
+      <<"ram_field">>:=[{<<"ram_value1">>,simple}]
+    }
+  } = ecomet_backend:dirty_read(?ROOT,?DATA,?RAM,?OID(Object1)),
+  % RAMDISC
+  not_found = ecomet_backend:dirty_read(?ROOT,?DATA,?RAMDISC,?OID(Object1)),
+
+  %------------Delete the object-------------------------------
+  ok=ecomet:delete_object(Object1),
+  % DISC
+  not_found = ecomet_backend:dirty_read(?ROOT,?DATA,?DISC,?OID(Object1)),
+  % RAM
+  not_found = ecomet_backend:dirty_read(?ROOT,?DATA,?RAM,?OID(Object1)),
+  %RAMDISC
+  not_found = ecomet_backend:dirty_read(?ROOT,?DATA,?RAMDISC,?OID(Object1)),
+
   ok.
 
 admin_rights(Config)->

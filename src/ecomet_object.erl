@@ -381,34 +381,38 @@ commit(OID,Dict)->
           % Update the object indexes and get changes
           {Add,Unchanged,Del,UpdatedBackTags}= ecomet_index:build_index(OID,Map,ChangedFields,BackTags),
 
-          % Step 3. Merge storage changes
-          NewStorages=
-            maps:fold(fun(T,StorageFields,Acc)->
-              case maps:size(StorageFields) of
-                0->
-                  maps:remove(T,Acc);
-                _->
-                  Acc#{T=> #{ fields=>StorageFields, tags=>maps:get(T,UpdatedBackTags,#{})} }
+          % Step 3. Dump changes to the storage, build the new version of the object
+          Version=
+            maps:fold(fun(T,S,Acc)->
+              case maps:find(T,UpdatedFields) of
+                error->
+                  % There are no changes in this type of the storage
+                  maps:merge(Acc,maps:get(fields,S,#{}));
+                {ok,TFields}->
+                  % The storage has changes
+                  case maps:size(TFields) of
+                    0->
+                      % Storage is empty now, delete it
+                      ok = ecomet_backend:delete(DB,?DATA,T,OID),
+                      Acc;
+                    _->
+                      % Update storage tags
+                      TTags = maps:get(T,UpdatedBackTags,maps:get(tags,S,#{})),
+                      NewStorage=
+                        case maps:size(TTags) of
+                          0->#{fields=>TFields};
+                          _->#{fields=>TFields, tags=>TTags}
+                        end,
+                      % Dump the new version of the storage
+                      ok = ecomet_backend:write(DB,?DATA,T,OID,NewStorage),
+                      maps:merge(Acc,TFields)
+                  end
               end
-                      end,Storages,UpdatedFields),
-
-          % Step 4.
-          % Remove empty storages
-          [ ok = ecomet_backend:delete(DB,?DATA,Type,OID) || Type <- maps:keys(Storages) -- maps:keys(NewStorages) ],
-          % Dump new/updated storages
-          [ ok = ecomet_backend:write(DB,?DATA,Type,OID,Storage) || {Type,Storage} <- maps:to_list(NewStorages) ],
-
-          % Build the version of the object
-          LogObject = maps:fold(fun
-                                  ( _Type ,#{ fields := F}, Acc)->
-                                    maps:merge(Acc,F);
-                                  (_Type,_Empty,Acc)->
-                                    Acc
-                                end,#{},NewStorages),
+            end,#{},Storages),
 
           % The log record
           #ecomet_log{
-            object = LogObject#{ <<".oid">> => OID },
+            object = Version#{ <<".oid">> => OID },
             db = DB,
             ts=ecomet_lib:log_ts(),
             tags={ Add, Unchanged, Del},
