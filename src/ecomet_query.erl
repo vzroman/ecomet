@@ -32,6 +32,7 @@
   subscribe/4,subscribe/5,
   unsubscribe/1,
   on_commit/1,
+  notify/2,
   set/3,
   delete/2,delete/3,
   execute/2,execute/3,
