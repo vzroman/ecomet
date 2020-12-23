@@ -21,6 +21,7 @@ Nonterminals
 StatementList
 Statement
 Get
+Subscribe
 Set
 Insert
 Delete
@@ -97,6 +98,7 @@ StatementList-> Statement ';' StatementList : ['$1'|'$3'].
 
 
 Statement -> Get : '$1'.
+Statement -> Subscribe : '$1'.
 Statement -> Set : '$1'.
 Statement -> Insert : '$1'.
 Statement -> Delete : '$1'.
@@ -106,6 +108,9 @@ Statement -> transaction_rollback : transaction_rollback.
 
 Get -> get GetFieldList where Condition ParamList: {get,'$2','$4','$5'}.
 Get -> get GetFieldList where Condition: {get,'$2','$4',[]}.
+
+Subscribe -> subscribe text get GetFieldList where Condition SubParamList: {subscribe,'$2','$4','$6','$7'}.
+Subscribe -> subscribe text get GetFieldList where Condition: {subscribe,'$2','$4','$6',[]}.
 
 Set->set SetFieldList where Condition Lock: {set,'$2','$4',['$5']}.
 Set-> set SetFieldList where Condition: {set,'$2','$4',[]}.
@@ -170,6 +175,12 @@ Param-> order by OrderByList : {order,'$3'}.
 Param-> group by GroupByList: {group,'$3'}.
 Param-> page integer ':' integer: {page,{ get_token('$2'), get_token('$4') }}.
 Param-> Lock : '$1'.
+
+SubParamList-> SubParam SubParamList: ['$1'|'$2'].
+SubParamList-> SubParam: ['$1'].
+
+SubParam-> stateless : {stateless,true}.
+SubParam-> no_feedback : {no_feedback,true}.
 
 Lock -> lock read : { lock , read }.
 Lock -> lock write : { lock , write }.

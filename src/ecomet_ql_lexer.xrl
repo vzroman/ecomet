@@ -26,6 +26,7 @@ DELETE = (D|d)(E|e)(L|l)(E|e)(T|t)(E|e)
 DESC = (D|d)(E|e)(S|s)(C|c)
 GROUP = (G|g)(R|r)(O|o)(U|u)(P|p)
 GET = (G|g)(E|e)(T|t)
+SUBSCRIBE = (S|s)(U|u)(B|b)(S|s)(C|c)(R|r)(I|i)(B|b)(E|e)
 INSERT = (I|i)(N|n)(S|s)(E|e)(R|r)(T|t)
 LOCK = (L|l)(O|o)(C|c)(K|k)
 OR = (O|o)(R|r)
@@ -38,6 +39,8 @@ TRANSACTION_COMMIT = (T|t)(R|r)(A|a)(N|n)(S|s)(A|a)(C|c)(T|t)(I|i)(O|o)(N|n)_(C|
 TRANSACTION_ROLLBACK = (T|t)(R|r)(A|a)(N|n)(S|s)(A|a)(C|c)(T|t)(I|i)(O|o)(N|n)_(R|r)(O|o)(L|l)(L|l)(B|b)(A|a)(C|c)(K|k)
 WHERE = (W|w)(H|h)(E|e)(R|r)(E|e)
 WRITE = (W|w)(R|r)(I|i)(T|t)(E|e)
+STATELESS = (S|s)(T|t)(A|a)(T|t)(E|e)(L|l)(E|e)(S|s)(S|s)
+NO_FEEDBACK = (N|n)(O|o)_(F|f)(E|e)(E|e)(D|d)(B|b)(A|a)(C|c)(K|k)
 
 TEXT = '(\\'|[^'])*'
 HEX = 0x([0-9a-zA-Z]*)
@@ -76,6 +79,7 @@ Rules.
 {DESC} : {token, {'DESC', TokenLine}}.
 {INSERT} : {token, {insert, TokenLine}}.
 {GET} : {token, {get, TokenLine}}.
+{SUBSCRIBE} : {token, {subscribe, TokenLine}}.
 {GROUP} : {token, {group, TokenLine}}.
 {OR} : {token, {'OR', TokenLine}}.
 {ORDER} : {token, {order, TokenLine}}.
@@ -87,6 +91,8 @@ Rules.
 {TRANSACTION_ROLLBACK} : {token, {transaction_rollback, TokenLine}}.
 {WHERE} : {token, {where, TokenLine}}.
 {WRITE} : {token, {write, TokenLine}}.
+{STATELESS} : {token, {stateless, TokenLine}}.
+{NO_FEEDBACK} : {token, {no_feedback, TokenLine}}.
 {HEX} : {token, {integer, TokenLine, to_hex(TokenChars)}}.
 {INTNUM}      : {token, {integer, TokenLine, list_to_integer(TokenChars)}}.
 {FLOATDEC}    : {token, {float, TokenLine, list_to_float(TokenChars)}}.

@@ -223,6 +223,8 @@ system(DBs,Fields,Conditions)->
 % no_feedback, stateless are supported
 subscribe(ID,DBs,Fields,Conditions)->
   subscribe(ID,DBs,Fields,Conditions,#{}).
+subscribe(ID,DBs,Fields,Conditions,InParams) when is_list(InParams)->
+  subscribe(ID,DBs,Fields,Conditions,maps:from_list(InParams));
 subscribe(ID,DBs,Fields,Conditions,InParams)->
 
   #{
