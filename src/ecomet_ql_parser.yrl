@@ -35,8 +35,8 @@ Function
 ConditionList
 Condition
 Operator
-FieldValue
-MacrosArgList
+Constant
+Variable
 ParamList
 Param
 SubParamList
@@ -62,7 +62,6 @@ insert
 get
 subscribe
 group
-macros
 'OR'
 order
 page
@@ -117,7 +116,7 @@ Get -> get GetFieldList where Condition: {get,'$2','$4',[]}.
 Subscribe -> subscribe text get GetFieldList where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$7'}.
 Subscribe -> subscribe text get GetFieldList where Condition: {subscribe,get_token('$2'),'$4','$6',[]}.
 
-Set->set SetFieldList where Condition Lock: {set,'$2','$4',['$5']}.
+Set-> set SetFieldList where Condition Lock: {set,'$2','$4',['$5']}.
 Set-> set SetFieldList where Condition: {set,'$2','$4',[]}.
 
 Insert -> insert SetFieldList : { insert, '$2' }.
@@ -128,28 +127,38 @@ Delete -> delete where Condition : { delete, '$3', []}.
 GetFieldList -> GetField: ['$1'].
 GetFieldList -> GetField ',' GetFieldList: ['$1'|'$3'].
 
-GetField -> FieldName 'AS' text : {get_token('$3'),'$1'}.
-GetField -> FieldName : '$1'.
-GetField -> Function 'AS' text : {get_token('$3'),'$1'}.
-GetField -> Function : '$1'.
+GetField -> text 'AS' text : {get_token('$3'),get_token('$1')}.
+GetField -> Variable 'AS' text : {get_token('$3'), '$1' }.
+GetField -> text : get_token('$1').
+GetField -> Variable : '$1'.
 
 SetFieldList -> SetField: ['$1'].
 SetFieldList -> SetField ',' SetFieldList: ['$1'|'$3'].
 
-SetField-> FieldName '=' SetValue : { '$1', '$3' }.
+SetField-> field '=' Variable : { get_token('$1'), '$3' }.
+SetField-> text '=' Variable : { get_token('$1'), '$3' }.
 
-SetValue -> FieldValue : '$1'.
-SetValue -> Function : '$1'.
+Variable -> Constant : '$1'.
+Variable -> field : get_token('$1').
+Variable -> Function '(' VariableList ')' : compile('$1','$3').
 
-FieldName -> field : get_token('$1').
-FieldName -> text : get_token('$1').
+Constant -> integer : get_token('$1').
+Constant -> float : get_token('$1').
+Constant -> text : get_token('$1').
+Constant -> atom : get_token('$1').
+Constant -> Function '(' ConstantList ')' : execute('$1','$3').
 
-Function -> atom '(' GetFieldList ')' : { get_function('$1'), '$3' }.
+VariableList -> Variable : ['$1'].
+VariableList -> Variable ',' VariableList : ['$1'|'$3'].
+
+Function -> atom : { ecomet_query ,get_token('$1') }.
+Function -> atom ':' atom : { get_token('$1') ,get_token('$3') }.
 
 ConditionList -> Condition: ['$1'].
 ConditionList -> Condition ',' ConditionList: ['$1'|'$3'].
 
-Condition -> FieldName Operator FieldValue : { '$1', '$2', '$3' }.
+Condition -> field Operator Constant : { get_token('$1'), '$2', '$3' }.
+Condition -> text Operator Constant : { get_token('$1'), '$2', '$3' }.
 Condition -> 'AND' '(' ConditionList ')' : { 'AND', '$3' }.
 Condition -> 'OR' '(' ConditionList ')' : { 'OR', '$3' }.
 Condition -> 'ANDNOT' '(' Condition ',' Condition ')' : { 'ANDNOT', '$3', '$5' }.
@@ -163,15 +172,6 @@ Operator -> ':=<' : ':=<'.
 Operator -> ':<>' : ':<>'.
 Operator -> 'LIKE' : 'LIKE'.
 Operator -> ':LIKE' : ':LIKE'.
-
-FieldValue -> integer : get_token('$1').
-FieldValue -> float : get_token('$1').
-FieldValue -> text : get_token('$1').
-FieldValue -> atom : get_token('$1').
-FieldValue -> macros '(' MacrosArgList ')' : run_macros(get_token('$1'),'$3').
-
-MacrosArgList -> FieldValue: ['$1'].
-MacrosArgList -> FieldValue ',' MacrosArgList: ['$1'|'$3'].
 
 ParamList-> Param ParamList: ['$1'|'$2'].
 ParamList-> Param: ['$1'].
@@ -193,9 +193,11 @@ Lock -> lock write : { lock , write }.
 OrderByList -> OrderBy: ['$1'].
 OrderByList -> OrderBy ',' OrderByList: ['$1'|'$3'].
 
-OrderBy -> FieldName OrderDirection: {'$1','$2'}.
-OrderBy -> FieldName : {'$1','ASC'}.
+OrderBy -> field OrderDirection: {get_token('$1'),'$2'}.
+OrderBy -> text OrderDirection: {get_token('$1'),'$2'}.
 OrderBy -> integer OrderDirection: { get_token('$1'), '$2'}.
+OrderBy -> field : {get_token('$1'),'ASC'}.
+OrderBy -> text : {get_token('$1'),'ASC'}.
 OrderBy -> integer: { get_token('$1'), 'ASC'}.
 
 OrderDirection -> 'ASC' : 'ASC'.
@@ -204,7 +206,8 @@ OrderDirection -> 'DESC' : 'DESC'.
 GroupByList -> GroupBy: ['$1'].
 GroupByList -> GroupBy ',' GroupByList: ['$1'|'$3'].
 
-GroupBy -> FieldName : '$1'.
+GroupBy -> field : get_token('$1').
+GroupBy -> text : get_token('$1').
 GroupBy -> integer : get_token('$1').
 
 Erlang code.

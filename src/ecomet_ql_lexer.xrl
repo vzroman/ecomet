@@ -45,7 +45,6 @@ NO_FEEDBACK = (N|n)(O|o)_(F|f)(E|e)(E|e)(D|d)(B|b)(A|a)(C|c)(K|k)
 TEXT = '(\\'|[^'])*'
 HEX = 0x([0-9a-zA-Z]*)
 ATOM = \$([a-zA-Z][a-zA-Z0-9_\-]*)
-MACROS = \$\$([a-zA-Z][a-zA-Z0-9_\-]*)
 FIELD = ([a-zA-Z0-9_\-.]*)
 COMMENT_MULTILINE = (/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+/)|(--.*)
 WHITESPACE = ([\000-\s]*)
@@ -72,7 +71,6 @@ Rules.
 {ANDNOT} : {token, {'ANDNOT', TokenLine}}.
 {AS} : {token, {'AS', TokenLine}}.
 {ASC} : {token, {'ASC', TokenLine}}.
-{MACROS} : {token, {macros,TokenLine,to_macros(TokenChars)}}.
 {ATOM} : {token, {atom,TokenLine,to_atom(TokenChars)}}.
 {BY} : {token, {by, TokenLine}}.
 {DELETE} : {token, {delete, TokenLine}}.
@@ -123,8 +121,7 @@ Erlang code.
 
 -export([
     to_hex/1,
-    to_atom/1,
-    to_macros/1
+    to_atom/1
 ]).
 
 to_hex([$0,$x|Hex]) ->
@@ -134,9 +131,6 @@ to_text([$'|Literal]) ->
     unicode:characters_to_binary(Text).
 to_atom([$$|Literal]) ->
     list_to_atom(Literal).
-
-to_macros([$$,$$|Literal]) ->
-    list_to_atom(string:lowercase(Literal)).
 
 filter_escapes([$\\,$'|Rest], Acc) ->
     filter_escapes(Rest,[$\'|Acc]);
