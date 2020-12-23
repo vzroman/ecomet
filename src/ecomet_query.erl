@@ -33,7 +33,7 @@
   unsubscribe/1,
   on_commit/1,
   notify/2,
-  set/3,
+  set/3,set/4,
   delete/2,delete/3,
   execute/2,execute/3,
   compile/3,compile/4,
@@ -105,7 +105,7 @@ parse(_Statements)->?ERROR(invalid_string).
 run_statements(Statements)->
   run_statements(Statements,[]).
 run_statements([S|Rest],Acc)->
-  run_statement(Rest,safe_statement(S,Acc));
+  run_statements(Rest,safe_statement(S,Acc));
 run_statements([],Acc)->
   case Acc of
     [Single]->Single;
@@ -122,6 +122,9 @@ safe_statement(Statement,Acc)->
 run_statement({get,Fields,Condition,Params},Acc)->
   DBs=ecomet_db:get_databases(),
   [get(DBs,Fields,Condition,Params)|Acc];
+run_statement({subscribe,ID,Fields,Condition,Params},Acc)->
+  DBs=ecomet_db:get_databases(),
+  [subscribe(ID,DBs,Fields,Condition,Params)|Acc];
 run_statement({set,Fields,Condition,Params},Acc)->
   DBs=ecomet_db:get_databases(),
   [set(DBs,Fields,Condition,Params)|Acc];

@@ -221,7 +221,7 @@ check_value(Config,Value)->
   Type = get_type(Config),
   case ecomet_types:check_value(Type,Value) of
     ok -> ok;
-    _->?ERROR(invalid_value)
+    _->?ERROR({invalid_value,Value})
   end.
 
 get_type(#{type:=list,subtype:=SubType})->

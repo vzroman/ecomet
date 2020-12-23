@@ -40,6 +40,23 @@
   copy_object/2
 ]).
 
+
+%%=================================================================
+%%	Query API
+%%=================================================================
+-export([
+  query/1,
+  get/3,get/4,
+  subscribe/4,subscribe/5,
+  unsubscribe/1,
+  set/3,set/4,
+  delete/2,delete/3,
+
+  parse_query/1,
+  run_query/1
+]).
+
+
 %%=================================================================
 %%	Transactions
 %%=================================================================
@@ -120,6 +137,40 @@ delete_object(Object)->
 copy_object(ID,Replace)->
   Object = ecomet_lib:to_object(ID),
   ecomet_object:copy(Object,Replace).
+
+%%=================================================================
+%%	Query API
+%%=================================================================
+query(QueryString)->
+  ecomet_query:run(QueryString).
+
+get(DBs,Fields,Conditions)->
+  ecomet_query:get(DBs,Fields,Conditions).
+get(DBs,Fields,Conditions,Params)->
+  ecomet_query:get(DBs,Fields,Conditions,Params).
+
+subscribe(ID,DBs,Fields,Conditions)->
+  ecomet_query:subscribe(ID,DBs,Fields,Conditions).
+subscribe(ID,DBs,Fields,Conditions,Params)->
+  ecomet_query:subscribe(ID,DBs,Fields,Conditions,Params).
+
+unsubscribe(ID)->
+  ecomet_query:unsubscribe(ID).
+
+set(DBs,Fields,Conditions)->
+  ecomet_query:set(DBs,Fields,Conditions).
+set(DBs,Fields,Conditions,Params)->
+  ecomet_query:set(DBs,Fields,Conditions,Params).
+
+delete(DBs,Conditions)->
+  ecomet_query:delete(DBs,Conditions).
+delete(DBs,Conditions,Params)->
+  ecomet_query:delete(DBs,Conditions,Params).
+
+parse_query(QueryString)->
+  ecomet_query:parse(QueryString).
+run_query(ParsedQuery)->
+  ecomet_query:run_statements(ParsedQuery).
 
 %%=================================================================
 %%	Transactions API

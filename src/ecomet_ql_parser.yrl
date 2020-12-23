@@ -39,6 +39,8 @@ FieldValue
 MacrosArgList
 ParamList
 Param
+SubParamList
+SubParam
 OrderByList
 OrderBy
 OrderDirection
@@ -58,6 +60,7 @@ delete
 'DESC'
 insert
 get
+subscribe
 group
 macros
 'OR'
@@ -70,6 +73,8 @@ transaction_commit
 transaction_rollback
 where
 write
+stateless
+no_feedback
 integer
 float
 '='
@@ -109,8 +114,8 @@ Statement -> transaction_rollback : transaction_rollback.
 Get -> get GetFieldList where Condition ParamList: {get,'$2','$4','$5'}.
 Get -> get GetFieldList where Condition: {get,'$2','$4',[]}.
 
-Subscribe -> subscribe text get GetFieldList where Condition SubParamList: {subscribe,'$2','$4','$6','$7'}.
-Subscribe -> subscribe text get GetFieldList where Condition: {subscribe,'$2','$4','$6',[]}.
+Subscribe -> subscribe text get GetFieldList where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$7'}.
+Subscribe -> subscribe text get GetFieldList where Condition: {subscribe,get_token('$2'),'$4','$6',[]}.
 
 Set->set SetFieldList where Condition Lock: {set,'$2','$4',['$5']}.
 Set-> set SetFieldList where Condition: {set,'$2','$4',[]}.
