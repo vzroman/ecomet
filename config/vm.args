@@ -1,12 +1,12 @@
 ######################################################################
-## Erlang VM Args for dlss
+## Erlang VM Args for ecomet
 ######################################################################
 
 ## Name of the node
 -name ecomet@node.1
 
 ## Cookie for distributed erlang
--setcookie dlss
+-setcookie ecomet
 
 ## folder for database
 -mnesia dir '"DB"'
