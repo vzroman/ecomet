@@ -63,6 +63,7 @@
 -export([
   is_transaction/0,
   transaction/1,
+  transaction_sync/1,
   start_transaction/0,
   commit_transaction/0,
   rollback_transaction/0,
@@ -180,6 +181,9 @@ is_transaction()->
 
 transaction(Fun)->
   ecomet_transaction:internal(Fun).
+
+transaction_sync(Fun)->
+  ecomet_transaction:internal_sync(Fun).
 
 start_transaction()->
   ecomet_transaction:start().

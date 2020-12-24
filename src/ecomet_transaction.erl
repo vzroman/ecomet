@@ -22,6 +22,7 @@
 %% API
 -export([
   internal/1,
+  internal_sync/1,
   start/0,
   lock_key/4,
   lock/3,
@@ -53,6 +54,21 @@ internal(Fun)->
     {Log,OnCommits}=tcommit(),
     {Result,Log,OnCommits}
   end) of
+    {ok,{Result,Log,OnCommits}}->
+      on_commit(Log,OnCommits),
+      {ok,Result};
+    {error,Error}->
+      rollback(),
+      {error,Error}
+  end.
+
+internal_sync(Fun)->
+  tstart(internal),
+  case ecomet_backend:sync_transaction(fun()->
+    Result=Fun(),
+    {Log,OnCommits}=tcommit(),
+    {Result,Log,OnCommits}
+                                  end) of
     {ok,{Result,Log,OnCommits}}->
       on_commit(Log,OnCommits),
       {ok,Result};
