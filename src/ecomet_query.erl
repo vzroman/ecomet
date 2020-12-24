@@ -44,7 +44,7 @@
 %%		Parser
 %%====================================================================
 -export([
-  macros/2,
+  compile_function/1,compile_function/3,
   wrap_transactions/1
 ]).
 
@@ -1135,28 +1135,75 @@ sort_leafs(_L,Rows,_Order)->
   [[Head|Tail]||{Head,Tail}<-Rows].
 
 %% ====================================================================
-%% MACROS
-%% ====================================================================
-macros(term,[Text]) when is_binary(Text)->
-  case ecomet_types:string_to_term(Text) of
-    {ok,Value}->Value;
-    {error,_Error}->?ERROR({invalid_term,Text})
-  end;
-macros(term,_Arguments)->
-  ?ERROR({term,invalid_arguments});
-macros(path,[Path]) when is_binary(Path)->
-  case ecomet:path2oid(Path) of
-    {ok,OID}->OID;
-    {error,_}->?ERROR({invalid_path,Path})
-  end;
-macros(path,_Arguments)->
-  ?ERROR({path,invalid_arguments});
-macros(Macros,_Arguments)->
-  ?ERROR({invalid_macros,Macros}).
-
-%% ====================================================================
 %% PARSER
 %% ====================================================================
+compile_function(Arguments)->
+  case collect_deps(Arguments) of
+    []->
+      % This is a constant
+      Arguments;
+    Deps->
+      % The list contains context dependent items
+      Map = values_map(Deps),
+      Fun =
+        fun(Values)->
+          ValueMap = Map(Values),
+          [arg_value(A,ValueMap)||A<-Arguments]
+        end,
+      { Fun, Deps }
+  end.
+
+compile_function(Module,Function,Arguments)->
+  case collect_deps(Arguments) of
+    []->
+      % This is the constant actually
+      apply(Module,Function,Arguments);
+    Deps ->
+      Map = values_map(Deps),
+      Fun =
+        fun(Values)->
+          ValueMap = Map(Values),
+
+          % Evaluate the arguments
+          ArgValues=[arg_value(A,ValueMap)||A<-Arguments],
+
+          % Evaluate the function
+          apply(Module,Function,ArgValues)
+        end,
+      { Fun, Deps }
+  end.
+
+values_map(Deps)->
+  NameMap=maps:from_list(lists:zip( lists:seq(1,length(Deps)), Deps )) ,
+  fun(Values)->
+    % Build dependencies name map
+    Values1=lists:zip( lists:seq(1,length(Values)), Values ),
+    lists:foldl(fun({I,V},Acc)->
+      Acc#{maps:get(I,NameMap)=>V}
+    end,#{},Values1)
+  end.
+
+collect_deps(Arguments)->
+  collect_deps(Arguments,#{}).
+collect_deps([{F,Args}|Rest],Acc)
+  when is_function(F,1),is_list(Args)->
+  Acc1 = maps:merge(Acc,maps:from_list([{V,1}||V<-Args])),
+  collect_deps(Rest,Acc1);
+collect_deps([List|Rest],Acc) when is_list(List)->
+  collect_deps(Rest,collect_deps(List,Acc));
+collect_deps([_Const|Rest],Acc)->
+  collect_deps(Rest,Acc);
+collect_deps([],Acc)->
+  [V||{V,_}<-ordsets:from_list(maps:to_list(Acc))].
+
+arg_value({F,Args},Values)->
+  ArgValues = [ maps:get(A,Values) || A<-Args ],
+  F(ArgValues);
+arg_value(List,Values) when is_list(List)->
+  [arg_value(I,Values)||I<-List];
+arg_value(Const,_Values)->
+  Const.
+
 wrap_transactions(Statements)->
   wrap_transactions(Statements,0,[]).
 wrap_transactions([transaction_start|Rest],Level,Acc)->

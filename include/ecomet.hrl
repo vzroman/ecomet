@@ -51,6 +51,7 @@
 
 -define(OBJECT(ID),ecomet_lib:to_object_system(ID)).
 -define(OID(ID),ecomet_lib:to_oid(ID)).
+-define(PATH(ID),ecomet_lib:to_path(ID)).
 
 -define(ENV(Key,Default),application:get_env(dlss,Key,Default)).
 -define(ENV(OS,Config,Default),

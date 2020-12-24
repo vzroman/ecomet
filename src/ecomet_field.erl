@@ -411,7 +411,7 @@ check_name(Object,IsEmpty)->
       ?ERROR(has_objects);
     { NewName, OldName }->
       % Check the name for forbidden symbols
-      case re:run(NewName,"^(\\.(\\w)+|(\\w+))$") of
+      case re:run(NewName,"^\\.?([a-zA-Z0-9_-]+)$") of
         {match,_}->
           if
             OldName=/=none->

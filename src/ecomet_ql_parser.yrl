@@ -29,14 +29,16 @@ GetFieldList
 GetField
 SetFieldList
 SetField
-SetValue
-FieldName
 Function
 ConditionList
 Condition
 Operator
+Atom
+ConstTerm
 Constant
+ConstantList
 Variable
+VariableList
 ParamList
 Param
 SubParamList
@@ -54,7 +56,6 @@ Terminals
 'ANDNOT'
 'AS'
 'ASC'
-atom
 by
 delete
 'DESC'
@@ -74,8 +75,11 @@ where
 write
 stateless
 no_feedback
+field
+atom
 integer
 float
+'$'
 '='
 ':='
 ':>'
@@ -88,9 +92,10 @@ float
 lock
 '('
 ')'
+'['
+']'
 text
 ','
-field
 ';'
 ':'
 .
@@ -116,8 +121,8 @@ Get -> get GetFieldList where Condition: {get,'$2','$4',[]}.
 Subscribe -> subscribe text get GetFieldList where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$7'}.
 Subscribe -> subscribe text get GetFieldList where Condition: {subscribe,get_token('$2'),'$4','$6',[]}.
 
-Set-> set SetFieldList where Condition Lock: {set,'$2','$4',['$5']}.
-Set-> set SetFieldList where Condition: {set,'$2','$4',[]}.
+Set-> set SetFieldList where Condition Lock: {set,maps:from_list('$2'),'$4',['$5']}.
+Set-> set SetFieldList where Condition: {set,maps:from_list('$2'),'$4',[]}.
 
 Insert -> insert SetFieldList : { insert, '$2' }.
 
@@ -127,38 +132,46 @@ Delete -> delete where Condition : { delete, '$3', []}.
 GetFieldList -> GetField: ['$1'].
 GetFieldList -> GetField ',' GetFieldList: ['$1'|'$3'].
 
-GetField -> text 'AS' text : {get_token('$3'),get_token('$1')}.
-GetField -> Variable 'AS' text : {get_token('$3'), '$1' }.
-GetField -> text : get_token('$1').
-GetField -> Variable : '$1'.
+GetField -> field 'AS' text : { get_token('$3'), get_token('$1') }.
+GetField -> field : get_token('$1').
+GetField -> Function '(' VariableList ')' 'AS' text : { get_token('$6'), compile('$1','$3') }.
+GetField -> Function '(' VariableList ')' : compile('$1','$3').
 
 SetFieldList -> SetField: ['$1'].
 SetFieldList -> SetField ',' SetFieldList: ['$1'|'$3'].
 
 SetField-> field '=' Variable : { get_token('$1'), '$3' }.
-SetField-> text '=' Variable : { get_token('$1'), '$3' }.
 
-Variable -> Constant : '$1'.
-Variable -> field : get_token('$1').
-Variable -> Function '(' VariableList ')' : compile('$1','$3').
+Atom -> field : binary_to_atom(get_token('$1'),utf8).
+Atom -> atom : get_token('$1').
 
-Constant -> integer : get_token('$1').
-Constant -> float : get_token('$1').
-Constant -> text : get_token('$1').
-Constant -> atom : get_token('$1').
-Constant -> Function '(' ConstantList ')' : execute('$1','$3').
+ConstTerm-> integer : get_token('$1').
+ConstTerm -> float : get_token('$1').
+ConstTerm -> text : get_token('$1').
+ConstTerm -> Atom : '$1'.
+
+ConstantList -> Constant : ['$1'].
+ConstantList -> Constant ',' ConstantList : ['$1'|'$3'].
+
+Constant -> ConstTerm : '$1'.
+Constant -> '[' ConstantList ']' : ['$2'].
+Constant -> Function '(' ConstantList ')' : compile('$1','$3').
 
 VariableList -> Variable : ['$1'].
 VariableList -> Variable ',' VariableList : ['$1'|'$3'].
 
-Function -> atom : { ecomet_query ,get_token('$1') }.
-Function -> atom ':' atom : { get_token('$1') ,get_token('$3') }.
+Variable -> ConstTerm : '$1'.
+Variable -> '$' field : get_field('$2').
+Variable -> '[' VariableList ']': compile(['$2']).
+Variable -> Function '(' VariableList ')' : compile('$1','$3').
+
+Function -> '$' Atom : { ecomet_ql_util ,'$2' }.
+Function -> '$' Atom ':' Atom : { '$2' ,'$4' }.
 
 ConditionList -> Condition: ['$1'].
 ConditionList -> Condition ',' ConditionList: ['$1'|'$3'].
 
 Condition -> field Operator Constant : { get_token('$1'), '$2', '$3' }.
-Condition -> text Operator Constant : { get_token('$1'), '$2', '$3' }.
 Condition -> 'AND' '(' ConditionList ')' : { 'AND', '$3' }.
 Condition -> 'OR' '(' ConditionList ')' : { 'OR', '$3' }.
 Condition -> 'ANDNOT' '(' Condition ',' Condition ')' : { 'ANDNOT', '$3', '$5' }.
@@ -194,10 +207,8 @@ OrderByList -> OrderBy: ['$1'].
 OrderByList -> OrderBy ',' OrderByList: ['$1'|'$3'].
 
 OrderBy -> field OrderDirection: {get_token('$1'),'$2'}.
-OrderBy -> text OrderDirection: {get_token('$1'),'$2'}.
 OrderBy -> integer OrderDirection: { get_token('$1'), '$2'}.
 OrderBy -> field : {get_token('$1'),'ASC'}.
-OrderBy -> text : {get_token('$1'),'ASC'}.
 OrderBy -> integer: { get_token('$1'), 'ASC'}.
 
 OrderDirection -> 'ASC' : 'ASC'.
@@ -207,7 +218,6 @@ GroupByList -> GroupBy: ['$1'].
 GroupByList -> GroupBy ',' GroupByList: ['$1'|'$3'].
 
 GroupBy -> field : get_token('$1').
-GroupBy -> text : get_token('$1').
 GroupBy -> integer : get_token('$1').
 
 Erlang code.
@@ -215,13 +225,13 @@ Erlang code.
 get_token({Token, _Line})->Token;
 get_token({_Token, _Line, Value}) -> Value.
 
-get_function({_Token,_Line,Function})->
-  case erlang:function_exported(ecomet_query,Function,1) of
-    true->fun ecomet_query:Function/1;
-    _->erlang:error({invalid_function,Function})
-  end.
-run_macros(Macros,ArgumentList)->
-  ecomet_query:macros(Macros,ArgumentList).
+get_field({_Token, _Line,Field})->
+    {fun erlang:hd/1,[Field]}.
+
+compile(VarList)->
+    ecomet_query:compile_function(VarList).
+compile({Module,Function},Args)->
+    ecomet_query:compile_function(Module,Function,Args).
 
 
 % leex:file("ecomet_ql_lexer.xrl",[{scannerfile,"../src/ecomet_ql_parser.erl"}])

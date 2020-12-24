@@ -57,9 +57,8 @@ get_databases()->
   ecomet_schema:get_registered_databases().
 
 get_by_name(Name) when is_binary(Name)->
-  {ok,PatternID} = ecomet:path2oid(<<"/root/.patterns/.database">>),
   case ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
-    {<<".pattern">>,'=',PatternID},
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.database">>)},
     {<<".name">>,'=',Name }
   ]}) of
     [OID]->{ok,OID};

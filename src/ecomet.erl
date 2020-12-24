@@ -73,10 +73,8 @@
 %%	Identification API
 %%=================================================================
 -export([
-  get_oid/1,
-  get_path/1,
-  oid2path/1,
-  path2oid/1,
+  to_oid/1,
+  to_path/1,
   is_object/1
 ]).
 
@@ -195,17 +193,11 @@ on_commit(Fun)->
 %%=================================================================
 %%	Identification API
 %%=================================================================
-get_oid(Object)->
-  ecomet_object:get_oid(Object).
+to_oid(Object)->
+  ecomet_lib:to_oid(Object).
 
-get_path(Object)->
-  oid2path(get_oid(Object)).
-
-oid2path(OID)->
-  ecomet_folder:oid2path(OID).
-
-path2oid(Path)->
-  ecomet_folder:path2oid(Path).
+to_path(Object)->
+  ecomet_lib:to_path(Object).
 
 is_object(Object)->
   ecomet_object:is_object(Object).
