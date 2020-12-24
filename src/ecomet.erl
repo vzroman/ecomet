@@ -47,7 +47,7 @@
 -export([
   query/1,
   get/3,get/4,
-  subscribe/4,subscribe/5,
+  subscribe/3, subscribe/4,subscribe/5,
   unsubscribe/1,
   set/3,set/4,
   delete/2,delete/3,
@@ -195,8 +195,12 @@ get(DBs,Fields,Conditions)->
 get(DBs,Fields,Conditions,Params)->
   ecomet_query:get(DBs,Fields,Conditions,Params).
 
+subscribe(ID, Fields, Conditions)->
+  ecomet_query:subscribe(ID, [root], Fields, Conditions).
+
 subscribe(ID,DBs,Fields,Conditions)->
   ecomet_query:subscribe(ID,DBs,Fields,Conditions).
+
 subscribe(ID,DBs,Fields,Conditions,Params)->
   ecomet_query:subscribe(ID,DBs,Fields,Conditions,Params).
 
