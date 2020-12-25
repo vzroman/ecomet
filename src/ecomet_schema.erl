@@ -47,7 +47,6 @@
   set_pattern/2,
   list_patterns/0,
 
-  field_description/7,
   local_increment/1
 ]).
 
@@ -69,7 +68,6 @@
 -ifdef(TEST).
 
 -export([
-  object_schema/0,
   register_type/2
 ]).
 
@@ -85,58 +83,36 @@
 %%====================================================================
 %%		System patterns
 %%====================================================================
-object_schema() ->
-  #{
-    <<".name">> => #{type => string, index => [simple], required => true},
-    <<".folder">> => #{type => link, index => [simple], required => true},
-    <<".pattern">> => #{type => link, index => [simple], required => true},
-    <<".readgroups">> => #{type => list, subtype => link, index => [simple]},
-    <<".writegroups">> => #{type => list, subtype => link, index => [simple]},
-    <<".ts">> => #{type => integer}
-  }.
-
-folder_schema() ->
-  BaseObj = object_schema(),
-  BaseObj#{
-    <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-    <<"only_patterns">>=>#{ type => list, subtype => link },
-    <<"exclude_patterns">>=>#{ type => list, subtype => link },
-    <<"recursive_rights">> =>#{ type => bool },
-    <<"database">> =>#{ type => link, index=> [simple] }
-  }.
-
-pattern_schema() ->
-  FolderObj = folder_schema(),
-  FolderObj#{
-    <<"behaviour_module">>=>#{ type => atom },
-    <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
-    <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
-  }.
-
-field_schema() ->
-  BaseObj = object_schema(),
-  BaseObj#{
-    <<"type">>=>#{ type => atom, required => true },
-    <<"subtype">>=>#{ type => atom },
-    <<"index">>=>#{ type => list, subtype => atom },
-    <<"required">>=>#{ type => bool },
-    <<"default">> =>#{ type => term },
-    <<"storage">>=>#{ type => atom, default_value => disc  },
-    <<"autoincrement">>=>#{ type => bool }
-  }.
-
-field_description(Type, Subtype, Index, Required, Storage, Default, Inc) ->
-  #{
-    type => Type,
-    subtype => Subtype,
-    index => Index,
-    required => Required,
-    storage => Storage,
-    default => Default,
-    autoincrement => Inc
-  }.
-
+-define(OBJECT_SCHEMA,#{
+  <<".name">>=>#{ type => string, index=> [simple], required => true },
+  <<".folder">>=>#{ type => link, index=> [simple], required => true },
+  <<".pattern">>=>#{ type => link, index=> [simple], required => true },
+  <<".readgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<".ts">> =>#{ type => integer }
+}).
+-define(FOLDER_SCHEMA,?OBJECT_SCHEMA#{
+  <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<"only_patterns">>=>#{ type => list, subtype => link },
+  <<"exclude_patterns">>=>#{ type => list, subtype => link },
+  <<"recursive_rights">> =>#{ type => bool },
+  <<"database">> =>#{ type => link, index=> [simple] }
+}).
+-define(PATTERN_SCHEMA,?FOLDER_SCHEMA#{
+  <<"behaviour_module">>=>#{ type => atom },
+  <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
+  <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
+}).
+-define(FIELD_SCHEMA,?OBJECT_SCHEMA#{
+  <<"type">>=>#{ type => atom, required => true },
+  <<"subtype">>=>#{ type => atom },
+  <<"index">>=>#{ type => list, subtype => atom },
+  <<"required">>=>#{ type => bool },
+  <<"default">> =>#{ type => term },
+  <<"storage">>=>#{ type => atom, default_value => disc  },
+  <<"autoincrement">>=>#{ type => bool }
+}).
 %-------------STORAGE PATTERNS--------------------------------------------
 -define(DATABASE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] }
@@ -515,16 +491,16 @@ register_node()->
 
 init_base_types()->
   %-------Object------------------
-  ok = register_type({?PATTERN_PATTERN,?OBJECT_PATTERN}, object_schema()),
+  ok = register_type({?PATTERN_PATTERN,?OBJECT_PATTERN}, ?OBJECT_SCHEMA),
 
   %-----Folder---------------------
-  ok = register_type({?PATTERN_PATTERN,?FOLDER_PATTERN}, folder_schema()),
+  ok = register_type({?PATTERN_PATTERN,?FOLDER_PATTERN}, ?FOLDER_SCHEMA),
 
   %-----Pattern---------------------
-  ok = register_type({?PATTERN_PATTERN,?PATTERN_PATTERN}, pattern_schema()),
+  ok = register_type({?PATTERN_PATTERN,?PATTERN_PATTERN}, ?PATTERN_SCHEMA),
 
   %-----Field---------------------
-  ok = register_type({?PATTERN_PATTERN,?FIELD_PATTERN}, field_schema()),
+  ok = register_type({?PATTERN_PATTERN,?FIELD_PATTERN}, ?FIELD_SCHEMA),
 
   ok.
 
@@ -570,7 +546,7 @@ init_base_types_objects()->
                 <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
                 <<"parents">>=>[]
               },
-              children=>init_pattern_fields(object_schema())
+              children=>init_pattern_fields(?OBJECT_SCHEMA)
             }},
             % #2. ?FOLDER_PATTERN
             { <<".folder">>, #{
@@ -580,7 +556,7 @@ init_base_types_objects()->
                 <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
                 <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}]
               },
-              children=>init_pattern_fields(folder_schema())
+              children=>init_pattern_fields(?FOLDER_SCHEMA)
             }},
             % IMPORTANT! Patterns describing objects are created WITHOUT behaviours
             % #3. ?PATTERN_PATTERN
@@ -591,7 +567,7 @@ init_base_types_objects()->
                 <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN},
                 <<"parents">>=>[{?PATTERN_PATTERN,?FOLDER_PATTERN},{?PATTERN_PATTERN,?OBJECT_PATTERN}]
               },
-              children=>init_pattern_fields(pattern_schema())
+              children=>init_pattern_fields(?PATTERN_SCHEMA)
             }},
             % #4. ?FIELD_PATTERN
             { <<".field">>, #{
@@ -601,7 +577,7 @@ init_base_types_objects()->
                 <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
                 <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}]
               },
-              children=>init_pattern_fields(field_schema())
+              children=>init_pattern_fields(?FIELD_SCHEMA)
             }}
           ]
         }}
@@ -753,7 +729,7 @@ init_default_users()->
           children=>
           [ begin
               { Name, #{ edit => true, fields=> ecomet_field:from_schema(#{ storage=>?RAMLOCAL })} }
-            end || Name <- maps:keys(object_schema())]
+            end || Name <- maps:keys(?OBJECT_SCHEMA)]
           ++ init_pattern_fields(?SUBSCRIPTION_SCHEMA)
         }}
       ]

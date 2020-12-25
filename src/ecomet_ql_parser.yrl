@@ -34,6 +34,7 @@ ConditionList
 Condition
 Operator
 Atom
+Field
 ConstTerm
 Constant
 ConstantList
@@ -124,7 +125,7 @@ Subscribe -> subscribe text get GetFieldList where Condition: {subscribe,get_tok
 Set-> set SetFieldList where Condition Lock: {set,maps:from_list('$2'),'$4',['$5']}.
 Set-> set SetFieldList where Condition: {set,maps:from_list('$2'),'$4',[]}.
 
-Insert -> insert SetFieldList : { insert, '$2' }.
+Insert -> insert SetFieldList : { insert, maps:from_list('$2') }.
 
 Delete -> delete where Condition Lock : { delete, '$3', ['$4']}.
 Delete -> delete where Condition : { delete, '$3', []}.
@@ -132,18 +133,21 @@ Delete -> delete where Condition : { delete, '$3', []}.
 GetFieldList -> GetField: ['$1'].
 GetFieldList -> GetField ',' GetFieldList: ['$1'|'$3'].
 
-GetField -> field 'AS' text : { get_token('$3'), get_token('$1') }.
-GetField -> field : get_token('$1').
+GetField -> Field 'AS' text : { get_token('$3'), '$1' }.
+GetField -> Field : '$1'.
 GetField -> Function '(' VariableList ')' 'AS' text : { get_token('$6'), compile('$1','$3') }.
 GetField -> Function '(' VariableList ')' : compile('$1','$3').
 
 SetFieldList -> SetField: ['$1'].
 SetFieldList -> SetField ',' SetFieldList: ['$1'|'$3'].
 
-SetField-> field '=' Variable : { get_token('$1'), '$3' }.
+SetField-> Field '=' Variable : { '$1', '$3' }.
 
 Atom -> field : binary_to_atom(get_token('$1'),utf8).
 Atom -> atom : get_token('$1').
+
+Field -> field : get_token('$1').
+Field -> text : get_token('$1').
 
 ConstTerm-> integer : get_token('$1').
 ConstTerm -> float : get_token('$1').
@@ -161,8 +165,8 @@ VariableList -> Variable : ['$1'].
 VariableList -> Variable ',' VariableList : ['$1'|'$3'].
 
 Variable -> ConstTerm : '$1'.
-Variable -> '$' field : get_field('$2').
-Variable -> '[' VariableList ']': compile(['$2']).
+Variable -> '$' Field : get_field('$2').
+Variable -> '[' VariableList ']': compile('$2').
 Variable -> Function '(' VariableList ')' : compile('$1','$3').
 
 Function -> '$' Atom : { ecomet_ql_util ,'$2' }.
@@ -171,7 +175,7 @@ Function -> '$' Atom ':' Atom : { '$2' ,'$4' }.
 ConditionList -> Condition: ['$1'].
 ConditionList -> Condition ',' ConditionList: ['$1'|'$3'].
 
-Condition -> field Operator Constant : { get_token('$1'), '$2', '$3' }.
+Condition -> Field Operator Constant : { '$1', '$2', '$3' }.
 Condition -> 'AND' '(' ConditionList ')' : { 'AND', '$3' }.
 Condition -> 'OR' '(' ConditionList ')' : { 'OR', '$3' }.
 Condition -> 'ANDNOT' '(' Condition ',' Condition ')' : { 'ANDNOT', '$3', '$5' }.
@@ -206,9 +210,9 @@ Lock -> lock write : { lock , write }.
 OrderByList -> OrderBy: ['$1'].
 OrderByList -> OrderBy ',' OrderByList: ['$1'|'$3'].
 
-OrderBy -> field OrderDirection: {get_token('$1'),'$2'}.
+OrderBy -> Field OrderDirection: {'$1','$2'}.
 OrderBy -> integer OrderDirection: { get_token('$1'), '$2'}.
-OrderBy -> field : {get_token('$1'),'ASC'}.
+OrderBy -> Field : {'$1','ASC'}.
 OrderBy -> integer: { get_token('$1'), 'ASC'}.
 
 OrderDirection -> 'ASC' : 'ASC'.
@@ -217,7 +221,7 @@ OrderDirection -> 'DESC' : 'DESC'.
 GroupByList -> GroupBy: ['$1'].
 GroupByList -> GroupBy ',' GroupByList: ['$1'|'$3'].
 
-GroupBy -> field : get_token('$1').
+GroupBy -> Field : '$1'.
 GroupBy -> integer : get_token('$1').
 
 Erlang code.
@@ -225,7 +229,7 @@ Erlang code.
 get_token({Token, _Line})->Token;
 get_token({_Token, _Line, Value}) -> Value.
 
-get_field({_Token, _Line,Field})->
+get_field(Field)->
     {fun erlang:hd/1,[Field]}.
 
 compile(VarList)->

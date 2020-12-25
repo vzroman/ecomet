@@ -18,6 +18,7 @@
 
 -module(ecomet_query_SUITE).
 
+-include_lib("ecomet_schema.hrl").
 -include_lib("ecomet_test.hrl").
 
 %% API
@@ -157,39 +158,39 @@ init_per_suite(Config)->
   PatternID3={3,1003},
 
   %--------Object map-------------------------------------------
-  BaseObj = ecomet_schema:object_schema(),
+  BaseObj = ecomet_pattern:get_fields({?PATTERN_PATTERN,?OBJECT_PATTERN}),
   %--------Pattern1-------------------------------------------
   Pattern1Map = BaseObj#{
-    <<"field1">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"field2">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"field3">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"field4">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"string1">> => ecomet_schema:field_description(string,none,[simple,'3gram'],false,ram,none,false),
-    <<"string2">> => ecomet_schema:field_description(string,none,[simple],false,ramdisc,none,false),
-    <<"string3">> => ecomet_schema:field_description(string,none,[simple],false,disc,none,false),
-    <<"integer">> => ecomet_schema:field_description(integer,none,[simple],false,ram,none,false),
-    <<"float">> => ecomet_schema:field_description(float,none,[simple],false,ramdisc,none,false),
-    <<"atom">> => ecomet_schema:field_description(atom,none,[simple],false,disc,none,false),
-    <<"bool">> => ecomet_schema:field_description(bool,none,[simple],false,ram,none,false)
+    <<"field1">> => ecomet_field:build_description(#{ type=>string,storage=>ram }),
+    <<"field2">> => ecomet_field:build_description(#{ type=>string,storage=>ramdisc }),
+    <<"field3">> => ecomet_field:build_description(#{ type=>string,storage=>ramdisc }),
+    <<"field4">> => ecomet_field:build_description(#{ type=>string,storage=>disc }),
+    <<"string1">> => ecomet_field:build_description(#{ type=>string,index=>[simple,'3gram'],storage=>ram }),
+    <<"string2">> => ecomet_field:build_description(#{ type=>string,index=>[simple],storage=>ramdisc }),
+    <<"string3">> => ecomet_field:build_description(#{ type=>string,index=>[simple],storage=>disc }),
+    <<"integer">> => ecomet_field:build_description(#{ type=>integer,index=>[simple],storage=>ram }),
+    <<"float">> => ecomet_field:build_description(#{ type=>float,index=>[simple],storage=>ramdisc }),
+    <<"atom">> => ecomet_field:build_description(#{ type=>atom,index=>[simple],storage=>disc }),
+    <<"bool">> => ecomet_field:build_description(#{ type=>bool,index=>[simple],storage=>ram })
   },
   ecomet_schema:register_type(PatternID1, Pattern1Map),
   %--------Pattern2-------------------------------------------
   Pattern2Map = BaseObj#{
-    <<"field1">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"field2">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"string1">> => ecomet_schema:field_description(string,none,[simple,'3gram'],false,ramdisc,none,false),
-    <<"string2">> => ecomet_schema:field_description(string,none,[simple],false,disc,none,false),
-    <<"string3">> => ecomet_schema:field_description(string,none,[simple],false,ram,none,false),
-    <<"integer">> => ecomet_schema:field_description(integer,none,[simple],false,ramdisc,none,false),
-    <<"float">> => ecomet_schema:field_description(float,none,[simple],false,disc,none,false),
-    <<"atom">> => ecomet_schema:field_description(atom,none,[simple],false,ram,none,false),
-    <<"bool">> => ecomet_schema:field_description(bool,none,[simple],false,ramdisc,none,false)
+    <<"field1">> => ecomet_field:build_description(#{ type=>string,storage=>ram }),
+    <<"field2">> => ecomet_field:build_description(#{ type=>string,storage=>disc }),
+    <<"string1">> => ecomet_field:build_description(#{ type=>string,index=>[simple,'3gram'],storage=>ramdisc }),
+    <<"string2">> => ecomet_field:build_description(#{ type=>string,index=>[simple],storage=>disc }),
+    <<"string3">> => ecomet_field:build_description(#{ type=>string,index=>[simple],storage=>ram }),
+    <<"integer">> => ecomet_field:build_description(#{ type=>integer,index=>[simple],storage=>ramdisc }),
+    <<"float">> => ecomet_field:build_description(#{ type=>float,index=>[simple],storage=>disc }),
+    <<"atom">> => ecomet_field:build_description(#{ type=>atom,index=>[simple],storage=>ram }),
+    <<"bool">> => ecomet_field:build_description(#{ type=>bool,index=>[simple],storage=>ramdisc })
   },
   ecomet_schema:register_type(PatternID2, Pattern2Map),
   %--------Pattern3-------------------------------------------
   Pattern3Map = BaseObj#{
-    <<"field1">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"field3">> => ecomet_schema:field_description(string,none,none,false,disc,none,false)
+    <<"field1">> => ecomet_field:build_description(#{ type=>string,storage=>ram }),
+    <<"field3">> => ecomet_field:build_description(#{ type=>string,storage=>disc })
   },
   ecomet_schema:register_type(PatternID3, Pattern3Map),
 
@@ -215,6 +216,7 @@ init_per_suite(Config)->
         <<".name">> => <<"test", IB/binary>>,
         <<".folder">> => FolderOID1,
         <<".pattern">> => PatternID1,
+        <<".ts">>=>ecomet_lib:log_ts(),
         <<"string1">> => String1,
         <<"string2">> => String2,
         <<"string3">> => String3,
@@ -227,6 +229,7 @@ init_per_suite(Config)->
         <<".name">> => <<"test", IB/binary>>,
         <<".folder">> => FolderOID2,
         <<".pattern">> => PatternID2,
+        <<".ts">>=>ecomet_lib:log_ts(),
         <<"string1">> => String1,
         <<"string2">> => String2,
         <<"string3">> => String3,
@@ -2056,105 +2059,66 @@ set(_Config)->
   {_,[SumBefore]}=ecomet_query:get([root],[{sum,<<"integer">>}],{<<"string1">>,'=',<<"value1">>}).
 
 parse_get(_Config) ->
-  TestSpecs = [
-    {
-      "get foo AS 'alias' where AND ( buz :> 123 )",
-      {get, [{<<"alias">>, <<"foo">>}], {'AND', [{<<"buz">>, ':>', 123}]}, []}
-    },
-    {
-      "get foo1, foo2 where OR ( buz :LIKE 'f', bar = -42 )",
-      {get, [<<"foo1">>, <<"foo2">>], {'OR', [{<<"buz">>, ':LIKE', <<"f">>}, {<<"bar">>, '=', -42}]}, []}
-    },
-    {
-      "get foo where ANDNOT (buz := 45.5, bar :< 4) order by foo3 DESC",
-      {get, [<<"foo">>], {'ANDNOT', {<<"buz">>, ':=', 45.5},{<<"bar">>, ':<', 4}}, [{order, [{<<"foo3">>, 'DESC'}]}]}
-    },
-    {
-      "get foo where AND (buz := 1) page 5:10",
-      {get, [<<"foo">>], {'AND', [{<<"buz">>, ':=', 1}]}, [{page, {5, 10}}]}
-    },
-    {
-      "get foo where AND (bar :< 4) page 5:10 lock read lock write",
-      {get, [<<"foo">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{page, {5, 10}},{lock, read},{lock, write}]}
-    },
-    {
-      "get foo1 where AND (bar :< 4) group by foo2, buz2 order by foo3, buz3 DESC",
-      {get, [<<"foo1">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{group, [<<"foo2">>, <<"buz2">>]}, {order, [{<<"foo3">>, 'ASC'}, {<<"buz3">>,'DESC'}]}]}
-    },
-    {
-      "get foo1 where AND (bar :< 4) group by 1 order by 2 DESC",
-      {get, [<<"foo1">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{group, [1]},{order, [{2, 'DESC'}]}]}
-    },
-    {
-      "get $concat(foo), $string(buz) AS 'fun' where AND (bar :< 4)",
-      {get,[{fun ecomet_query:concat/1, [<<"foo">>]}, {<<"fun">>, {fun ecomet_query:string/1, [<<"buz">>]}}], {'AND', [{<<"bar">>, ':<', 4}]}, []}
-    }
-  ],
-  lists:foreach(
-    fun({Input, ExpOutput}) ->
-      ?assertEqual([ExpOutput], ecomet_query:parse(Input))
-    end,
-    TestSpecs
-  ),
+
+  [{get, [{<<"alias">>, <<"foo">>}], {'AND', [{<<"buz">>, ':>', 123}]}, []}]=
+    ecomet_query:parse("get foo AS 'alias' where AND ( buz :> 123 )"),
+
+  [{get, [<<"foo1">>, <<"foo2">>], {'OR', [{<<"buz">>, ':LIKE', <<"f">>}, {<<"bar">>, '=', -42}]}, []}]=
+    ecomet_query:parse("get foo1, foo2 where OR ( buz :LIKE 'f', bar = -42 )"),
+
+  [{get, [<<"foo">>], {'ANDNOT', {<<"buz">>, ':=', 45.5},{<<"bar">>, ':<', 4}}, [{order, [{<<"foo3">>, 'DESC'}]}]}]=
+    ecomet_query:parse("get foo where ANDNOT (buz := 45.5, bar :< 4) order by foo3 DESC"),
+
+  [{get, [<<"foo">>], {'AND', [{<<"buz">>, ':=', 1}]}, [{page, {5, 10}}]}]=
+    ecomet_query:parse("get foo where AND (buz := 1) page 5:10"),
+
+  [{get, [<<"foo">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{page, {5, 10}},{lock, read}]}]=
+    ecomet_query:parse("get foo where AND (bar :< 4) page 5:10 lock read"),
+
+  [{get, [<<"foo1">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{group, [<<"foo2">>, <<"buz2">>]}, {order, [{<<"foo3">>, 'ASC'}, {<<"buz3">>,'DESC'}]}]}]=
+    ecomet_query:parse("get foo1 where AND (bar :< 4) group by foo2, buz2 order by foo3, buz3 DESC"),
+
+  [{get, [<<"foo1">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{group, [1]},{order, [{2, 'DESC'}]}]}]=
+    ecomet_query:parse("get foo1 where AND (bar :< 4) group by 1 order by 2 DESC"),
+
+  [{get,[{Concat, [<<"buz">>,<<"foo">>]}, {<<"fun">>, {test}}], {'AND', [{<<"bar">>, ':<', 4}]}, []}]=
+    ecomet_query:parse("get $concat($buz,$foo), $term('{test}') AS 'fun' where AND (bar :< 4)"),
+
+  <<"str1str2">> = Concat([<<"str1">>,<<"str2">>]),
+
   ok.
 
 parse_set(_Config) ->
-  TestSpecs = [
-    {
-      "set foo=$hello where AND (bar :< 1) lock write",
-      {set, [{<<"foo">>, hello}], {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}
-    },
-    {
-      "set foo=$concat(buz) where OR (bar :> 1) lock read",
-      {set,[{<<"foo">>,{fun ecomet_query:concat/1,[<<"buz">>]}}], {'OR',[{<<"bar">>,':>',1}]}, [{lock,read}]}
-    },
-    {
-      "set foo1=123, foo2=$string(buz) where AND (bar :LIKE '1')",
-      {set, [{<<"foo1">>, 123}, {<<"foo2">>, {fun ecomet_query:string/1, [<<"buz">>]}}], {'AND', [{<<"bar">>, ':LIKE', <<"1">>}]}, []}
-    }
-  ],
-  lists:foreach(
-    fun({Input, ExpOutput}) ->
-      ?assertEqual([ExpOutput], ecomet_query:parse(Input))
-    end,
-    TestSpecs
-  ),
+  [{set, #{<<"foo">>:={ FieldValue,[<<"hello">>] }}, {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}]=
+    ecomet_query:parse("set foo=$hello where AND (bar :< 1) lock write"),
+  <<"value">>=FieldValue([<<"value">>]),
+
+  [{set,#{<<"foo">>:={Concat,[<<"buz">>]}}, {'OR',[{<<"bar">>,':>',1}]}, [{lock,read}]}]=
+    ecomet_query:parse("set foo=$concat($buz,'_test') where OR (bar :> 1) lock read"),
+  <<"value_test">> = Concat([<<"value">>]),
+
+  [{set, #{<<"foo1">>:= 123, <<"foo2">>:= {Term,[<<"buz">>]} }, {'AND', [{<<"bar">>, ':LIKE', <<"1">>}]}, []}]=
+    ecomet_query:parse("set foo1=123, foo2=$term(['{test}',$buz]) where AND (bar :LIKE '1')"),
+
+  [{test},value] = Term([value]),
+
   ok.
 
 parse_insert(_Config) ->
-  TestSpecs = [
-    {
-      "insert foo1=123, foo2=$string(buz)",
-      {insert, [{<<"foo1">>, 123}, {<<"foo2">>, {fun ecomet_query:string/1, [<<"buz">>]}}]}
-    }
-  ],
-  lists:foreach(
-    fun({Input, ExpOutput}) ->
-      ?assertEqual([ExpOutput], ecomet_query:parse(Input))
-    end,
-    TestSpecs
-  ),
+  [{insert, #{<<"foo1">>:=123, <<"foo2">>:=buz}}]=
+    ecomet_query:parse("insert foo1=123, foo2=$term('buz')"),
+
   ok.
 
 parse_delete(_Config) ->
-  TestSpecs = [
-    {
-      "delete where AND (bar :< 1) lock write",
-      {delete, {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}
-    },
-    {
-      "delete where OR (bar :> 1.0) lock read",
-      {delete, {'OR', [{<<"bar">>, ':>', 1.0}]}, [{lock, read}]}
-    },
-    {
-      "delete where ANDNOT (bar :LIKE '1', buz := $foo)",
-      {delete, {'ANDNOT', {<<"bar">>, ':LIKE', <<"1">>}, {<<"buz">>, ':=', foo}}, []}
-    }
-  ],
-  lists:foreach(
-    fun({Input, ExpOutput}) ->
-      ?assertEqual([ExpOutput], ecomet_query:parse(Input))
-    end,
-    TestSpecs
-  ),
+
+  [{delete, {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}]=
+    ecomet_query:parse("delete where AND (bar :< 1) lock write"),
+
+  [{delete, {'OR', [{<<"bar">>, ':>', 1.0}]}, [{lock, read}]}]=
+    ecomet_query:parse("delete where OR (bar :> 1.0) lock read"),
+
+  [{delete, {'ANDNOT', {<<"bar">>, ':LIKE', <<"1">>}, {<<"buz">>, ':=', foo}}, []}]=
+    ecomet_query:parse("delete where ANDNOT (bar :LIKE '1', buz := foo)"),
+
   ok.

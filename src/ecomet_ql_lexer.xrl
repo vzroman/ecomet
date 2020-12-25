@@ -44,13 +44,13 @@ NO_FEEDBACK = (N|n)(O|o)_(F|f)(E|e)(E|e)(D|d)(B|b)(A|a)(C|c)(K|k)
 
 TEXT        = '(\\'|[^'])*'
 HEX         = 0x([0-9a-zA-Z]*)
-FIELD       = (\.?([a-zA-Z0-9_-]+)*)
-ATOM        = ([a-zA-Z][a-zA-Z0-9_\-]*)
 COMMENT_MULTILINE = (/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+/)|(--.*)
 WHITESPACE  = ([\000-\s]*)
 INTNUM      = (\-?[0-9]+)
 FLOATDEC    = (\-?([0-9]+)?\.[0-9]+)
 FLOATSCI    = (\-?([0-9]+)?(\.)?[0-9]+(E|e)(\+|\-)?[0-9]+)
+FIELD       = (\.?([a-zA-Z0-9_-]+)*)
+ATOM        = ([a-zA-Z][a-zA-Z0-9_\-]*)
 S           = (\$)
 EQ          = (=)
 EQS         = (:=)
@@ -93,12 +93,6 @@ Rules.
 {WRITE}       : {token, {write, TokenLine}}.
 {STATELESS}   : {token, {stateless, TokenLine}}.
 {NO_FEEDBACK} : {token, {no_feedback, TokenLine}}.
-{FIELD}       : {token, {field,TokenLine,list_to_binary(TokenChars)}}.
-{ATOM}        : {token, {atom,TokenLine,list_to_atom(TokenChars)}}.
-{HEX}         : {token, {integer, TokenLine, to_hex(TokenChars)}}.
-{INTNUM}      : {token, {integer, TokenLine, list_to_integer(TokenChars)}}.
-{FLOATDEC}    : {token, {float, TokenLine, list_to_float(TokenChars)}}.
-{FLOATSCI}    : {token, {float, TokenLine, list_to_float(TokenChars)}}.
 {S}           : {token, {'$', TokenLine}}.
 {EQ}          : {token, {'=', TokenLine}}.
 {EQS}         : {token, {':=',TokenLine}}.
@@ -114,10 +108,16 @@ Rules.
 {CLOSE}       : {token, {')',TokenLine}}.
 {LIST_OPEN}   : {token, {'[',TokenLine}}.
 {LIST_CLOSE}  : {token, {']',TokenLine}}.
-{TEXT}        : {token, {text,TokenLine,to_text(TokenChars)}}.
 {COMMA}       : {token, {',', TokenLine}}.
 {SEMICOLON}   : {token, {';', TokenLine}}.
 {COLON}       : {token, {':', TokenLine}}.
+{HEX}         : {token, {integer, TokenLine, to_hex(TokenChars)}}.
+{INTNUM}      : {token, {integer, TokenLine, list_to_integer(TokenChars)}}.
+{FLOATDEC}    : {token, {float, TokenLine, list_to_float(TokenChars)}}.
+{FLOATSCI}    : {token, {float, TokenLine, list_to_float(TokenChars)}}.
+{FIELD}       : {token, {field,TokenLine,list_to_binary(TokenChars)}}.
+{ATOM}        : {token, {atom,TokenLine,list_to_atom(TokenChars)}}.
+{TEXT}        : {token, {text,TokenLine,to_text(TokenChars)}}.
 {COMMENT_MULTILINE} : skip_token.
 {WHITESPACE}  : skip_token.
 \z            : {end_token, {'$end'}}.

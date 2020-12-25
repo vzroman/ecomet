@@ -48,13 +48,6 @@
   wrap_transactions/1
 ]).
 
-%%====================================================================
-%%		QL functions
-%%====================================================================
--export([
-  concat/1,
-  string/1
-]).
 
 %%====================================================================
 %%		Test API
@@ -611,31 +604,34 @@ compile_map_reduce(get,Fields,Params)->
       true -> fun(Result)->{Count,Rows}=Reduce(Result), {Count,{Header,Rows}} end
     end,
   {Map,ReduceFun};
-compile_map_reduce(set,Fields,Params) ->
-  Updates = lists:map(
-    fun({Field, Value})->
-      case Value of
-        {Fun, ArgList} when is_function(Fun, 1) and is_list(ArgList)->
-          {Field, read_fun(Value)};
-        _->
-          {Field, Value}
-      end
-    end,
-    maps:to_list(Fields)
-  ),
+
+compile_map_reduce(set,Fields,Params)->
+  Updates=
+    [case Value of
+       {Fun,ArgList} when is_function(Fun,1) and is_list(ArgList)->
+         {Field,read_fun(Value)};
+       _->{Field,Value}
+     end || {Field,Value} <- maps:to_list(Fields) ],
   % Fun to read object fields from storage, default lock is none (check rights is performed)
-  ReadUp = read_up(proplists:get_value(lock, Params, none)),
-  ReadFields = ordsets:union([ Args || {_,#get{args = Args}} <- Updates]),
-  Map = fun(RS)->
-    ecomet_resultset:foldr(fun(OID,Acc)->
-      ObjectMap=ReadUp(OID, ReadFields),
-      NewValues = [{Name, value(Value, ObjectMap)} || {Name, Value} <- Updates],
-      ecomet_object:edit(maps:get(object,ObjectMap), maps:from_list(NewValues)),
-      Acc+1
-    end,0,RS)
-  end,
+  ReadUp=read_up(proplists:get_value(lock,Params,none)),
+  ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
+  Map=
+    fun(RS)->
+      ecomet_resultset:foldr(fun(OID,Acc)->
+        ObjectMap=ReadUp(OID,ReadFields),
+        NewValues=
+          [{Name,
+            case Value of
+              #get{value = Fun}->Fun(ObjectMap);
+              _->Value
+            end}||{Name,Value}<-Updates],
+        ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues)),
+        Acc+1
+      end,0,RS)
+    end,
   Reduce=fun lists:sum/1,
   {Map,Reduce};
+
 compile_map_reduce(delete,none,Params)->
   % Fun to read object fields from storage, default lock is none (check rights is performed)
   ReadUp=read_up(proplists:get_value(lock,Params,none)),
@@ -649,12 +645,6 @@ compile_map_reduce(delete,none,Params)->
     end,
   Reduce=fun lists:sum/1,
   {Map,Reduce}.
-
-value(#get{value = Fun}, ObjectMap) ->
-  Fun(ObjectMap);
-value(Value, _ObjectMap) ->
-  Value.
-
 %%-----------------------------------------------------------------
 %%	MAP/REDUCE PLANNING
 %%-----------------------------------------------------------------
@@ -1193,7 +1183,11 @@ collect_deps([{F,Args}|Rest],Acc)
   Acc1 = maps:merge(Acc,maps:from_list([{V,1}||V<-Args])),
   collect_deps(Rest,Acc1);
 collect_deps([List|Rest],Acc) when is_list(List)->
-  collect_deps(Rest,collect_deps(List,Acc));
+  Acc1=
+    lists:foldl(fun(V,InAcc)->
+      InAcc#{V=>1}
+    end,Acc,collect_deps(List)),
+  collect_deps(Rest,Acc1);
 collect_deps([_Const|Rest],Acc)->
   collect_deps(Rest,Acc);
 collect_deps([],Acc)->
@@ -1235,19 +1229,6 @@ wrap_transactions([End|Rest],Level,Acc)
 wrap_transactions([S|Rest],Level,Acc)->
   wrap_transactions(Rest,Level,[S|Acc]);
 wrap_transactions([],_Level,Acc)->lists:reverse(Acc).
-
-%% ====================================================================
-%% QL functions
-%% ====================================================================
-concat(Items)->
-  concat(Items,<<>>).
-concat([Item|Rest],Acc)->
-  concat(Rest,<<Acc/binary,Item/binary>>);
-concat([],Acc)->Acc.
-
-string([Term])->
-  ecomet_types:term_to_string(Term).
-
 
 %% ====================================================================
 %% Internal helpers

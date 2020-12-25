@@ -17,6 +17,7 @@
 %%----------------------------------------------------------------
 -module(ecomet_resultset_SUITE).
 
+-include_lib("ecomet_schema.hrl").
 -include_lib("ecomet_test.hrl").
 
 %% API
@@ -51,13 +52,6 @@
   search_idhs/1,
   search_simple/1,
   execute_remote/1
-%%  query_results_nopage/1,
-%%  query_results_page/1,
-%%
-%%  aggregate_nogroup_nosort/1,
-%%  aggregate_group_nosort/1,
-%%  sorting/1,
-%%  sorting_page/1
 ]).
 
 
@@ -117,52 +111,52 @@ init_per_suite(Config)->
   PatternID4={3,1004},
   PatternID5={3,1005},
 
-  BaseObj = ecomet_schema:object_schema(),
+  BaseObj = ecomet_pattern:get_fields({?PATTERN_PATTERN,?OBJECT_PATTERN}),
 
   %--------Pattern1-------------------------------------------
   Pattern1Map = BaseObj#{
-    <<"field1">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"field2">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"field3">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"field4">> => ecomet_schema:field_description(string,none,none,false,disc,none,false)
+    <<"field1">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"field2">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"field3">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"field4">> => ecomet_field:build_description(#{ type=>string, storage=>disc })
   },
   ecomet_schema:register_type(PatternID1, Pattern1Map),
 
   %--------Pattern2-------------------------------------------
   Pattern2Map = BaseObj#{
-    <<"field1">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"field2">> => ecomet_schema:field_description(string,none,none,false,disc,none,false)
+    <<"field1">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"field2">> => ecomet_field:build_description(#{ type=>string, storage=>disc })
   },
   ecomet_schema:register_type(PatternID2, Pattern2Map),
 
   %--------Pattern3-------------------------------------------
   Pattern3Map = BaseObj#{
-    <<"field1">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"field3">> => ecomet_schema:field_description(string,none,none,false,disc,none,false)
+    <<"field1">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"field3">> => ecomet_field:build_description(#{ type=>string, storage=>disc })
   },
   ecomet_schema:register_type(PatternID3, Pattern3Map),
 
-  %--------Pattern4-------------------------------------------
+  %--------Pattern4----------------------------PatternID2---------------
   Pattern4Map = Pattern1Map#{
-    <<"string1">> => ecomet_schema:field_description(string,none,[simple],false,ram,none,false),
-    <<"string2">> => ecomet_schema:field_description(string,none,[simple],false,ramdisc,none,false),
-    <<"string3">> => ecomet_schema:field_description(string,none,[simple],false,disc,none,false),
-    <<"integer">> => ecomet_schema:field_description(integer,none,[simple],false,ram,none,false),
-    <<"float">> => ecomet_schema:field_description(float,none,[simple],false,ramdisc,none,false),
-    <<"atom">> => ecomet_schema:field_description(atom,none,[simple],false,disc,none,false),
-    <<"bool">> => ecomet_schema:field_description(bool,none,[simple],false,ram,none,false)
+    <<"string1">> => ecomet_field:build_description(#{ type=>string, index => [simple,'3gram'],storage=>ram }),
+    <<"string2">> => ecomet_field:build_description(#{ type=>string, index => [simple],storage=>ramdisc }),
+    <<"string3">> => ecomet_field:build_description(#{ type=>string, index => [simple], storage=>disc }),
+    <<"integer">> => ecomet_field:build_description(#{ type=>integer, index => [simple],storage=>ram }),
+    <<"float">> => ecomet_field:build_description(#{ type=>float, index => [simple],storage=>ramdisc }),
+    <<"atom">> => ecomet_field:build_description(#{ type=>atom, index => [simple], storage=>disc }),
+    <<"bool">> => ecomet_field:build_description(#{ type=>bool, index => [simple],storage=>ram })
   },
   ecomet_schema:register_type(PatternID4, Pattern4Map),
 
   %--------Pattern5-------------------------------------------
   Pattern5Map = Pattern2Map#{
-    <<"string1">> => ecomet_schema:field_description(string,none,[simple,'3gram'],false,ramdisc,none,false),
-    <<"string2">> => ecomet_schema:field_description(string,none,[simple],false,disc,none,false),
-    <<"string3">> => ecomet_schema:field_description(string,none,[simple],false,ram,none,false),
-    <<"integer">> => ecomet_schema:field_description(integer,none,[simple],false,ramdisc,none,false),
-    <<"float">> => ecomet_schema:field_description(float,none,[simple],false,disc,none,false),
-    <<"atom">> => ecomet_schema:field_description(atom,none,[simple],false,ram,none,false),
-    <<"bool">> => ecomet_schema:field_description(bool,none,[simple],false,ramdisc,none,false)
+    <<"string1">> => ecomet_field:build_description(#{ type=>string, index => [simple,'3gram'],storage=>ramdisc }),
+    <<"string2">> => ecomet_field:build_description(#{ type=>string, index => [simple], storage=>disc }),
+    <<"string3">> => ecomet_field:build_description(#{ type=>string, index => [simple],storage=>ram }),
+    <<"integer">> => ecomet_field:build_description(#{ type=>integer, index => [simple],storage=>ramdisc }),
+    <<"float">> => ecomet_field:build_description(#{ type=>float, index => [simple], storage=>disc }),
+    <<"atom">> => ecomet_field:build_description(#{ type=>atom, index => [simple],storage=>ram }),
+    <<"bool">> => ecomet_field:build_description(#{ type=>bool, index => [simple],storage=>ramdisc })
   },
   ecomet_schema:register_type(PatternID5, Pattern5Map),
   [
@@ -199,56 +193,48 @@ init_per_group(search,Config)->
   PatternID5=?config(pattern_id5, Config),
 
   %-----Create objects-------------------------------------------------------
-  Self=self(),
-  ProcessCount=1000,
-  ObjectCount=1,
+  ObjectCount=1000,
   lists:foreach(fun(I)->
-    spawn(fun()->
-      ecomet_user:on_init_state(),
-      lists:foreach(fun(J)->
-        IB=integer_to_binary(I*ProcessCount*J),
-        S1=integer_to_binary(I rem 100),
-        String1= <<"value",S1/binary>>,
-        S2= integer_to_binary(I div 100),
-        String2= <<"value",S2/binary>>,
-        S3=integer_to_binary(I div 500),
-        String3= <<"value",S3/binary>>,
-        Integer= I rem 100,
-        Float= I/7,
-        Atom=list_to_atom(binary_to_list(String3)),
-        Bool=((I rem 2)==1),
-        % Pattern 1
-        ecomet:create_object(#{
-          <<".name">> => <<"test", IB/binary>>,
-          <<".folder">> => FolderOID1,
-          <<".pattern">> => PatternID4,
-          <<"string1">> => String1,
-          <<"string2">> => String2,
-          <<"string3">> => String3,
-          <<"integer">> => Integer,
-          <<"float">> => Float,
-          <<"atom">> => Atom,
-          <<"bool">> => Bool
-        }),
-        ecomet:create_object(#{
-          <<".name">> => <<"test", IB/binary>>,
-          <<".folder">> => FolderOID2,
-          <<".pattern">> => PatternID5,
-          <<"string1">> => String1,
-          <<"string2">> => String2,
-          <<"string3">> => String3,
-          <<"integer">> => Integer,
-          <<"float">> => Float,
-          <<"atom">> => Atom,
-          <<"bool">> => Bool
-        })
-                    end,lists:seq(1,ObjectCount))
-          end),
-    Self!ready
-                end,lists:seq(1,ProcessCount)),
-  [receive
-     ready->ok
-   end||_<-lists:seq(1,ProcessCount)],
+    IB=integer_to_binary(I),
+    S1=integer_to_binary(I rem 100),
+    String1= <<"value",S1/binary>>,
+    S2= integer_to_binary(I div 100),
+    String2= <<"value",S2/binary>>,
+    S3=integer_to_binary(I div 500),
+    String3= <<"value",S3/binary>>,
+    Integer= I rem 100,
+    Float= I/7,
+    Atom=list_to_atom(binary_to_list(String3)),
+    Bool=((I rem 2)==1),
+    % Pattern 1
+    ecomet:create_object(#{
+      <<".name">> => <<"test", IB/binary>>,
+      <<".folder">> => FolderOID1,
+      <<".pattern">> => PatternID4,
+      <<".ts">>=>ecomet_lib:log_ts(),
+      <<"string1">> => String1,
+      <<"string2">> => String2,
+      <<"string3">> => String3,
+      <<"integer">> => Integer,
+      <<"float">> => Float,
+      <<"atom">> => Atom,
+      <<"bool">> => Bool
+    }),
+
+    ecomet:create_object(#{
+      <<".name">> => <<"test", IB/binary>>,
+      <<".folder">> => FolderOID2,
+      <<".pattern">> => PatternID5,
+      <<".ts">>=>ecomet_lib:log_ts(),
+      <<"string1">> => String1,
+      <<"string2">> => String2,
+      <<"string3">> => String3,
+      <<"integer">> => Integer,
+      <<"float">> => Float,
+      <<"atom">> => Atom,
+      <<"bool">> => Bool
+    })
+  end,lists:seq(1,ObjectCount)),
   Config;
 init_per_group(_,Config)->
   Config.
@@ -268,7 +254,7 @@ end_per_group(search,Config)->
         Object=ecomet_object:open(OID,none),
         ecomet_object:delete(Object),
         Acc+1
-                             end,0,RS)
+      end,0,RS)
     end,
   Result=ecomet_resultset:execute_local(root,Query,Delete,{'OR',ecomet_resultset:new()}),
   ct:pal("deleted - ~p",[Result]),
@@ -1259,7 +1245,7 @@ search_patterns(Config)->
     {<<"string1">>,'=',<<"value1">>}
   ]}),
   {'AND',[
-    {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{ramdisc,Ext1,[]}]}},
+    {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
     {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}}
   ],{Ext1,[]}}=ecomet_resultset:search_patterns(S3Query,root,'UNDEFINED'),
 
@@ -1298,7 +1284,7 @@ search_patterns(Config)->
   }),
   {'ANDNOT',{
     {'OR',[
-      {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{ramdisc,Ext1,[]}]}},
+      {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
       {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ram,Ext1,[]},{ramdisc,Ext2,[]}]}}
     ],{Ext12,[]}},
     {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext12,[{ramdisc,Ext1,[]},{disc,Ext2,[]}]}}
@@ -1313,7 +1299,7 @@ search_patterns(Config)->
     ]}
   }),
   {'ANDNOT',{
-    {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{ramdisc,Ext1,[]}]}},
+    {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
     {'OR',[
       {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}},
       {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext1,[{ramdisc,Ext1,[]}]}}
@@ -1333,7 +1319,7 @@ search_patterns(Config)->
   ]}),
   {'OR',[
     {'AND',[
-      {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{ramdisc,Ext1,[]}]}},
+      {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
       {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}}
     ],{Ext1,[]}},
     {'ANDNOT',{
@@ -1358,7 +1344,7 @@ search_patterns(Config)->
     {'NORM',{{S8N1AND,S8N1ANDNOT},{S8N1DAND,S8N1DANDNOT}},{Ext1,[]}}
   ],{Ext1,[]}}=S8PLevel,
   {'AND',[
-    {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{ramdisc,Ext1,[]}]}}
+    {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}
   ],{Ext1,[]}}=S8N1AND,
   {'OR',[
     {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext1,[{ramdisc,Ext1,[]}]}}
@@ -1374,27 +1360,30 @@ search_idhs(Config)->
   Ext1=ecomet_bits:set_bit(IDP1,none),
   Ext2=ecomet_bits:set_bit(IDP2,none),
   Ext12=ecomet_bits:set_bit(IDP2,Ext1),
-  [{_,NodeID}]=ets:lookup(local_params,node_unique_id),
-  IDH1=ecomet_bits:set_bit((0 bsl 16)+NodeID,none),
+
+  NodeID = ecomet_node:get_unique_id(),
+  DB = ecomet_schema:get_db_id( root ),
+  IDH1_0 = ((0 bsl 16) + NodeID) bsl 8 + DB,
+  IDH1 = ecomet_bits:set_bit(IDH1_0,none),
 
   % S1. tag on pattern
   S1Query=ecomet_resultset:prepare({<<".pattern">>,'=',PatternID1}),
-  {IDH1,S1P1TAG}=ecomet_resultset:seacrh_idhs(S1Query,<<"sys">>,IDP1),
-  {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{ramdisc,Ext1,[
+  {IDH1,S1P1TAG}=ecomet_resultset:seacrh_idhs(S1Query,root,IDP1),
+  {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[
     {IDP1,IDH1}
   ]}]}}=S1P1TAG,
-  {none,S1P2TAG}=ecomet_resultset:seacrh_idhs(S1Query,<<"sys">>,IDP2),
-  {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{ramdisc,Ext1,[]}]}}=S1P2TAG,
+  {none,S1P2TAG}=ecomet_resultset:seacrh_idhs(S1Query,root,IDP2),
+  {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=S1P2TAG,
 
   %S2. Simple tag
   S2Query=ecomet_resultset:prepare({<<"string1">>,'=',<<"value1">>}),
-  S2PLevel=ecomet_resultset:search_patterns(S2Query,<<"sys">>,'UNDEFINED'),
-  {IDH1,S2P1TAG}=ecomet_resultset:seacrh_idhs(S2PLevel,<<"sys">>,IDP1),
+  S2PLevel=ecomet_resultset:search_patterns(S2Query,root,'UNDEFINED'),
+  {IDH1,S2P1TAG}=ecomet_resultset:seacrh_idhs(S2PLevel,root,IDP1),
   {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[
     {ram,Ext1,[{IDP1,IDH1}]},
     {ramdisc,Ext2,[]}
   ]}}=S2P1TAG,
-  {IDH1,S2P2TAG}=ecomet_resultset:seacrh_idhs(S2P1TAG,<<"sys">>,IDP2),
+  {IDH1,S2P2TAG}=ecomet_resultset:seacrh_idhs(S2P1TAG,root,IDP2),
   {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[
     {ramdisc,Ext2,[{IDP2,IDH1}]},
     {ram,Ext1,[{IDP1,IDH1}]}
@@ -1406,16 +1395,16 @@ search_idhs(Config)->
     {<<"string1">>,'=',<<"value1">>}
   ]}),
   % No need to search patterns
-  {IDH1,S3P1COND}=ecomet_resultset:seacrh_idhs(S3Query,<<"sys">>,IDP1),
+  {IDH1,S3P1COND}=ecomet_resultset:seacrh_idhs(S3Query,root,IDP1),
   {'AND',[
     {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[
-      {ramdisc,Ext1,[{IDP1,IDH1}]}
+      {disc,Ext1,[{IDP1,IDH1}]}
     ]}},
     {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[
       {ram,Ext1,[{IDP1,IDH1}]}
     ]}}
   ],{Ext1,[{IDP1,IDH1}]}}=S3P1COND,
-  {none,S3P1COND}=ecomet_resultset:seacrh_idhs(S3P1COND,<<"sys">>,IDP2),
+  {none,S3P1COND}=ecomet_resultset:seacrh_idhs(S3P1COND,root,IDP2),
 
   % S4. AND with direct
   S4Query=ecomet_resultset:prepare({'AND',[
@@ -1423,13 +1412,13 @@ search_idhs(Config)->
     {<<"string1">>,':>',<<"value1">>}
   ]}),
   % Pattern is defined, search idhs
-  {IDH1,S4P1COND}=ecomet_resultset:seacrh_idhs(S4Query,<<"sys">>,IDP1),
+  {IDH1,S4P1COND}=ecomet_resultset:seacrh_idhs(S4Query,root,IDP1),
   {'OR',[S4Norm1],{Ext1,[{IDP1,IDH1}]}}=S4P1COND,
   {'NORM',{
     {
       {'AND',[
         {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[
-          {ramdisc,Ext1,[{IDP1,IDH1}]}
+          {disc,Ext1,[{IDP1,IDH1}]}
         ]}}
       ],{Ext1,[{IDP1,IDH1}]}},
       {'OR',[],{Ext1,[]}}
@@ -1445,8 +1434,8 @@ search_idhs(Config)->
     {<<"string1">>,'=',<<"value1">>},
     {<<"string2">>,':>',<<"value2">>}
   }),
-  S5Plevel=ecomet_resultset:search_patterns(S5Query,<<"sys">>,'UNDEFINED'),
-  {IDH1,S5P1COND}=ecomet_resultset:seacrh_idhs(S5Plevel,<<"sys">>,IDP1),
+  S5Plevel=ecomet_resultset:search_patterns(S5Query,root,'UNDEFINED'),
+  {IDH1,S5P1COND}=ecomet_resultset:seacrh_idhs(S5Plevel,root,IDP1),
   {'OR',[S5Norm1],{Ext12,[{IDP1,IDH1}]}}=S5P1COND,
   {'NORM',{
     {
@@ -1468,6 +1457,19 @@ search_simple(Config)->
   PatternID1=?config(pattern_id4,Config),
   PatternID2=?config(pattern_id5,Config),
 
+%%  1000 objects
+%%  IB=integer_to_binary(I*ProcessCount*J),
+%%  S1=integer_to_binary(I rem 100),
+%%  String1= <<"value",S1/binary>>,
+%%  S2= integer_to_binary(I div 100),
+%%  String2= <<"value",S2/binary>>,
+%%  S3=integer_to_binary(I div 500),
+%%  String3= <<"value",S3/binary>>,
+%%  Integer= I rem 100,
+%%  Float= I/7,
+%%  Atom=list_to_atom(binary_to_list(String3)),
+%%  Bool=((I rem 2)==1),
+
   % S1. Simple tag
   S1Query=ecomet_resultset:prepare({<<"string1">>,'=',<<"value1">>}),
   FunPatName=fun(RS)->
@@ -1476,9 +1478,9 @@ search_simple(Config)->
       {ok,Pattern}=ecomet_object:read_field(Object,<<".pattern">>),
       {ok,Name}=ecomet_object:read_field(Object,<<".name">>),
       [{Pattern,Name}|Acc]
-                           end,[],RS)
-             end,
-  S1Res=ecomet_resultset:execute_local(<<"sys">>,S1Query,FunPatName,{'OR',ecomet_resultset:new()}),
+    end,[],RS)
+  end,
+  S1Res=ecomet_resultset:execute_local(root,S1Query,FunPatName,{'OR',ecomet_resultset:new()}),
 
   20=length(S1Res),
   []=lists:subtract(S1Res,[
@@ -1509,7 +1511,7 @@ search_simple(Config)->
     {<<".pattern">>,'=',PatternID1},
     {<<"string1">>,'=',<<"value1">>}
   ]}),
-  S2Res=ecomet_resultset:execute_local(<<"sys">>,S2Query,FunPatName,{'OR',ecomet_resultset:new()}),
+  S2Res=ecomet_resultset:execute_local(root,S2Query,FunPatName,{'OR',ecomet_resultset:new()}),
   10=length(S2Res),
   []=lists:subtract(S2Res,[
     {PatternID1,<<"test1">>},
@@ -1529,7 +1531,7 @@ search_simple(Config)->
     {<<"string1">>,'=',<<"value3">>},
     {<<"string2">>,'=',<<"value3">>}
   ]}),
-  S3Res=ecomet_resultset:execute_local(<<"sys">>,S3Query,FunPatName,{'OR',ecomet_resultset:new()}),
+  S3Res=ecomet_resultset:execute_local(root,S3Query,FunPatName,{'OR',ecomet_resultset:new()}),
   2=length(S3Res),
   []=lists:subtract(S3Res,[
     {PatternID1,<<"test303">>},
@@ -1553,7 +1555,7 @@ search_simple(Config)->
         [Name|Acc]
                              end,[],RS)
     end,
-  S4Res=ecomet_resultset:execute_local(<<"sys">>,S4Query,FunName,{'OR',ecomet_resultset:new()}),
+  S4Res=ecomet_resultset:execute_local(root,S4Query,FunName,{'OR',ecomet_resultset:new()}),
   6=length(S4Res),
   []=lists:subtract(S4Res,[<<"test101">>,<<"test501">>,<<"test601">>,<<"test701">>,<<"test801">>,<<"test901">>]),
 
@@ -1569,7 +1571,7 @@ search_simple(Config)->
       {<<"string2">>,'=',<<"value3">>}
     ]}
   }),
-  S5Res=ecomet_resultset:execute_local(<<"sys">>,S5Query,FunName,{'OR',ecomet_resultset:new()}),
+  S5Res=ecomet_resultset:execute_local(root,S5Query,FunName,{'OR',ecomet_resultset:new()}),
   3=length(S5Res),
   []=lists:subtract(S5Res,[<<"test5">>,<<"test105">>,<<"test405">>]),
 
@@ -1578,7 +1580,7 @@ search_simple(Config)->
     {<<".pattern">>,'=',PatternID1},
     {<<"string1">>,':=',<<"value1">>}
   ]}),
-  S6Res=ecomet_resultset:execute_local(<<"sys">>,S6Query,FunPatName,{'OR',ecomet_resultset:new()}),
+  S6Res=ecomet_resultset:execute_local(root,S6Query,FunPatName,{'OR',ecomet_resultset:new()}),
   10=length(S6Res),
   []=lists:subtract(S6Res,[
     {PatternID1,<<"test1">>},
@@ -1598,7 +1600,7 @@ search_simple(Config)->
     {<<"string1">>,':=',<<"value1">>},
     {<<".name">>,':<>',<<"test1">>}
   ]}),
-  S6_ARes=ecomet_resultset:execute_local(<<"sys">>,S6_AQuery,FunPatName,{'OR',ecomet_resultset:new()}),
+  S6_ARes=ecomet_resultset:execute_local(root,S6_AQuery,FunPatName,{'OR',ecomet_resultset:new()}),
   9=length(S6_ARes),
   []=lists:subtract(S6_ARes,[
     {PatternID1,<<"test101">>},
@@ -1617,7 +1619,7 @@ search_simple(Config)->
     {<<".pattern">>,'=',PatternID1},
     {<<"string1">>,':>',<<"value98">>}
   ]}),
-  S7Res=ecomet_resultset:execute_local(<<"sys">>,S7Query,FunName,{'OR',ecomet_resultset:new()}),
+  S7Res=ecomet_resultset:execute_local(root,S7Query,FunName,{'OR',ecomet_resultset:new()}),
   10=length(S7Res),
   []=lists:subtract(S7Res,[
     <<"test99">>,
@@ -1637,7 +1639,7 @@ search_simple(Config)->
     {<<".pattern">>,'=',PatternID1},
     {<<"string1">>,':>=',<<"value98">>}
   ]}),
-  S8Res=ecomet_resultset:execute_local(<<"sys">>,S8Query,FunName,{'OR',ecomet_resultset:new()}),
+  S8Res=ecomet_resultset:execute_local(root,S8Query,FunName,{'OR',ecomet_resultset:new()}),
   20=length(S8Res),
   []=lists:subtract(S8Res,[
     <<"test98">>,<<"test99">>,
@@ -1664,7 +1666,7 @@ search_simple(Config)->
       {<<"string1">>,':>=',<<"value10">>}
     ]}
   }),
-  S9Res=ecomet_resultset:execute_local(<<"sys">>,S9Query,FunName,{'OR',ecomet_resultset:new()}),
+  S9Res=ecomet_resultset:execute_local(root,S9Query,FunName,{'OR',ecomet_resultset:new()}),
   2=length(S9Res),
   % value2 > value10, so test502 is not here
   []=lists:subtract(S9Res,[<<"test500">>,<<"test501">>]),
@@ -1674,7 +1676,7 @@ search_simple(Config)->
     {<<".pattern">>,'=',PatternID1},
     {<<"string1">>,'LIKE',<<"lue99">>}
   ]}),
-  S10Res=ecomet_resultset:execute_local(<<"sys">>,S10Query,FunName,{'OR',ecomet_resultset:new()}),
+  S10Res=ecomet_resultset:execute_local(root,S10Query,FunName,{'OR',ecomet_resultset:new()}),
   10=length(S10Res),
   []=lists:subtract(S10Res,[
     <<"test99">>,
@@ -1694,7 +1696,7 @@ search_simple(Config)->
     {<<".pattern">>,'=',PatternID1},
     {<<"string1">>,':LIKE',<<"lue99">>}
   ]}),
-  S10_ARes=ecomet_resultset:execute_local(<<"sys">>,S10_AQuery,FunName,{'OR',ecomet_resultset:new()}),
+  S10_ARes=ecomet_resultset:execute_local(root,S10_AQuery,FunName,{'OR',ecomet_resultset:new()}),
   10=length(S10_ARes),
   []=lists:subtract(S10_ARes,[
     <<"test99">>,
@@ -1723,13 +1725,13 @@ search_simple(Config)->
       ]}
     ]}
   ]}),
-  S11Res=ecomet_resultset:execute_local(<<"sys">>,S11Query,FunName,{'OR',ecomet_resultset:new()}),
+  S11Res=ecomet_resultset:execute_local(root,S11Query,FunName,{'OR',ecomet_resultset:new()}),
   4=length(S11Res),
   % test1000 is true for integer<1 and string2=<value2, because value10 < value2
   []=lists:subtract(S11Res,[<<"test100">>,<<"test200">>,<<"test999">>,<<"test1000">>]).
 
 execute_remote(Config)->
-  PatternID1=?config(pattern_id1,Config),
+  PatternID1=?config(pattern_id4,Config),
 
   FunPatName=fun(RS)->
     ecomet_resultset:foldl(fun(OID,Acc)->
@@ -1737,15 +1739,15 @@ execute_remote(Config)->
       {ok,Pattern}=ecomet_object:read_field(Object,<<".pattern">>),
       {ok,Name}=ecomet_object:read_field(Object,<<".name">>),
       [{Pattern,Name}|Acc]
-                           end,[],RS)
-             end,
+    end,[],RS)
+  end,
 
   Query=ecomet_resultset:prepare({'AND',[
     {<<".pattern">>,'=',PatternID1},
     {<<"string1">>,'=',<<"value1">>}
   ]}),
-  PID=ecomet_resultset:execute_remote([<<"sys">>],Query,FunPatName,{'OR',ecomet_resultset:new()}),
-  [{<<"sys">>,Res}]=ecomet_resultset:wait_remote(PID,[]),
+  PID=ecomet_resultset:execute_remote([root],Query,FunPatName,{'OR',ecomet_resultset:new()}),
+  [{root,Res}]=ecomet_resultset:wait_remote(PID,[]),
 
   10=length(Res),
   []=lists:subtract(Res,[

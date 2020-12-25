@@ -33,7 +33,7 @@
 -export([
   create_object/1,
   open/1,open/2,open/3,open_nolock/1,open_rlock/1,open_wlock/1,
-  read_field/2,read_field/3,read_fields/2,
+  read_field/2,read_field/3,read_fields/2,read_fields/1,
   field_changes/2,
   edit_object/2,
   delete_object/1,
@@ -161,6 +161,9 @@ read_field(Object, Field, Default) ->
 
 read_fields(Object, Fields)->
   ecomet_object:read_fields(Object, Fields).
+
+read_fields(Object)->
+  ecomet_object:read_all(Object).
 
 field_changes(Object, Field)->
   ecomet_object:field_changes(Object,Field).

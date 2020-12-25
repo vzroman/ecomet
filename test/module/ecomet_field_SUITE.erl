@@ -150,17 +150,16 @@ end_per_testcase(_,_Config)->
 %%--------------------------------------------------------------
 build(_Config)->
   OID = {<<"sys">>, 1},
-  % {name,type,subtype,index,required,storage,default,autoincrement}
   StartT=erlang:monotonic_time(),
   ObjectDescription = #{
-    <<"simple">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"required">> => ecomet_schema:field_description(string,none,none,true,ramdisc,none,false),
-    <<"default1">> => ecomet_schema:field_description(string,none,none,true,ramdisc,<<"default1_string">>,false),
-    <<"default2">> => ecomet_schema:field_description(string,none,none,true,ramdisc,<<"default2_string">>,false),
-    <<"autoincrement1">> => ecomet_schema:field_description(string,none,none,true,ramdisc,none,true),
-    <<"autoincrement2">> => ecomet_schema:field_description(string,none,none,true,ramdisc,none,true),
-    <<"field1">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"field2">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false)
+    <<"simple">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"required">> => ecomet_field:build_description(#{ type=>string, required=>true, storage=>ramdisc }),
+    <<"default1">> => ecomet_field:build_description(#{ type=>string, required=>true, default=><<"default1_string">>, storage=>ramdisc }),
+    <<"default2">> => ecomet_field:build_description(#{ type=>string, required=>true, default=><<"default2_string">>, storage=>ramdisc }),
+    <<"autoincrement1">> => ecomet_field:build_description(#{ type=>string, required=>true, autoincrement => true,storage=>ramdisc }),
+    <<"autoincrement2">> => ecomet_field:build_description(#{ type=>string, required=>true, autoincrement => true,storage=>ramdisc }),
+    <<"field1">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"field2">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc })
   },
   BuildMapT=erlang:monotonic_time(),
   io:format("build_map: ~p",[BuildMapT-StartT]),
@@ -210,11 +209,20 @@ build(_Config)->
 
 build_fail(_Config)->
   % {name,type,subtype,index,required,storage,default,autoincrement}
+  %%  #{
+%%    type => string,
+%%    subtype => none,
+%%    index => none,
+%%    required => false,
+%%    storage => disc,
+%%    default => none,
+%%    autoincrement => false
+%%  }
   ObjectDescription = #{
-    <<"simple">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"required">> => ecomet_schema:field_description(string,none,none,true,ramdisc,none,false),
-    <<"default">> => ecomet_schema:field_description(string,none,none,true,ramdisc,<<"default1_string">>,false),
-    <<"autoincrement">> => ecomet_schema:field_description(string,none,none,true,ramdisc,none,true)
+    <<"simple">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"required">> => ecomet_field:build_description(#{ type=>string, required=>true, storage=>ramdisc }),
+    <<"default">> => ecomet_field:build_description(#{ type=>string, required=>true, default=><<"default1_string">>,storage=>ramdisc }),
+    <<"autoincrement">> => ecomet_field:build_description(#{ type=>string, required=>true, autoincrement => true,storage=>ramdisc })
   },
   % Invalid value
   ?assertError(
@@ -250,14 +258,13 @@ build_fail(_Config)->
 %% Save group
 %%--------------------------------------------------------------
 get_changes(_Config)->
-  % {name,type,subtype,index,required,storage,default,autoincrement}
   ObjectDescription = #{
-    <<"ram_field1">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ram_field2">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ramdisc_field">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"disc_field1">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"disc_field2">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"disc_field3">> => ecomet_schema:field_description(string,none,none,false,disc,none,false)
+    <<"ram_field1">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ram_field2">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ramdisc_field">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"disc_field1">> => ecomet_field:build_description(#{ type=>string }),
+    <<"disc_field2">> => ecomet_field:build_description(#{ type=>string }),
+    <<"disc_field3">> => ecomet_field:build_description(#{ type=>string })
   },
   % Empty project
   Empty=ecomet_field:get_changes([],ObjectDescription,#{}),
@@ -299,14 +306,14 @@ object_creation(_Config)->
   },
   % {name,type,subtype,index,required,storage,default,autoincrement}
   ObjectDescription = #{
-    <<"ram_field1">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ram_field2">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ram_field3">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ram_field4">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ramdisc_field">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"disc_field1">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"disc_field2">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"disc_field3">> => ecomet_schema:field_description(string,none,none,false,disc,none,false)
+    <<"ram_field1">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ram_field2">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ram_field3">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ram_field4">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ramdisc_field">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"disc_field1">> => ecomet_field:build_description(#{ type=>string }),
+    <<"disc_field2">> => ecomet_field:build_description(#{ type=>string }),
+    <<"disc_field3">> => ecomet_field:build_description(#{ type=>string })
   },
   %-----------------------------------------------------------
   % Scenario 1. Single storage changed
@@ -380,14 +387,14 @@ object_edit(_Config)->
   OID={1, 42},
   % {name,type,subtype,index,required,storage,default,autoincrement}
   ObjectDescription = #{
-    <<"ram_field1">> => ecomet_schema:field_description(string,none,none,false,ram,none,fals),
-    <<"ram_field2">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ram_field3">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ram_field4">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ramdisc_field">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"disc_field1">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"disc_field2">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"disc_field3">> => ecomet_schema:field_description(string,none,none,false,disc,none,false)
+    <<"ram_field1">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ram_field2">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ram_field3">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ram_field4">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ramdisc_field">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"disc_field1">> => ecomet_field:build_description(#{ type=>string }),
+    <<"disc_field2">> => ecomet_field:build_description(#{ type=>string }),
+    <<"disc_field3">> => ecomet_field:build_description(#{ type=>string })
   },
 
   %-----------------------------------------------------------
@@ -472,11 +479,11 @@ object_edit(OID,ObjectDescription,Preloaded)->
 dump_storages(_Config)->
   % {name,type,subtype,index,required,storage,default,autoincrement}
   ObjectDescription = #{
-    <<"ram_field1">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ram_field2">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ramdisc_field">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"disc_field1">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"disc_field2">> => ecomet_schema:field_description(string,none,none,false,disc,none,false)
+    <<"ram_field1">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ram_field2">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ramdisc_field">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"disc_field1">> => ecomet_field:build_description(#{ type=>string }),
+    <<"disc_field2">> => ecomet_field:build_description(#{ type=>string })
   },
   Fields=ecomet_field:build_new(ObjectDescription,
     #{
@@ -539,12 +546,12 @@ dump_storages(_Config)->
 merge(_Config)->
   % {name,type,subtype,index,required,storage,default,autoincrement}
   ObjectDescription = #{
-    <<"ram_field">> => ecomet_schema:field_description(string,none,none,false,ram,none,false),
-    <<"ram_required">> => ecomet_schema:field_description(string,none,none,true,ram,none,false),
-    <<"ramdisc_field">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"disc_field1">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"disc_field2">> => ecomet_schema:field_description(string,none,none,false,disc,none,false),
-    <<"disc_field3">> => ecomet_schema:field_description(string,none,none,false,disc,none,false)
+    <<"ram_field">> => ecomet_field:build_description(#{ type=>string, storage=>ram }),
+    <<"ram_required">> => ecomet_field:build_description(#{ type=>string, required=>true, storage=>ram }),
+    <<"ramdisc_field">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"disc_field1">> => ecomet_field:build_description(#{ type=>string }),
+    <<"disc_field2">> => ecomet_field:build_description(#{ type=>string }),
+    <<"disc_field3">> => ecomet_field:build_description(#{ type=>string })
   },
   % Fill project
   Fields = ecomet_field:build_new(ObjectDescription,
@@ -584,11 +591,11 @@ merge(_Config)->
 helpers(_Config)->
   % {name,type,subtype,index,required,storage,default,autoincrement}
   ObjectDescription = #{
-    <<"simple">> => ecomet_schema:field_description(string,none,[simple],false,ramdisc,none,false),
-    <<"list">> => ecomet_schema:field_description(list,string,none,false,ramdisc,none,false),
-    <<"required">> => ecomet_schema:field_description(string,none,none,true,ramdisc,none,false),
-    <<"disc">> => ecomet_schema:field_description(string,none,[simple],false,disc,none,false),
-    <<"default">> => ecomet_schema:field_description(string,none,none,false,ramdisc,<<"default_string">>,false)
+    <<"simple">> => ecomet_field:build_description(#{ type=>string, index=>[simple], storage=>ramdisc }),
+    <<"list">> => ecomet_field:build_description(#{ type=>list, subtype=>string, storage=>ramdisc }),
+    <<"required">> => ecomet_field:build_description(#{ type=>string, required=>true, storage=>ramdisc }),
+    <<"disc">> => ecomet_field:build_description(#{ type=>string, index=>[simple] }),
+    <<"default">> => ecomet_field:build_description(#{ type=>string, default=><<"default_string">>, storage=>ramdisc })
   },
   % type
   {ok,string}=ecomet_field:get_type(ObjectDescription,<<"simple">>),
@@ -610,8 +617,8 @@ helpers(_Config)->
 autoincrement_test(_Config)->
   % {name,type,subtype,index,required,storage,default,autoincrement}
   Description = #{
-    <<"simple">> => ecomet_schema:field_description(string,none,none,false,ramdisc,none,false),
-    <<"autoincrement">> => ecomet_schema:field_description(string,none,none,true,ramdisc,none,true)
+    <<"simple">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
+    <<"autoincrement">> => ecomet_field:build_description(#{ type=>string, required=>true, autoincrement=>true, storage=>ramdisc })
   },
   ParentPid = self(),
   SmallCnt = 10,
