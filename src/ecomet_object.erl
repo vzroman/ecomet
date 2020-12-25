@@ -72,7 +72,12 @@
   on_delete/1
 ]).
 
--record(object,{oid,edit,map,deleted=false,db}).
+% @edoc handler of ecomet object
+-record(object, {oid, edit, map, deleted=false, db}).
+
+-type object_handler() :: #object{}.
+-export_type([object_handler/0]).
+
 
 -define(ObjectID(PatternID,ObjectID),{PatternID,ObjectID}).
 -define(TRANSACTION(Fun),
@@ -232,9 +237,9 @@ edit(#object{oid=OID,map=Map}=Object,Fields)->
   end,
   ok.
 
-copy(Object,Replace)->
+copy(Object, Replace)->
   Original = read_all(Object),
-  New = maps:merge(Original,Replace),
+  New = maps:merge(Original, Replace),
   create(New).
 
 % Check changes for the field within the transaction
