@@ -22,6 +22,8 @@
 %%	Common utilities
 %%=================================================================
 -export([
+  create_object/4,
+  edit_or_create/1,
   parse_dt/1,
   dt_to_string/1,dt_to_string/2,
   ts/0,log_ts/0,
@@ -44,6 +46,31 @@
     133,0,39,0,2,110,0,0,0,0,0,0,255,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
     0,0,0,0,0,0,0,0,0,0,107,120,0,39,94,9,29,125,25,120,0,105,0>>
 }).
+
+% @edoc Creates object of certain Pattern for Fields with given Name and Folder
+
+create_object(Name, Folder, Pattern, Fields) ->
+  Obj = Fields#{
+    <<".name">> => Name,
+    <<".folder">> => Folder,
+    <<".pattern">> => Pattern
+  },
+  ecomet_object:create(Obj).
+
+% @edoc Edit object if path exists, create otherwise
+-spec edit_or_create(DescMap :: ecomet:object()) -> ecomet:object_handler() | {error, wrong_object}.
+
+edit_or_create(#{<<".folder">> := FolderID, <<".name">> := Name, <<".pattern">> := PatternID} = Fields) ->
+  case ecomet_folder:find_object(FolderID, Name) of
+    {ok, OID}->
+      Object=ecomet:open_wlock(OID),
+      ?assertMatch({ok, PatternID}, read_field(Object, <<".pattern">>), different_pattern),
+      ecomet:edit_object(Object, maps:without([<<".pattern">>], Fields));
+    _ ->
+      ecomet:create_object(Fields)
+  end;
+edit_or_create(_) ->
+  {error, wrong_object}.
 
 dt_to_string(DT)->
   DT1 =
