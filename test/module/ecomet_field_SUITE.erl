@@ -218,7 +218,7 @@ build_fail(_Config)->
   },
   % Invalid value
   ?assertError(
-    invalid_value,
+    {invalid_value,not_string},
     ecomet_field:build_new(ObjectDescription,
       #{
         <<".pattern">> => key1,

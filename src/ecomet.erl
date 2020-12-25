@@ -145,13 +145,13 @@ open_wlock(ID)->
   open(ID, write).
 
 % @edoc Return field value for given ecomet object
--spec read_field(Object :: object_handler(), Field :: field_key()) -> field_value().
+-spec read_field(Object :: object_handler(), Field :: field_key()) -> {ok, field_value()} | {error, Error::term()}.
 
 read_field(Object, Field) ->
   ecomet_object:read_field(Object, Field).
 
 % @edoc Return field value or default for given ecomet object
--spec read_field(Object :: object_handler(), Field :: field_key()) -> field_value().
+-spec read_field(Object :: object_handler(), Field :: field_key(), Default :: term()) -> {ok, field_value()} | {error, Error::term()}.
 
 read_field(Object, Field, Default) ->
   ecomet_object:read_field(Object, Field, Default).
