@@ -45,7 +45,9 @@
   %-------Pattern--------------------
   get_pattern/1,
   set_pattern/2,
+  list_patterns/0,
 
+  field_description/7,
   local_increment/1
 ]).
 
@@ -67,6 +69,7 @@
 -ifdef(TEST).
 
 -export([
+  object_schema/0,
   register_type/2
 ]).
 
@@ -82,36 +85,58 @@
 %%====================================================================
 %%		System patterns
 %%====================================================================
--define(OBJECT_SCHEMA,#{
-  <<".name">>=>#{ type => string, index=> [simple], required => true },
-  <<".folder">>=>#{ type => link, index=> [simple], required => true },
-  <<".pattern">>=>#{ type => link, index=> [simple], required => true },
-  <<".readgroups">>=>#{ type => list, subtype => link, index=> [simple] },
-  <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-  <<".ts">> =>#{ type => integer }
-}).
--define(FOLDER_SCHEMA,?OBJECT_SCHEMA#{
-  <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
-  <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-  <<"only_patterns">>=>#{ type => list, subtype => link },
-  <<"exclude_patterns">>=>#{ type => list, subtype => link },
-  <<"recursive_rights">> =>#{ type => bool },
-  <<"database">> =>#{ type => link, index=> [simple] }
-}).
--define(PATTERN_SCHEMA,?FOLDER_SCHEMA#{
-  <<"behaviour_module">>=>#{ type => atom },
-  <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
-  <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
-}).
--define(FIELD_SCHEMA,?OBJECT_SCHEMA#{
-  <<"type">>=>#{ type => atom, required => true },
-  <<"subtype">>=>#{ type => atom },
-  <<"index">>=>#{ type => list, subtype => atom },
-  <<"required">>=>#{ type => bool },
-  <<"default">> =>#{ type => term },
-  <<"storage">>=>#{ type => atom, default_value => disc  },
-  <<"autoincrement">>=>#{ type => bool }
-}).
+object_schema() ->
+  #{
+    <<".name">> => #{type => string, index => [simple], required => true},
+    <<".folder">> => #{type => link, index => [simple], required => true},
+    <<".pattern">> => #{type => link, index => [simple], required => true},
+    <<".readgroups">> => #{type => list, subtype => link, index => [simple]},
+    <<".writegroups">> => #{type => list, subtype => link, index => [simple]},
+    <<".ts">> => #{type => integer}
+  }.
+
+folder_schema() ->
+  BaseObj = object_schema(),
+  BaseObj#{
+    <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
+    <<"only_patterns">>=>#{ type => list, subtype => link },
+    <<"exclude_patterns">>=>#{ type => list, subtype => link },
+    <<"recursive_rights">> =>#{ type => bool },
+    <<"database">> =>#{ type => link, index=> [simple] }
+  }.
+
+pattern_schema() ->
+  FolderObj = folder_schema(),
+  FolderObj#{
+    <<"behaviour_module">>=>#{ type => atom },
+    <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
+    <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
+  }.
+
+field_schema() ->
+  BaseObj = object_schema(),
+  BaseObj#{
+    <<"type">>=>#{ type => atom, required => true },
+    <<"subtype">>=>#{ type => atom },
+    <<"index">>=>#{ type => list, subtype => atom },
+    <<"required">>=>#{ type => bool },
+    <<"default">> =>#{ type => term },
+    <<"storage">>=>#{ type => atom, default_value => disc  },
+    <<"autoincrement">>=>#{ type => bool }
+  }.
+
+field_description(Type, Subtype, Index, Required, Storage, Default, Inc) ->
+  #{
+    type => Type,
+    subtype => Subtype,
+    index => Index,
+    required => Required,
+    storage => Storage,
+    default => Default,
+    autoincrement => Inc
+  }.
+
 %-------------STORAGE PATTERNS--------------------------------------------
 -define(DATABASE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] }
@@ -324,6 +349,11 @@ get_pattern(ID)->
 set_pattern(ID,Value)->
   ok = mnesia:write(?SCHEMA,#kv{key = #pattern{id=ID}, value = Value },write).
 
+list_patterns() ->
+  Matcher = #kv{key = #pattern{id = '$1'}, value = '$2'},
+  Result = ['$1'],
+  lists:flatten(mnesia:dirty_select(?SCHEMA, [{Matcher, [], [Result]}])).
+
 local_increment(Key)->
   mnesia:dirty_update_counter(?INCREMENT,Key,1).
 
@@ -485,16 +515,16 @@ register_node()->
 
 init_base_types()->
   %-------Object------------------
-  ok = register_type({?PATTERN_PATTERN,?OBJECT_PATTERN}, ?OBJECT_SCHEMA),
+  ok = register_type({?PATTERN_PATTERN,?OBJECT_PATTERN}, object_schema()),
 
   %-----Folder---------------------
-  ok = register_type({?PATTERN_PATTERN,?FOLDER_PATTERN}, ?FOLDER_SCHEMA),
+  ok = register_type({?PATTERN_PATTERN,?FOLDER_PATTERN}, folder_schema()),
 
   %-----Pattern---------------------
-  ok = register_type({?PATTERN_PATTERN,?PATTERN_PATTERN}, ?PATTERN_SCHEMA),
+  ok = register_type({?PATTERN_PATTERN,?PATTERN_PATTERN}, pattern_schema()),
 
   %-----Field---------------------
-  ok = register_type({?PATTERN_PATTERN,?FIELD_PATTERN}, ?FIELD_SCHEMA),
+  ok = register_type({?PATTERN_PATTERN,?FIELD_PATTERN}, field_schema()),
 
   ok.
 
@@ -540,7 +570,7 @@ init_base_types_objects()->
                 <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
                 <<"parents">>=>[]
               },
-              children=>init_pattern_fields(?OBJECT_SCHEMA)
+              children=>init_pattern_fields(object_schema())
             }},
             % #2. ?FOLDER_PATTERN
             { <<".folder">>, #{
@@ -550,7 +580,7 @@ init_base_types_objects()->
                 <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
                 <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}]
               },
-              children=>init_pattern_fields(?FOLDER_SCHEMA)
+              children=>init_pattern_fields(folder_schema())
             }},
             % IMPORTANT! Patterns describing objects are created WITHOUT behaviours
             % #3. ?PATTERN_PATTERN
@@ -561,7 +591,7 @@ init_base_types_objects()->
                 <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN},
                 <<"parents">>=>[{?PATTERN_PATTERN,?FOLDER_PATTERN},{?PATTERN_PATTERN,?OBJECT_PATTERN}]
               },
-              children=>init_pattern_fields(?PATTERN_SCHEMA)
+              children=>init_pattern_fields(pattern_schema())
             }},
             % #4. ?FIELD_PATTERN
             { <<".field">>, #{
@@ -571,7 +601,7 @@ init_base_types_objects()->
                 <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
                 <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}]
               },
-              children=>init_pattern_fields(?FIELD_SCHEMA)
+              children=>init_pattern_fields(field_schema())
             }}
           ]
         }}
@@ -723,7 +753,7 @@ init_default_users()->
           children=>
           [ begin
               { Name, #{ edit => true, fields=> ecomet_field:from_schema(#{ storage=>?RAMLOCAL })} }
-            end || Name <- maps:keys(?OBJECT_SCHEMA)]
+            end || Name <- maps:keys(object_schema())]
           ++ init_pattern_fields(?SUBSCRIPTION_SCHEMA)
         }}
       ]
