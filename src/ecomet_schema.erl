@@ -68,7 +68,8 @@
 -ifdef(TEST).
 
 -export([
-  register_type/2
+  register_type/2,
+  init_tree/2
 ]).
 
 -endif.

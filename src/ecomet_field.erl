@@ -177,7 +177,10 @@ build_new(Map, NewFields)->
              Key = { PatternID, Name},
              auto_value(Config, Key)
          end,
-       check_value(Config,Value),
+       case check_value(Config,Value) of
+         ok->ok;
+         {error,Error}->?ERROR({Name,Error})
+       end,
        { Name ,Value }
      end || {Name,Config} <- maps:to_list(Map),is_binary(Name)],
   maps:from_list(Fields).
@@ -187,7 +190,10 @@ merge(Map,Project,NewFields)->
   maps:fold(fun(Name,Value,OutProject)->
     case Map of
       #{Name := Config}->
-        check_value(Config,Value),
+        case check_value(Config,Value) of
+          ok->ok;
+          {error,Error}->?ERROR({Name,Error})
+        end,
         OutProject#{Name=>Value};
       _->?ERROR(undefined_field)
     end
@@ -216,12 +222,12 @@ auto_value(#{default:=Default, autoincrement:=Increment, type := Type}, Key)->
 
 % Check field value
 check_value(#{required:=true},none)->
-  ?ERROR(required_field);
+  {error,required_field};
 check_value(Config,Value)->
   Type = get_type(Config),
   case ecomet_types:check_value(Type,Value) of
     ok -> ok;
-    _->?ERROR({invalid_value,Value})
+    _->{error,{invalid_value,Value}}
   end.
 
 get_type(#{type:=list,subtype:=SubType})->
