@@ -226,7 +226,7 @@ build_fail(_Config)->
   },
   % Invalid value
   ?assertError(
-    {invalid_value,not_string},
+    {<<"simple">>,{invalid_value,not_string}},
     ecomet_field:build_new(ObjectDescription,
       #{
         <<".pattern">> => key1,
@@ -237,7 +237,7 @@ build_fail(_Config)->
   ),
   % Undefined required field
   ?assertError(
-    required_field,
+    {<<"required">>,required_field},
     ecomet_field:build_new(ObjectDescription,
       #{
         <<".pattern">> => key1,
@@ -579,7 +579,7 @@ merge(_Config)->
 
   % We can not delete required field
   ?assertError(
-    required_field,
+    {<<"ram_required">>,required_field},
     ecomet_field:merge(ObjectDescription, Fields, #{<<"ram_required">> => none})
   ),
 

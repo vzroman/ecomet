@@ -97,6 +97,8 @@ init_per_suite(Config)->
     <<".name">>=>#{ type=> string, subtype=>none, index=>[simple], required=>true, storage=>ramdisc, default=>none, autoincrement=>false},
     <<".folder">>=>#{ type=> link, subtype=>none, index=>[simple], required=>true, storage=>ramdisc, default=>none, autoincrement=>false},
     <<".pattern">>=>#{ type=> link, subtype=>none, index=>[simple], required=>true, storage=>ramdisc, default=>none, autoincrement=>false},
+    <<".readgroups">>=>#{ type=> list, subtype=>link, index=>[simple], required=>false, storage=>ramdisc, default=>none, autoincrement=>false},
+    <<".writegroups">>=>#{ type=> list, subtype=>link, index=>[simple], required=>false, storage=>ramdisc, default=>none, autoincrement=>false},
     <<"ram_field">>=>#{ type=> string, subtype=>none, index=>[simple], required=>true, storage=>ram, default=>none, autoincrement=>false} ,
     <<"disc_field">>=>#{ type=> string, subtype=>none, index=>[simple], required=>true, storage=>disc, default=>none, autoincrement=>false}
   },
@@ -370,7 +372,7 @@ create(Config)->
   %---------------------------------------------
   % Ramdisc
   #{tags:=RamDiscBacktags}=ecomet_backend:dirty_read(DB,?DATA,ramdisc,OID),
-  3=maps:size(RamDiscBacktags),
+  5=maps:size(RamDiscBacktags),
   RamBackTagsName = maps:get(<<".name">>,RamDiscBacktags),
   RamBackTagsFolder = maps:get(<<".folder">>,RamDiscBacktags),
   maps:get(<<".pattern">>,RamDiscBacktags),

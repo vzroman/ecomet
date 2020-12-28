@@ -89,6 +89,10 @@
       end;
     _->Fun()
   end).
+-define(SERVICE_FIELDS,#{
+  <<".oid">>=>fun ecomet_lib:to_oid/1,
+  <<".path">>=>fun ecomet_lib:to_path/1
+}).
 %%=================================================================
 %%	Data API
 %%=================================================================
@@ -184,14 +188,18 @@ open(OID,Lock,Timeout)->
   Object.
 
 % Read field value
-read_field(#object{oid=OID,map=Map},Field)->
-  % Check if we have project with changes in transaction dict
-  Fields=ecomet_transaction:dict_get({OID,fields},#{}),
-  case maps:find(Field,Fields) of
-    {ok,Value}->
-      {ok,Value};
-    error->
-      ecomet_field:get_value(Map,OID,Field)
+read_field(#object{oid=OID,map=Map}=Object,Field)->
+  case ?SERVICE_FIELDS of
+    #{Field:=Fun}->{ok,Fun(Object)};
+    _->
+      % Check if we have project with changes in transaction dict
+      Fields=ecomet_transaction:dict_get({OID,fields},#{}),
+      case maps:find(Field,Fields) of
+        {ok,Value}->
+          {ok,Value};
+        error->
+          ecomet_field:get_value(Map,OID,Field)
+      end
   end.
 read_field(Object,Field,Default)->
   case read_field(Object,Field) of
@@ -202,15 +210,17 @@ read_field(Object,Field,Default)->
 read_fields(Object,Fields) when is_list(Fields)->
   Map = maps:from_list([ {Field,none} || Field <- Fields ]),
   read_fields(Object, Map);
-read_fields(#object{oid = OID,map = Map},Fields) when is_map(Fields)->
+read_fields(#object{oid = OID,map = Map}=Object,Fields) when is_map(Fields)->
 
   % Check if we have project with changes in transaction dict
   Project=ecomet_transaction:dict_get({OID,fields},#{}),
 
   % Load storage for fields absent in the project
+  ToLoad = maps:merge(Project,?SERVICE_FIELDS),
   Storage=
     maps:fold(fun(F,_,Acc)->
       {ok,S}=ecomet_field:get_storage(Map,F),
+
       case Acc of
         #{S:=_}->Acc;
         _->
@@ -219,17 +229,21 @@ read_fields(#object{oid = OID,map = Map},Fields) when is_map(Fields)->
             _-> Acc#{S=>#{}}
           end
       end
-    end,#{},maps:without(maps:keys(Project),Fields)),
+    end,#{},maps:without(maps:keys(ToLoad),Fields)),
 
   maps:map(fun(Name,Default)->
     case Project of
       #{Name:=none}->Default;
       #{Name:=Value}->Value;
       _->
-        % Look up the field in the storage
-        {ok,S}=ecomet_field:get_storage(Map,Name),
-        #{S:=Values} = Storage,
-        maps:get(Name,Values,Default)
+        case ToLoad of
+          #{Name:=Fun}->Fun(Object);
+          _->
+            % Look up the field in the storage
+            {ok,S}=ecomet_field:get_storage(Map,Name),
+            #{S:=Values} = Storage,
+            maps:get(Name,Values,Default)
+        end
     end
   end,Fields).
 

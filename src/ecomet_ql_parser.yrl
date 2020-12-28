@@ -25,6 +25,8 @@ Subscribe
 Set
 Insert
 Delete
+Databases
+Database
 GetFieldList
 GetField
 SetFieldList
@@ -69,6 +71,8 @@ order
 page
 read
 set
+from
+in
 transaction_start
 transaction_commit
 transaction_rollback
@@ -81,6 +85,7 @@ atom
 integer
 float
 '$'
+'*'
 '='
 ':='
 ':>'
@@ -116,19 +121,26 @@ Statement -> transaction_start : transaction_start.
 Statement -> transaction_commit : transaction_commit.
 Statement -> transaction_rollback : transaction_rollback.
 
-Get -> get GetFieldList where Condition ParamList: {get,'$2','$4','$5'}.
-Get -> get GetFieldList where Condition: {get,'$2','$4',[]}.
+Get -> get GetFieldList from Databases where Condition ParamList: {get,'$2','$4','$6','$7'}.
+Get -> get GetFieldList from Databases where Condition: {get,'$2','$4','$6',[]}.
 
-Subscribe -> subscribe text get GetFieldList where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$7'}.
-Subscribe -> subscribe text get GetFieldList where Condition: {subscribe,get_token('$2'),'$4','$6',[]}.
+Subscribe -> subscribe text get GetFieldList from Databases where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$8','$9'}.
+Subscribe -> subscribe text get GetFieldList from Databases where Condition: {subscribe,get_token('$2'),'$4','$6','$8',[]}.
 
-Set-> set SetFieldList where Condition Lock: {set,maps:from_list('$2'),'$4',['$5']}.
-Set-> set SetFieldList where Condition: {set,maps:from_list('$2'),'$4',[]}.
+Set-> set SetFieldList in Databases where Condition Lock: {set,maps:from_list('$2'),'$4','$6',['$7']}.
+Set-> set SetFieldList in Databases where Condition: {set,maps:from_list('$2'),'$4','$6',[]}.
 
 Insert -> insert SetFieldList : { insert, maps:from_list('$2') }.
 
-Delete -> delete where Condition Lock : { delete, '$3', ['$4']}.
-Delete -> delete where Condition : { delete, '$3', []}.
+Delete -> delete from Databases where Condition Lock : { delete, '$3', '$5', ['$6']}.
+Delete -> delete from Databases where Condition : { delete, '$3','$5', []}.
+
+Databases -> '*' : ecomet_db:get_databases().
+Databases -> Database : ['$1'].
+Databases -> Database ',' Databases: ['$1'|'$3'].
+
+Database -> Atom : '$1'.
+Database -> text : binary_to_atom(get_token('$1'),utf8).
 
 GetFieldList -> GetField: ['$1'].
 GetFieldList -> GetField ',' GetFieldList: ['$1'|'$3'].

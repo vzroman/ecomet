@@ -26,6 +26,7 @@ DELETE      = (D|d)(E|e)(L|l)(E|e)(T|t)(E|e)
 DESC        = (D|d)(E|e)(S|s)(C|c)
 GROUP       = (G|g)(R|r)(O|o)(U|u)(P|p)
 GET         = (G|g)(E|e)(T|t)
+FROM        = (F|f)(R|r)(O|o)(M|m)
 SUBSCRIBE   = (S|s)(U|u)(B|b)(S|s)(C|c)(R|r)(I|i)(B|b)(E|e)
 INSERT      = (I|i)(N|n)(S|s)(E|e)(R|r)(T|t)
 LOCK        = (L|l)(O|o)(C|c)(K|k)
@@ -34,6 +35,7 @@ ORDER       = (O|o)(R|r)(D|d)(E|e)(R|r)
 PAGE        = (P|p)(A|a)(G|g)(E|e)
 READ        = (R|r)(E|e)(A|a)(D|d)
 SET         = (S|s)(E|e)(T|t)
+IN          = (I|i)(N|n)
 TRANSACTION_START = (T|t)(R|r)(A|a)(N|n)(S|s)(A|a)(C|c)(T|t)(I|i)(O|o)(N|n)_(S|s)(T|t)(A|a)(R|r)(T|t)
 TRANSACTION_COMMIT = (T|t)(R|r)(A|a)(N|n)(S|s)(A|a)(C|c)(T|t)(I|i)(O|o)(N|n)_(C|c)(O|o)(M|m)(M|m)(I|i)(T|t)
 TRANSACTION_ROLLBACK = (T|t)(R|r)(A|a)(N|n)(S|s)(A|a)(C|c)(T|t)(I|i)(O|o)(N|n)_(R|r)(O|o)(L|l)(L|l)(B|b)(A|a)(C|c)(K|k)
@@ -52,6 +54,7 @@ FLOATSCI    = (\-?([0-9]+)?(\.)?[0-9]+(E|e)(\+|\-)?[0-9]+)
 FIELD       = (\.?([a-zA-Z0-9_-]+)*)
 ATOM        = ([a-zA-Z][a-zA-Z0-9_\-]*)
 S           = (\$)
+ALL         = (\*)
 EQ          = (=)
 EQS         = (:=)
 GTS         = (:>)
@@ -79,6 +82,7 @@ Rules.
 {DESC}        : {token, {'DESC', TokenLine}}.
 {INSERT}      : {token, {insert, TokenLine}}.
 {GET}         : {token, {get, TokenLine}}.
+{FROM}        : {token, {from, TokenLine}}.
 {SUBSCRIBE}   : {token, {subscribe, TokenLine}}.
 {GROUP}       : {token, {group, TokenLine}}.
 {OR}          : {token, {'OR', TokenLine}}.
@@ -86,6 +90,7 @@ Rules.
 {PAGE}        : {token, {page, TokenLine}}.
 {READ}        : {token, {read, TokenLine}}.
 {SET}         : {token, {set, TokenLine}}.
+{IN}          : {token, {in, TokenLine}}.
 {TRANSACTION_START} : {token, {transaction_start, TokenLine}}.
 {TRANSACTION_COMMIT} : {token, {transaction_commit, TokenLine}}.
 {TRANSACTION_ROLLBACK} : {token, {transaction_rollback, TokenLine}}.
@@ -94,6 +99,7 @@ Rules.
 {STATELESS}   : {token, {stateless, TokenLine}}.
 {NO_FEEDBACK} : {token, {no_feedback, TokenLine}}.
 {S}           : {token, {'$', TokenLine}}.
+{ALL}         : {token, {'*', TokenLine}}.
 {EQ}          : {token, {'=', TokenLine}}.
 {EQS}         : {token, {':=',TokenLine}}.
 {GTS}         : {token, {':>',TokenLine}}.

@@ -2060,45 +2060,45 @@ set(_Config)->
 
 parse_get(_Config) ->
 
-  [{get, [{<<"alias">>, <<"foo">>}], {'AND', [{<<"buz">>, ':>', 123}]}, []}]=
-    ecomet_query:parse("get foo AS 'alias' where AND ( buz :> 123 )"),
+  [{get, [{<<"alias">>, <<"foo">>}],[root], {'AND', [{<<"buz">>, ':>', 123}]}, []}]=
+    ecomet_query:parse("get foo AS 'alias' from root where AND ( buz :> 123 )"),
 
-  [{get, [<<"foo1">>, <<"foo2">>], {'OR', [{<<"buz">>, ':LIKE', <<"f">>}, {<<"bar">>, '=', -42}]}, []}]=
-    ecomet_query:parse("get foo1, foo2 where OR ( buz :LIKE 'f', bar = -42 )"),
+  [{get, [<<"foo1">>, <<"foo2">>], [db1,db2],{'OR', [{<<"buz">>, ':LIKE', <<"f">>}, {<<"bar">>, '=', -42}]}, []}]=
+    ecomet_query:parse("get foo1, foo2 from db1,db2 where OR ( buz :LIKE 'f', bar = -42 )"),
 
-  [{get, [<<"foo">>], {'ANDNOT', {<<"buz">>, ':=', 45.5},{<<"bar">>, ':<', 4}}, [{order, [{<<"foo3">>, 'DESC'}]}]}]=
-    ecomet_query:parse("get foo where ANDNOT (buz := 45.5, bar :< 4) order by foo3 DESC"),
+  [{get, [<<"foo">>],['TEST'], {'ANDNOT', {<<"buz">>, ':=', 45.5},{<<"bar">>, ':<', 4}}, [{order, [{<<"foo3">>, 'DESC'}]}]}]=
+    ecomet_query:parse("get foo from 'TEST' where ANDNOT (buz := 45.5, bar :< 4) order by foo3 DESC"),
 
-  [{get, [<<"foo">>], {'AND', [{<<"buz">>, ':=', 1}]}, [{page, {5, 10}}]}]=
-    ecomet_query:parse("get foo where AND (buz := 1) page 5:10"),
+  [{get, [<<"foo">>], [root],{'AND', [{<<"buz">>, ':=', 1}]}, [{page, {5, 10}}]}]=
+    ecomet_query:parse("get foo from root where AND (buz := 1) page 5:10"),
 
-  [{get, [<<"foo">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{page, {5, 10}},{lock, read}]}]=
-    ecomet_query:parse("get foo where AND (bar :< 4) page 5:10 lock read"),
+  [{get, [<<"foo">>], [root],{'AND', [{<<"bar">>, ':<', 4}]}, [{page, {5, 10}},{lock, read}]}]=
+    ecomet_query:parse("get foo from * where AND (bar :< 4) page 5:10 lock read"),
 
-  [{get, [<<"foo1">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{group, [<<"foo2">>, <<"buz2">>]}, {order, [{<<"foo3">>, 'ASC'}, {<<"buz3">>,'DESC'}]}]}]=
-    ecomet_query:parse("get foo1 where AND (bar :< 4) group by foo2, buz2 order by foo3, buz3 DESC"),
+  [{get, [<<"foo1">>],[d1,d2,'D3'],{'AND', [{<<"bar">>, ':<', 4}]}, [{group, [<<"foo2">>, <<"buz2">>]}, {order, [{<<"foo3">>, 'ASC'}, {<<"buz3">>,'DESC'}]}]}]=
+    ecomet_query:parse("get foo1 from d1,d2,'D3' where AND (bar :< 4) group by foo2, buz2 order by foo3, buz3 DESC"),
 
-  [{get, [<<"foo1">>], {'AND', [{<<"bar">>, ':<', 4}]}, [{group, [1]},{order, [{2, 'DESC'}]}]}]=
-    ecomet_query:parse("get foo1 where AND (bar :< 4) group by 1 order by 2 DESC"),
+  [{get, [<<"foo1">>],[root], {'AND', [{<<"bar">>, ':<', 4}]}, [{group, [1]},{order, [{2, 'DESC'}]}]}]=
+    ecomet_query:parse("get foo1 from root where AND (bar :< 4) group by 1 order by 2 DESC"),
 
-  [{get,[{Concat, [<<"buz">>,<<"foo">>]}, {<<"fun">>, {test}}], {'AND', [{<<"bar">>, ':<', 4}]}, []}]=
-    ecomet_query:parse("get $concat($buz,$foo), $term('{test}') AS 'fun' where AND (bar :< 4)"),
+  [{get,[{Concat, [<<"buz">>,<<"foo">>]}, {<<"fun">>, {test}}],[root], {'AND', [{<<"bar">>, ':<', 4}]}, []}]=
+    ecomet_query:parse("get $concat($buz,$foo), $term('{test}') AS 'fun' from root where AND (bar :< 4)"),
 
   <<"str1str2">> = Concat([<<"str1">>,<<"str2">>]),
 
   ok.
 
 parse_set(_Config) ->
-  [{set, #{<<"foo">>:={ FieldValue,[<<"hello">>] }}, {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}]=
-    ecomet_query:parse("set foo=$hello where AND (bar :< 1) lock write"),
+  [{set, #{<<"foo">>:={ FieldValue,[<<"hello">>] }},[root], {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}]=
+    ecomet_query:parse("set foo=$hello in root where AND (bar :< 1) lock write"),
   <<"value">>=FieldValue([<<"value">>]),
 
-  [{set,#{<<"foo">>:={Concat,[<<"buz">>]}}, {'OR',[{<<"bar">>,':>',1}]}, [{lock,read}]}]=
-    ecomet_query:parse("set foo=$concat($buz,'_test') where OR (bar :> 1) lock read"),
+  [{set,#{<<"foo">>:={Concat,[<<"buz">>]}},[root], {'OR',[{<<"bar">>,':>',1}]}, [{lock,read}]}]=
+    ecomet_query:parse("set foo=$concat($buz,'_test') in * where OR (bar :> 1) lock read"),
   <<"value_test">> = Concat([<<"value">>]),
 
-  [{set, #{<<"foo1">>:= 123, <<"foo2">>:= {Term,[<<"buz">>]} }, {'AND', [{<<"bar">>, ':LIKE', <<"1">>}]}, []}]=
-    ecomet_query:parse("set foo1=123, foo2=$term(['{test}',$buz]) where AND (bar :LIKE '1')"),
+  [{set, #{<<"foo1">>:= 123, <<"foo2">>:= {Term,[<<"buz">>]} },[db1,db2], {'AND', [{<<"bar">>, ':LIKE', <<"1">>}]}, []}]=
+    ecomet_query:parse("set foo1=123, foo2=$term(['{test}',$buz]) in db1,db2 where AND (bar :LIKE '1')"),
 
   [{test},value] = Term([value]),
 
@@ -2112,13 +2112,13 @@ parse_insert(_Config) ->
 
 parse_delete(_Config) ->
 
-  [{delete, {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}]=
-    ecomet_query:parse("delete where AND (bar :< 1) lock write"),
+  [{delete,[root], {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}]=
+    ecomet_query:parse("delete from root where AND (bar :< 1) lock write"),
 
-  [{delete, {'OR', [{<<"bar">>, ':>', 1.0}]}, [{lock, read}]}]=
-    ecomet_query:parse("delete where OR (bar :> 1.0) lock read"),
+  [{delete,[root], {'OR', [{<<"bar">>, ':>', 1.0}]}, [{lock, read}]}]=
+    ecomet_query:parse("delete from * where OR (bar :> 1.0) lock read"),
 
-  [{delete, {'ANDNOT', {<<"bar">>, ':LIKE', <<"1">>}, {<<"buz">>, ':=', foo}}, []}]=
-    ecomet_query:parse("delete where ANDNOT (bar :LIKE '1', buz := foo)"),
+  [{delete,[db1,db2], {'ANDNOT', {<<"bar">>, ':LIKE', <<"1">>}, {<<"buz">>, ':=', foo}}, []}]=
+    ecomet_query:parse("delete from db1,db2 where ANDNOT (bar :LIKE '1', buz := foo)"),
 
   ok.

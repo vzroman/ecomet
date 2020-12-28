@@ -27,7 +27,9 @@
   build_index/4,
   delete_object/2,
   read_tag/4,
-  get_supported_types/0
+  get_supported_types/0,
+  % only for tests
+  build_bitmap/7
 ]).
 
 %%====================================================================
@@ -40,8 +42,7 @@
   merge_backtags/2,
   dump_log/2,
   get_unchanged/2,
-  split_3grams/1,
-  build_bitmap/7
+  split_3grams/1
 ]).
 -endif.
 

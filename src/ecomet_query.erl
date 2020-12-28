@@ -112,20 +112,16 @@ safe_statement(Statement,Acc)->
     _:Error ->[{error,Error}|Acc]
   end.
 
-run_statement({get,Fields,Condition,Params},Acc)->
-  DBs=ecomet_db:get_databases(),
+run_statement({get,Fields,DBs,Condition,Params},Acc)->
   [get(DBs,Fields,Condition,Params)|Acc];
-run_statement({subscribe,ID,Fields,Condition,Params},Acc)->
-  DBs=ecomet_db:get_databases(),
+run_statement({subscribe,ID,Fields,DBs,Condition,Params},Acc)->
   [subscribe(ID,DBs,Fields,Condition,Params)|Acc];
-run_statement({set,Fields,Condition,Params},Acc)->
-  DBs=ecomet_db:get_databases(),
+run_statement({set,Fields,DBs,Condition,Params},Acc)->
   [set(DBs,Fields,Condition,Params)|Acc];
 run_statement({insert,Fields},Acc)->
   Object=ecomet_object:create(Fields),
   [ecomet_object:get_oid(Object)|Acc];
-run_statement({delete,Condition,Params},Acc)->
-  DBs=ecomet_db:get_databases(),
+run_statement({delete,DBs,Condition,Params},Acc)->
   [delete(DBs,Condition,Params)|Acc];
 run_statement(transaction_start,Acc)->
   ecomet_transaction:start(),
