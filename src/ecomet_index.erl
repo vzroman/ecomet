@@ -40,7 +40,8 @@
   merge_backtags/2,
   dump_log/2,
   get_unchanged/2,
-  split_3grams/1
+  split_3grams/1,
+  build_bitmap/7
 ]).
 -endif.
 
@@ -187,7 +188,7 @@ dump_log(OID,Log)->
   % We do not hold locks on them while indexing other fields.
   lists:foldl(fun(#log{field=Field,value=Value,type=Type,storage=Storage,oper=Oper},{Add,Del})->
     Tag={Field,Value,Type},
-    build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN),
+    ecomet_index:build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN),
     case Oper of
       add->{[Tag|Add],Del};
       del->{Add,[Tag|Del]}

@@ -202,26 +202,41 @@ read_field(Object,Field,Default)->
 read_fields(Object,Fields) when is_list(Fields)->
   Map = maps:from_list([ {Field,none} || Field <- Fields ]),
   read_fields(Object, Map);
-read_fields(Object,Fields) when is_map(Fields)->
+read_fields(#object{oid = OID,map = Map},Fields) when is_map(Fields)->
+
+  % Check if we have project with changes in transaction dict
+  Project=ecomet_transaction:dict_get({OID,fields},#{}),
+
+  % Load storage for fields absent in the project
+  Storage=
+    maps:fold(fun(F,_,Acc)->
+      {ok,S}=ecomet_field:get_storage(Map,F),
+      case Acc of
+        #{S:=_}->Acc;
+        _->
+          case load_storage(OID,S) of
+            Values when is_map(Values)-> Acc#{S=>Values};
+            _-> Acc#{S=>#{}}
+          end
+      end
+    end,#{},maps:without(maps:keys(Project),Fields)),
+
   maps:map(fun(Name,Default)->
-    case read_field(Object,Name,Default) of
-      {ok,Value}->Value;
-      _->invalid_field
+    case Project of
+      #{Name:=none}->Default;
+      #{Name:=Value}->Value;
+      _->
+        % Look up the field in the storage
+        {ok,S}=ecomet_field:get_storage(Map,Name),
+        #{S:=Values} = Storage,
+        maps:get(Name,Values,Default)
     end
   end,Fields).
 
 % Read all object fields
-read_all(#object{oid=OID,map=Map})->
-  % Check if we have project with changes in transaction dict
-  Fields=ecomet_transaction:dict_get({OID,fields},#{}),
-  List=
-    [case Fields of
-       #{Name:=Value}->{ Name, Value };
-       _->
-         {ok,Value}=ecomet_field:get_value(Map,OID,Name),
-         { Name, Value }
-     end|| Name <- maps:keys(ecomet_pattern:get_fields(Map)) ],
-  maps:from_list(List).
+read_all(#object{map=Map}=Object)->
+  Fields=maps:keys(ecomet_pattern:get_fields(Map)),
+  read_fields(Object,Fields).
 
 % Edit object
 edit(#object{edit=false},_FieldList)->?ERROR(access_denied);
@@ -369,7 +384,7 @@ commit(OID,Dict)->
       % Purge object indexes
       {[],Tags}= ecomet_index:delete_object(OID,BackTags),
       % Purge object storage
-      [ ok = ecomet_backend:delete(DB,?DATA,Type,OID) || Type <- maps:keys(Storages) ],
+      [ ok = ecomet_backend:delete(DB,?DATA,Type,OID,none) || Type <- maps:keys(Storages) ],
       % The log record
       #ecomet_log{
         object = #{ <<".oid">> => OID },
@@ -407,7 +422,7 @@ commit(OID,Dict)->
                   case maps:size(TFields) of
                     0->
                       % Storage is empty now, delete it
-                      ok = ecomet_backend:delete(DB,?DATA,T,OID),
+                      ok = ecomet_backend:delete(DB,?DATA,T,OID,none),
                       Acc;
                     _->
                       % Update storage tags
@@ -418,7 +433,7 @@ commit(OID,Dict)->
                           _->#{fields=>TFields, tags=>TTags}
                         end,
                       % Dump the new version of the storage
-                      ok = ecomet_backend:write(DB,?DATA,T,OID,NewStorage),
+                      ok = ecomet_backend:write(DB,?DATA,T,OID,NewStorage,none),
                       maps:merge(Acc,TFields)
                   end
               end

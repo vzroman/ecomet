@@ -20,8 +20,9 @@
 -include("ecomet.hrl").
 -include("ecomet_test.hrl").
 
--define(PROCESSES,20).
--define(OBJECTS,50000).
+-define(PROCESSES,10).
+-define(OBJECTS,10000).
+-define(STORAGE,disc).
 
 %% API
 -export([
@@ -45,7 +46,7 @@
 all()->
   [
     {group,create}
-    %,{group,create_no_index}
+    %{group,create_log_index}
   ].
 
 groups()->[
@@ -53,7 +54,7 @@ groups()->[
     [parallel],
     [create||_<-lists:seq(1,?PROCESSES)]
   },
-  {create_no_index,
+  {create_log_index,
     [parallel],
     [create||_<-lists:seq(1,?PROCESSES)]
   }
@@ -76,38 +77,56 @@ init_per_suite(Config)->
             <<"parent_pattern">>=>?OID(<<"/root/.patterns/.object">>)
           },
           children=>[
+            { <<".name">>, #{ fields=>?FIELD(#{
+              storage=>?STORAGE
+            })}},
+            { <<".folder">>, #{ fields=>?FIELD(#{
+              storage=>?STORAGE
+            })}},
+            { <<".pattern">>, #{ fields=>?FIELD(#{
+              storage=>?STORAGE
+            })}},
+            { <<".ts">>, #{ fields=>?FIELD(#{
+              storage=>?STORAGE
+            })}},
+            { <<".readgroups">>, #{ fields=>?FIELD(#{
+              storage=>?STORAGE
+            })}},
+            { <<".writegroups">>, #{ fields=>?FIELD(#{
+              storage=>?STORAGE
+            })}},
             { <<"field1">>, #{ fields=>?FIELD(#{
-              type=>string, storage=>ram
+              type=>string, storage=>?STORAGE
             })}},
             { <<"field2">>, #{ fields=>?FIELD(#{
-              type=>string, storage=>ramdisc
+              type=>string, storage=>?STORAGE
             })}},
             { <<"field3">>, #{ fields=>?FIELD(#{
-              type=>string, storage=>ramdisc
+              type=>string, storage=>?STORAGE
             })}},
             { <<"field4">>, #{ fields=>?FIELD(#{
-              type=>string, storage=>disc
+              type=>string, storage=>?STORAGE
             })}},
             { <<"string1">>, #{ fields=>?FIELD(#{
-              type=>string, index => [simple,'3gram'],storage=>ram
+              type=>string, index => [simple,'3gram'],storage=>?STORAGE
             })}},
             { <<"string2">>, #{ fields=>?FIELD(#{
-              type=>string, index => [simple],storage=>ramdisc
+              type=>string, index => [simple],storage=>?STORAGE
             })}},
             { <<"string3">>, #{ fields=>?FIELD(#{
-              type=>string, index => [simple], storage=>disc
+              type=>string, index => [simple], storage=>?STORAGE
             })}},
             { <<"integer">>, #{ fields=>?FIELD(#{
-              type=>integer, index => [simple],storage=>ram
+              type=>integer, index => [simple],storage=>?STORAGE
             })}},
             { <<"float">>, #{ fields=>?FIELD(#{
-              type=>float, index => [simple],storage=>ramdisc
+              type=>float, index => [simple],storage=>?STORAGE
             })}},
             { <<"atom">>, #{ fields=>?FIELD(#{
-              type=>atom, index => [simple], storage=>disc
+              type=>atom, index => [simple], storage=>?STORAGE
             })}},
             { <<"bool">>, #{ fields=>?FIELD(#{
-              type=>bool, index => [simple],storage=>ram
+              type=>bool, index => [simple],storage=>?STORAGE
             })}}
           ]
         }}
@@ -131,11 +150,16 @@ end_per_suite(_Config)->
   ok.
 
 
-init_per_group(create_no_index,Config)->
+init_per_group(create_log_index,Config)->
   meck:new(ecomet_index, [non_strict,no_link,passthrough]),
-  meck:expect(ecomet_index, build_index, fun(_OID,_Map,_ChangedFields,BackTags)->
-    {[],[],[],BackTags}
+  meck:expect(ecomet_index, build_bitmap, fun(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN)->
+    %ok
+    ecomet_backend:write(DB,?INDEX,Storage,{index_log,Tag,{PatternID,IDHN,IDLN}},Oper,none)
   end),
+
+%%  meck:expect(ecomet_index, build_index, fun(_OID,_Map,_ChangedFields,BackTags)->
+%%    {[],[],[],BackTags}
+%%  end),
 
   Config;
 
