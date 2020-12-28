@@ -45,6 +45,7 @@
   %-------Pattern--------------------
   get_pattern/1,
   set_pattern/2,
+  list_patterns/0,
 
   local_increment/1
 ]).
@@ -67,7 +68,8 @@
 -ifdef(TEST).
 
 -export([
-  register_type/2
+  register_type/2,
+  init_tree/2
 ]).
 
 -endif.
@@ -213,7 +215,7 @@ mount_db(FolderID,DB)->
     % Adding a new mount point requires lock on the schema
     mnesia:lock({table,?SCHEMA},write),
 
-    Path = ecomet:oid2path( FolderID ),
+    Path = ecomet:to_path( FolderID ),
 
     % Index on OID
     ok = mnesia:write( ?SCHEMA, #kv{ key = #mntOID{k=FolderID}, value = DB }, write ),
@@ -231,7 +233,7 @@ unmount_db(FolderID)->
 
     mnesia:lock({table,?SCHEMA},write),
 
-    Path = ecomet:oid2path( FolderID ),
+    Path = ecomet:to_path( FolderID ),
 
     ok = mnesia:delete( ?SCHEMA, #mntOID{k=FolderID}, write ),
 
@@ -323,6 +325,11 @@ get_pattern(ID)->
 
 set_pattern(ID,Value)->
   ok = mnesia:write(?SCHEMA,#kv{key = #pattern{id=ID}, value = Value },write).
+
+list_patterns() ->
+  Matcher = #kv{key = #pattern{id = '$1'}, value = '$2'},
+  Result = ['$1'],
+  lists:flatten(mnesia:dirty_select(?SCHEMA, [{Matcher, [], [Result]}])).
 
 local_increment(Key)->
   mnesia:dirty_update_counter(?INCREMENT,Key,1).

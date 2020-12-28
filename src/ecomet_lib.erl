@@ -27,10 +27,23 @@
   ts/0,log_ts/0,
   to_object/1,to_object/2,to_object/3,to_object_system/1,
   to_oid/1,
+  to_path/1,
   pipe/2,
   module_exists/1,
   guid/0
 ]).
+
+% The result of
+% re:compile("^\\s*\{\\s*(?<P>[0-9]+)\\s*,\\s*(?<I>[0-9]+)\\s*\}$")
+-define(OID_RE,{re_pattern,2,0,0,
+  <<69,82,67,80,181,0,0,0,16,0,0,0,65,0,0,0,255,255,255,255,255,255,
+    255,255,0,0,125,0,0,0,2,0,0,0,64,0,4,0,2,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,73,0,0,1,80,0,131,0,105,27,94,9,
+    29,123,94,9,133,0,39,0,1,110,0,0,0,0,0,0,255,3,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,107,120,0,39,94,9,29,44,94,9,
+    133,0,39,0,2,110,0,0,0,0,0,0,255,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,107,120,0,39,94,9,29,125,25,120,0,105,0>>
+}).
 
 dt_to_string(DT)->
   DT1 =
@@ -60,7 +73,7 @@ to_object(ID)->
 to_object(ID,Lock)->
   to_object(ID,Lock,none).
 to_object(<<"/root",_/binary>> =Path,Lock,Timeout)->
-  {ok,OID}=ecomet:path2oid(Path),
+  {ok,OID}=ecomet_folder:path2oid(Path),
   ecomet_object:open(OID,Lock,Timeout);
 to_object(ID, Lock,Timeout)->
   case ecomet_object:is_object(ID) of
@@ -71,7 +84,7 @@ to_object(ID, Lock,Timeout)->
       ecomet_object:open(?OID(ID),Lock,Timeout)
   end.
 to_object_system(<<"/root",_/binary>> =Path)->
-  {ok,OID}=ecomet:path2oid(Path),
+  {ok,OID}=ecomet_folder:path2oid(Path),
   ecomet_object:construct(OID);
 to_object_system(ID)->
   case ecomet_object:is_object(ID) of
@@ -81,13 +94,23 @@ to_object_system(ID)->
   end.
 
 to_oid(<<"/root",_/binary>> =Path)->
-  {ok,OID}=ecomet:path2oid(Path),
+  {ok,OID}=ecomet_folder:path2oid(Path),
   OID;
+to_oid(OID) when is_binary(OID)->
+  case re:run(OID,?OID_RE,[{capture,['P','I'],binary}]) of
+    {match,[P,I]}->{binary_to_integer(P),binary_to_integer(I)};
+    _->?ERROR({invalid_oid,OID})
+  end;
 to_oid(ID)->
   case ecomet_object:is_oid(ID) of
     true->ID;
-    _->ecomet:get_oid(?OBJECT(ID))
+    _->ecomet_object:get_oid(?OBJECT(ID))
   end.
+
+to_path(<<"/root",_/binary>> =Path)->
+  Path;
+to_path(ID)->
+  ecomet_folder:oid2path(?OID(ID)).
 
 pipe(Pipe,Acc)->
   pipe(Pipe,Acc,1).

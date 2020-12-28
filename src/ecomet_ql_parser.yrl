@@ -21,23 +21,31 @@ Nonterminals
 StatementList
 Statement
 Get
+Subscribe
 Set
 Insert
 Delete
+Databases
+Database
 GetFieldList
 GetField
 SetFieldList
 SetField
-SetValue
-FieldName
 Function
 ConditionList
 Condition
 Operator
-FieldValue
-MacrosArgList
+Atom
+Field
+ConstTerm
+Constant
+ConstantList
+Variable
+VariableList
 ParamList
 Param
+SubParamList
+SubParam
 OrderByList
 OrderBy
 OrderDirection
@@ -51,26 +59,33 @@ Terminals
 'ANDNOT'
 'AS'
 'ASC'
-atom
 by
 delete
 'DESC'
 insert
 get
+subscribe
 group
-macros
 'OR'
 order
 page
 read
 set
+from
+in
 transaction_start
 transaction_commit
 transaction_rollback
 where
 write
+stateless
+no_feedback
+field
+atom
 integer
 float
+'$'
+'*'
 '='
 ':='
 ':>'
@@ -83,9 +98,10 @@ float
 lock
 '('
 ')'
+'['
+']'
 text
 ','
-field
 ';'
 ':'
 .
@@ -97,6 +113,7 @@ StatementList-> Statement ';' StatementList : ['$1'|'$3'].
 
 
 Statement -> Get : '$1'.
+Statement -> Subscribe : '$1'.
 Statement -> Set : '$1'.
 Statement -> Insert : '$1'.
 Statement -> Delete : '$1'.
@@ -104,42 +121,73 @@ Statement -> transaction_start : transaction_start.
 Statement -> transaction_commit : transaction_commit.
 Statement -> transaction_rollback : transaction_rollback.
 
-Get -> get GetFieldList where Condition ParamList: {get,'$2','$4','$5'}.
-Get -> get GetFieldList where Condition: {get,'$2','$4',[]}.
+Get -> get GetFieldList from Databases where Condition ParamList: {get,'$2','$4','$6','$7'}.
+Get -> get GetFieldList from Databases where Condition: {get,'$2','$4','$6',[]}.
 
-Set->set SetFieldList where Condition Lock: {set,'$2','$4',['$5']}.
-Set-> set SetFieldList where Condition: {set,'$2','$4',[]}.
+Subscribe -> subscribe text get GetFieldList from Databases where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$8','$9'}.
+Subscribe -> subscribe text get GetFieldList from Databases where Condition: {subscribe,get_token('$2'),'$4','$6','$8',[]}.
 
-Insert -> insert SetFieldList : { insert, '$2' }.
+Set-> set SetFieldList in Databases where Condition Lock: {set,maps:from_list('$2'),'$4','$6',['$7']}.
+Set-> set SetFieldList in Databases where Condition: {set,maps:from_list('$2'),'$4','$6',[]}.
 
-Delete -> delete where Condition Lock : { delete, '$3', ['$4']}.
-Delete -> delete where Condition : { delete, '$3', []}.
+Insert -> insert SetFieldList : { insert, maps:from_list('$2') }.
+
+Delete -> delete from Databases where Condition Lock : { delete, '$3', '$5', ['$6']}.
+Delete -> delete from Databases where Condition : { delete, '$3','$5', []}.
+
+Databases -> '*' : ecomet_db:get_databases().
+Databases -> Database : ['$1'].
+Databases -> Database ',' Databases: ['$1'|'$3'].
+
+Database -> Atom : '$1'.
+Database -> text : binary_to_atom(get_token('$1'),utf8).
 
 GetFieldList -> GetField: ['$1'].
 GetFieldList -> GetField ',' GetFieldList: ['$1'|'$3'].
 
-GetField -> FieldName 'AS' text : {get_token('$3'),'$1'}.
-GetField -> FieldName : '$1'.
-GetField -> Function 'AS' text : {get_token('$3'),'$1'}.
-GetField -> Function : '$1'.
+GetField -> Field 'AS' text : { get_token('$3'), '$1' }.
+GetField -> Field : '$1'.
+GetField -> Function '(' VariableList ')' 'AS' text : { get_token('$6'), compile('$1','$3') }.
+GetField -> Function '(' VariableList ')' : compile('$1','$3').
 
 SetFieldList -> SetField: ['$1'].
 SetFieldList -> SetField ',' SetFieldList: ['$1'|'$3'].
 
-SetField-> FieldName '=' SetValue : { '$1', '$3' }.
+SetField-> Field '=' Variable : { '$1', '$3' }.
 
-SetValue -> FieldValue : '$1'.
-SetValue -> Function : '$1'.
+Atom -> field : binary_to_atom(get_token('$1'),utf8).
+Atom -> atom : get_token('$1').
 
-FieldName -> field : get_token('$1').
-FieldName -> text : get_token('$1').
+Field -> field : get_token('$1').
+Field -> text : get_token('$1').
 
-Function -> atom '(' GetFieldList ')' : { get_function('$1'), '$3' }.
+ConstTerm-> integer : get_token('$1').
+ConstTerm -> float : get_token('$1').
+ConstTerm -> text : get_token('$1').
+ConstTerm -> Atom : '$1'.
+
+ConstantList -> Constant : ['$1'].
+ConstantList -> Constant ',' ConstantList : ['$1'|'$3'].
+
+Constant -> ConstTerm : '$1'.
+Constant -> '[' ConstantList ']' : ['$2'].
+Constant -> Function '(' ConstantList ')' : compile('$1','$3').
+
+VariableList -> Variable : ['$1'].
+VariableList -> Variable ',' VariableList : ['$1'|'$3'].
+
+Variable -> ConstTerm : '$1'.
+Variable -> '$' Field : get_field('$2').
+Variable -> '[' VariableList ']': compile('$2').
+Variable -> Function '(' VariableList ')' : compile('$1','$3').
+
+Function -> '$' Atom : { ecomet_ql_util ,'$2' }.
+Function -> '$' Atom ':' Atom : { '$2' ,'$4' }.
 
 ConditionList -> Condition: ['$1'].
 ConditionList -> Condition ',' ConditionList: ['$1'|'$3'].
 
-Condition -> FieldName Operator FieldValue : { '$1', '$2', '$3' }.
+Condition -> Field Operator Constant : { '$1', '$2', '$3' }.
 Condition -> 'AND' '(' ConditionList ')' : { 'AND', '$3' }.
 Condition -> 'OR' '(' ConditionList ')' : { 'OR', '$3' }.
 Condition -> 'ANDNOT' '(' Condition ',' Condition ')' : { 'ANDNOT', '$3', '$5' }.
@@ -154,15 +202,6 @@ Operator -> ':<>' : ':<>'.
 Operator -> 'LIKE' : 'LIKE'.
 Operator -> ':LIKE' : ':LIKE'.
 
-FieldValue -> integer : get_token('$1').
-FieldValue -> float : get_token('$1').
-FieldValue -> text : get_token('$1').
-FieldValue -> atom : get_token('$1').
-FieldValue -> macros '(' MacrosArgList ')' : run_macros(get_token('$1'),'$3').
-
-MacrosArgList -> FieldValue: ['$1'].
-MacrosArgList -> FieldValue ',' MacrosArgList: ['$1'|'$3'].
-
 ParamList-> Param ParamList: ['$1'|'$2'].
 ParamList-> Param: ['$1'].
 
@@ -171,15 +210,21 @@ Param-> group by GroupByList: {group,'$3'}.
 Param-> page integer ':' integer: {page,{ get_token('$2'), get_token('$4') }}.
 Param-> Lock : '$1'.
 
+SubParamList-> SubParam SubParamList: ['$1'|'$2'].
+SubParamList-> SubParam: ['$1'].
+
+SubParam-> stateless : {stateless,true}.
+SubParam-> no_feedback : {no_feedback,true}.
+
 Lock -> lock read : { lock , read }.
 Lock -> lock write : { lock , write }.
 
 OrderByList -> OrderBy: ['$1'].
 OrderByList -> OrderBy ',' OrderByList: ['$1'|'$3'].
 
-OrderBy -> FieldName OrderDirection: {'$1','$2'}.
-OrderBy -> FieldName : {'$1','ASC'}.
+OrderBy -> Field OrderDirection: {'$1','$2'}.
 OrderBy -> integer OrderDirection: { get_token('$1'), '$2'}.
+OrderBy -> Field : {'$1','ASC'}.
 OrderBy -> integer: { get_token('$1'), 'ASC'}.
 
 OrderDirection -> 'ASC' : 'ASC'.
@@ -188,7 +233,7 @@ OrderDirection -> 'DESC' : 'DESC'.
 GroupByList -> GroupBy: ['$1'].
 GroupByList -> GroupBy ',' GroupByList: ['$1'|'$3'].
 
-GroupBy -> FieldName : '$1'.
+GroupBy -> Field : '$1'.
 GroupBy -> integer : get_token('$1').
 
 Erlang code.
@@ -196,13 +241,13 @@ Erlang code.
 get_token({Token, _Line})->Token;
 get_token({_Token, _Line, Value}) -> Value.
 
-get_function({_Token,_Line,Function})->
-  case erlang:function_exported(ecomet_query,Function,1) of
-    true->fun ecomet_query:Function/1;
-    _->erlang:error({invalid_function,Function})
-  end.
-run_macros(Macros,ArgumentList)->
-  ecomet_query:macros(Macros,ArgumentList).
+get_field(Field)->
+    {fun erlang:hd/1,[Field]}.
+
+compile(VarList)->
+    ecomet_query:compile_function(VarList).
+compile({Module,Function},Args)->
+    ecomet_query:compile_function(Module,Function,Args).
 
 
 % leex:file("ecomet_ql_lexer.xrl",[{scannerfile,"../src/ecomet_ql_parser.erl"}])

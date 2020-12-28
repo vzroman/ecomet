@@ -54,7 +54,7 @@ login(Login,Pass)->
   login(Login,Pass,#{}).
 login(Login,Pass,Info)->
   case ?PIPE([
-    fun(_)->ecomet:path2oid(<<"/root/.users/",Login/binary>>) end,
+    fun(_)->ecomet_folder:path2oid(<<"/root/.users/",Login/binary>>) end,
     fun(UserID)->{ok,?OBJECT(UserID)} end,
     fun(User)->
       ?PIPE([

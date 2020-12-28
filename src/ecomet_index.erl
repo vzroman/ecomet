@@ -27,7 +27,9 @@
   build_index/4,
   delete_object/2,
   read_tag/4,
-  get_supported_types/0
+  get_supported_types/0,
+  % only for tests
+  build_bitmap/7
 ]).
 
 %%====================================================================
@@ -187,7 +189,7 @@ dump_log(OID,Log)->
   % We do not hold locks on them while indexing other fields.
   lists:foldl(fun(#log{field=Field,value=Value,type=Type,storage=Storage,oper=Oper},{Add,Del})->
     Tag={Field,Value,Type},
-    build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN),
+    ecomet_index:build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN),
     case Oper of
       add->{[Tag|Add],Del};
       del->{Add,[Tag|Del]}

@@ -134,7 +134,7 @@ find_mount_points(ID)->
   DBs = ecomet_db:get_databases(),
   % Folder descendants
   Patterns = [{?PATTERN_PATTERN,?FOLDER_PATTERN} | ecomet_pattern:get_children({?PATTERN_PATTERN,?FOLDER_PATTERN}) ],
-  ecomet_query:system([DBs],[<<".oid">>],{'AND',[
+  ecomet_query:system(DBs,[<<".oid">>],{'AND',[
     {'OR',[ {<<".pattern">>,'=',P} || P <- Patterns ]},
     {<<"database">>,'=',?OID(ID)}
   ]}).

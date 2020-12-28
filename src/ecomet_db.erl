@@ -46,7 +46,8 @@
 -export([
   check_id/1,
   check_name/1,
-  create_database/1
+  create_database/1,
+  remove_database/1
 ]).
 
 -endif.
@@ -73,9 +74,8 @@ get_databases()->
   ecomet_schema:get_registered_databases().
 
 get_by_name(Name) when is_binary(Name)->
-  {ok,PatternID} = ecomet:path2oid(<<"/root/.patterns/.database">>),
   case ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
-    {<<".pattern">>,'=',PatternID},
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.database">>)},
     {<<".name">>,'=',Name }
   ]}) of
     [OID]->{ok,OID};
@@ -110,7 +110,13 @@ on_edit(Object)->
 
 on_delete(Object)->
   case ecomet_folder:find_mount_points(?OID(Object)) of
-    []->ok;
+    []->
+      {ok,Name}=ecomet:read_field(Object,<<".name">>),
+      NameAtom = binary_to_atom(Name,utf8),
+      ecomet:on_commit(fun()->
+        remove_database(NameAtom)
+      end),
+      ok;
     _->?ERROR(is_mounted)
   end.
 
@@ -146,7 +152,12 @@ create_database(Name)->
     ?LOGINFO("registering the ~p database in the schema",[Name]),
     case ecomet_schema:add_db(Name) of
       {ok,ID}->{ok,ID};
-      {error,Error}->throw(Error)
+      {error,Error}->
+        try ecomet_backend:remove_db(Name) catch
+          _:CleanError->
+            ?LOGERROR("error on removing ~p database, error ~p",[Name,CleanError])
+        end,
+        throw(Error)
     end
   catch
     _:CreateError:Stack->
@@ -155,9 +166,18 @@ create_database(Name)->
         CreateError,
         Stack
       ]),
-      try ecomet_backend:remove_db(Name) catch
-        _:CleanError->
-          ?LOGERROR("error on removing ~p database, error ~p",[Name,CleanError])
-      end,
       error
   end.
+
+remove_database(Name)->
+  ?LOGINFO("unregistering the ~p database",[Name]),
+  case ecomet_schema:remove_db(Name) of
+    ok->ok;
+    {error,Error}->
+      ?LOGERROR("error unregistering a database ~p, error ~p",[Name,Error])
+  end,
+  try ecomet_backend:remove_db(Name) catch
+    _:CleanError->
+      ?LOGERROR("error on removing ~p database, error ~p",[Name,CleanError])
+  end,
+  ok.

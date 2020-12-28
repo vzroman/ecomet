@@ -151,74 +151,102 @@ check_id_test(_Config) ->
 % Just putting %
 create_database_test(_Config) ->
 
+  DBs0 = ecomet_db:get_databases(),
+  Storages0 = ecomet_backend:get_storages(),
   % We are creating new DB, should return ok %
   {ok, _ID1} = ecomet_db:create_database(mydb1),
   {ok, _ID2} = ecomet_db:create_database(mydb2),
   {ok, _ID3} = ecomet_db:create_database(mydb3),
 
+  Storages=ecomet_backend:get_storages(),
+  DBs = ecomet_db:get_databases(),
+
   % We are creating existing DB, error should occur%
   error = ecomet_db:create_database(mydb1),
   error = ecomet_db:create_database(mydb2),
-  error = ecomet_db:create_database(mydb3)
-.
+  error = ecomet_db:create_database(mydb3),
+
+  Storages=ecomet_backend:get_storages(),
+  DBs = ecomet_db:get_databases(),
+
+  ecomet_db:remove_database(mydb1),
+  ecomet_db:remove_database(mydb2),
+  ecomet_db:remove_database(mydb3),
+
+  DBs0 = ecomet_db:get_databases(),
+  Storages0 = ecomet_backend:get_storages(),
+
+  ok.
 
 % Object == {id1, id2} %
 delete_test(_Config) ->
 
-  meck:new(ecomet_lib, [no_link]),
-  meck:expect(ecomet_lib, to_oid, fun(Object) -> Object end),
+%%  meck:new(ecomet_lib, [no_link,passthrough]),
+%%  meck:expect(ecomet_lib, to_oid, fun(Object) -> Object end),
 
-  % Object is not mounted, should return ok %
-  ok = ecomet_db:on_delete({1, 2}),
-  ok = ecomet_db:on_delete({12, 23}),
-  ok = ecomet_db:on_delete({324, 34}),
-
-  meck:unload(ecomet_lib),
+%%  % Object is not mounted, should return ok %
+%%  ok = ecomet_db:on_delete({1, 2}),
+%%%%  ok = ecomet_db:on_delete({12, 23}),
+%%%%  ok = ecomet_db:on_delete({324, 34}),
+%%
+%%  meck:unload(ecomet_lib),
+  ecomet_user:on_init_state(),
   % We create object. but not mount should return ok %
   TestDB_1 = ecomet:create_object(#{
     <<".name">>=><<"my_db1">>,
-    <<".folder">>=>?OID(<<"/root/.database">>),
+    <<".folder">>=>?OID(<<"/root/.databases">>),
     <<".pattern">>=>?OID(<<"/root/.patterns/.database">>)
   }),
   TestDB_2 = ecomet:create_object(#{
     <<".name">>=><<"my_db2">>,
-    <<".folder">>=>?OID(<<"/root/.database">>),
+    <<".folder">>=>?OID(<<"/root/.databases">>),
     <<".pattern">>=>?OID(<<"/root/.patterns/.database">>)
   }),
 
 
-  ok = ecomet_db:on_delete(?OID(TestDB_1)),
-  ok = ecomet_db:on_delete(?OID(TestDB_2)),
+  ok = ecomet:delete_object(TestDB_1),
+  ok = ecomet:delete_object(TestDB_2),
 
 
   % We create and mount object, error should occur %
 
-  _TestFolder_1=ecomet:create_object(#{
-    <<".name">>=><<"test_folder">>,
+  TestDB_3 = ecomet:create_object(#{
+    <<".name">>=><<"my_db3">>,
+    <<".folder">>=>?OID(<<"/root/.databases">>),
+    <<".pattern">>=>?OID(<<"/root/.patterns/.database">>)
+  }),
+  TestDB_4 = ecomet:create_object(#{
+    <<".name">>=><<"my_db4">>,
+    <<".folder">>=>?OID(<<"/root/.databases">>),
+    <<".pattern">>=>?OID(<<"/root/.patterns/.database">>)
+  }),
+
+  TestFolder_3=ecomet:create_object(#{
+    <<".name">>=><<"test_folder3">>,
     <<".folder">>=>?OID(<<"/root">>),
     <<".pattern">>=>?OID(<<"/root/.patterns/.folder">>),
-    <<"database">>=>?OID(TestDB_1)
+    <<"database">>=>?OID(TestDB_3)
   }),
 
-  _TestFolder_2=ecomet:create_object(#{
-  <<".name">>=><<"test_folder">>,
+  TestFolder_4=ecomet:create_object(#{
+  <<".name">>=><<"test_folder4">>,
   <<".folder">>=>?OID(<<"/root">>),
   <<".pattern">>=>?OID(<<"/root/.patterns/.folder">>),
-  <<"database">>=>?OID(TestDB_2)
+  <<"database">>=>?OID(TestDB_4)
   }),
 
-  try ecomet_db:on_delete(?OID(TestDB_1))
-  catch
-    error:is_mounted -> is_mounted
-  end,
 
-  try ecomet_db:on_delete(?OID(TestDB_2))
-  catch
-    error:is_mounted -> is_mounted
-  end
+  ?assertError({is_mounted,_}, ecomet:delete_object(TestDB_3)),
+  ?assertError({is_mounted,_}, ecomet:delete_object(TestDB_4)),
+  ok = ecomet:edit_object(TestFolder_3, #{<<"database">> => none}),
+  ok = ecomet:edit_object(TestFolder_4, #{<<"database">> => none}),
 
- % meck:unload(ecomet_lib)
-.
+  ok = ecomet:delete_object(TestDB_3),
+  ok = ecomet:delete_object(TestDB_4),
+
+  ok = ecomet:delete_object(TestFolder_3),
+  ok = ecomet:delete_object(TestFolder_4),
+  ok.
 
 % Object =  {<<".name">> => {NewName, OldName}, <<"id">> => {NewId, OldId}} or #{} %
 % Other fields are not important in this case %
@@ -262,19 +290,22 @@ create_test(_Config) ->
   ecomet_user:on_init_state(),
   AA =  ?OID(<<"/root">>),
   ct:pal("OID  /root/.databases ~p", [AA]),
-  TestDB_3 = ecomet:create_object(#{
-    <<".name">>=><<"my_db3">>,
-    <<".folder">>=>?OID(<<"/root/.database">>),
+  TestDB = ecomet:create_object(#{
+    <<".name">>=><<"my_db">>,
+    <<".folder">>=>?OID(<<"/root/.databases">>),
     <<".pattern">>=>?OID(<<"/root/.patterns/.database">>)
   }),
-  _ID = ecomet_schema:get_db_id(my_db3),
+  _ID = ecomet_schema:get_db_id(my_db),
   Folder = ecomet:create_object(#{
     <<".name">>=><<"test_folder">>,
     <<".folder">>=>?OID(<<"/root">>),
     <<".pattern">>=>?OID(<<"/root/.patterns/.folder">>),
-   <<"database">>=>?OID(TestDB_3)
+   <<"database">>=>?OID(TestDB)
   }),
-  my_db3 = ecomet_schema:get_mounted_db(?OID(Folder))
 
+  my_db = ecomet_schema:get_mounted_db(?OID(Folder)),
+  ok = ecomet:delete_object(Folder),
+  ok = ecomet:delete_object(TestDB),
+  ok
 .
 
