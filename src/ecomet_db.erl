@@ -29,6 +29,7 @@
   get_by_name/1
 ]).
 
+
 %%===========================================================================
 %% Ecomet object behaviour
 %%===========================================================================
@@ -37,6 +38,21 @@
   on_edit/1,
   on_delete/1
 ]).
+
+%%===========================================================================
+%% This functions we need to export ONLY for testing them
+%%===========================================================================
+-ifdef(TEST).
+-export([
+  check_id/1,
+  check_name/1,
+  create_database/1
+]).
+
+-endif.
+
+
+
 
 %%=================================================================
 %%	SERVICE API
@@ -77,7 +93,7 @@ on_create(Object)->
   ?LOGINFO("creating a new database ~p",[NameAtom]),
   % We need to create the backend out of a transaction, otherwise it throws 'nested_transaction'
   ecomet:on_commit(fun()->
-    case create_database(Name) of
+    case create_database(NameAtom) of
       {ok,ID}->
         ?LOGINFO("database ~p created successfully, id = ~p",[NameAtom,ID]),
         ok = ecomet:edit_object(Object,#{<<"id">>=>ID});
@@ -102,7 +118,7 @@ check_name(Object)->
   case ecomet:field_changes(Object,<<".name">>) of
     none->ok;
     { Name, none }->
-      case re:run(Name,"^(\\.(\\w)+|(\\w+))$") of
+      case re:run(Name,"^(\\w+)$") of
         {match,_}->ok;
         _->
           ?ERROR(invalid_name)

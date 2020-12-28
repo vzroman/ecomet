@@ -67,7 +67,13 @@
 -ifdef(TEST).
 -export([
   get_changes/3,
-  merge_storages/4
+  merge_storages/4,
+  check_name/2,
+  check_folder/2,
+  check_storage/2,
+  check_type/2,
+  check_index/2,
+  check_default/2
 ]).
 -endif.
 
@@ -411,7 +417,7 @@ check_name(Object,IsEmpty)->
       ?ERROR(has_objects);
     { NewName, OldName }->
       % Check the name for forbidden symbols
-      case re:run(NewName,"^(\\.(\\w)+|(\\w+))$") of
+      case re:run(NewName,"^\\.?([a-zA-Z0-9_-]+)$") of
         {match,_}->
           if
             OldName=/=none->

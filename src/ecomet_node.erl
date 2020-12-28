@@ -43,6 +43,20 @@
   on_delete/1
 ]).
 
+%%===========================================================================
+%% This functions we need to export ONLY for testing them
+%%===========================================================================
+-ifdef(TEST).
+-export([
+  check_id/1,
+  check_name/1,
+  register_node/1,
+  unregister_node/1
+]).
+
+-endif.
+
+
 
 %%=================================================================
 %%	SERVICE API
