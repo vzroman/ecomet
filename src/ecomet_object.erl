@@ -44,7 +44,7 @@
   delete/1,
   open/1,open/2,open/3,
   construct/1,
-  edit/2,
+  edit/2,edit/3,
   copy/2,
   read_field/2,read_field/3,read_fields/2,read_all/1,read_all/2,
   field_changes/2,
@@ -100,7 +100,17 @@
 %% Main functions
 %%============================================================================
 % Create new object
-create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields)->
+create(Fields)->
+  create(Fields,#{}).
+create(#{<<".pattern">>:=Pattern} = Fields,#{format:=Format}=Params)->
+  PatternID = Format(link,Pattern),
+  Map=ecomet_pattern:get_map(PatternID),
+  ParsedFields = parse_fields(Format,Map,maps:remove(<<".pattern">>,Fields)),
+  Params1 = maps:remove(format,Params),
+  Fields1 = ParsedFields#{<<".pattern">>=>PatternID},
+  create(Fields1,Params1);
+create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params)->
+
   % Get folder rights
   Folder = construct(FolderID),
   % Check rights
@@ -281,9 +291,16 @@ read_all(#object{map=Map}=Object,Params) when is_map(Params)->
   read_fields(Object,Fields,Params).
 
 % Edit object
-edit(#object{edit=false},_Fields)->?ERROR(access_denied);
-edit(#object{oid=OID,map=Map}=Object,Fields)->
+edit(Object,Fields)->
+  edit(Object,Fields,#{}).
+edit(#object{edit=false},_Fields,_Params)->?ERROR(access_denied);
+edit(#object{map=Map}=Object,Fields,#{format:=Format}=Params)->
+  ParsedFields= parse_fields(Format,Map,Fields),
+  Params1 = maps:remove(format,Params),
+  edit(Object,ParsedFields,Params1);
+edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
   OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
+
   NewFields=ecomet_field:merge(Map,OldFields,Fields),
   case ecomet_transaction:dict_get({OID,handler},none) of
     none->
@@ -298,6 +315,13 @@ copy(Object, Replace)->
   Original = read_all(Object),
   New = maps:merge(Original, Replace),
   create(New).
+
+parse_fields(Formatter,Map,Fields)->
+  maps:map(fun(Name,Value)->
+    {ok,Type}=ecomet_field:get_type(Map,Name),
+    Formatter(Type,Value)
+  end,Fields).
+
 
 % Check changes for the field within the transaction
 field_changes(#object{oid=OID,map=Map},Field)->

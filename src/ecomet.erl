@@ -31,12 +31,12 @@
 %%	Object-level CRUD
 %%=================================================================
 -export([
-  create_object/1,
+  create_object/1,create_object/2,
   open/1,open/2,open/3,open_nolock/1,open_rlock/1,open_wlock/1,
   read_field/2,read_field/3,read_fields/2,
   read_all/1,read_all/2,
   field_changes/2,
-  edit_object/2,
+  edit_object/2,edit_object/3,
   delete_object/1,
   copy_object/2
 ]).
@@ -123,6 +123,9 @@ is_admin()->
 create_object(Fields)->
   ecomet_object:create(Fields).
 
+create_object(Fields,Params)->
+  ecomet_object:create(Fields,Params).
+
 % @edoc Return object hanler for given OID
 -spec open(ID :: oid()) -> object_handler().
 
@@ -179,6 +182,9 @@ field_changes(Object, Field)->
 
 edit_object(Object, Fields)->
   ecomet_object:edit(Object, Fields).
+
+edit_object(Object, Fields, Params)->
+  ecomet_object:edit(Object, Fields, Params).
 
 % @edoc Deletes existing ecomet object
 -spec delete_object(Object :: object_handler()) -> ok.
