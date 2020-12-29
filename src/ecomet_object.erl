@@ -701,7 +701,7 @@ new_id(FolderID,?ObjectID(_,PatternID))->
 
 get_db_id(?ObjectID(_,ID))->
   IDH=ID div ?BITSTRING_LENGTH,
-  IDH rem 1 bsl 8.
+  IDH rem (1 bsl 8).
 
 get_db_name(OID)->
   ID = get_db_id(OID),
