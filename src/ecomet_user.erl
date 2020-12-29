@@ -174,7 +174,7 @@ check_groups(Object)->
   end.
 
 check_rights(Object)->
-  {ok,Rights}=ecomet:read_field(Object,<<".writegroups">>,[]),
+  {ok,Rights}=ecomet:read_field(Object,<<".writegroups">>,#{default=>[]}),
   case lists:member(?OID(Object),Rights) of
     true->ok;
     _->

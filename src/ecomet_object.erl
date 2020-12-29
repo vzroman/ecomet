@@ -46,7 +46,7 @@
   construct/1,
   edit/2,
   copy/2,
-  read_field/2,read_field/3,read_fields/2,read_all/1,
+  read_field/2,read_field/3,read_fields/2,read_all/1,read_all/2,
   field_changes/2,
   is_object/1,
   is_oid/1,
@@ -201,16 +201,26 @@ read_field(#object{oid=OID,map=Map}=Object,Field)->
           ecomet_field:get_value(Map,OID,Field)
       end
   end.
-read_field(Object,Field,Default)->
+read_field(Object,Field,Params) when is_map(Params)->
   case read_field(Object,Field) of
-    {ok,none}->{ok,Default};
+    {ok,Value}->
+      case {Params,Value} of
+        { #{default:=Default}, none}->{ok,Default};
+        { #{format:=Format}, _ }->
+          {ok,Type}=ecomet_field:get_type(Object#object.map,Field),
+          {ok,Format(Type,Value)};
+        _->
+          {ok,Value}
+      end;
     Other->Other
   end.
 
-read_fields(Object,Fields) when is_list(Fields)->
-  Map = maps:from_list([ {Field,none} || Field <- Fields ]),
-  read_fields(Object, Map);
-read_fields(#object{oid = OID,map = Map}=Object,Fields) when is_map(Fields)->
+read_fields(Object,Fields)->
+  read_fields(Object,Fields,#{}).
+read_fields(Object,Fields,Params) when is_list(Fields)->
+  FieldsMap = maps:from_list([ {Field,none} || Field <- Fields ]),
+  read_fields(Object,FieldsMap,Params);
+read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Fields),is_map(Params)->
 
   % Check if we have project with changes in transaction dict
   Project=ecomet_transaction:dict_get({OID,fields},#{}),
@@ -231,29 +241,47 @@ read_fields(#object{oid = OID,map = Map}=Object,Fields) when is_map(Fields)->
       end
     end,#{},maps:without(maps:keys(ToLoad),Fields)),
 
+  Formatter=
+    case Params of
+      #{format:=Format}->Format;
+      _->fun(_Type,Value)->Value end
+    end,
+
   maps:map(fun(Name,Default)->
-    case Project of
-      #{Name:=none}->Default;
-      #{Name:=Value}->Value;
+    case ?SERVICE_FIELDS of
+      #{Name:=Fun}->
+        % The field is a virtual field
+        Fun(Object);
       _->
-        case ToLoad of
-          #{Name:=Fun}->Fun(Object);
-          _->
-            % Look up the field in the storage
-            {ok,S}=ecomet_field:get_storage(Map,Name),
-            #{S:=Values} = Storage,
-            maps:get(Name,Values,Default)
-        end
+        % The real field
+        Value=
+          case Project of
+            #{ Name:= none }->
+              Default;
+            #{ Name:= New }->
+              % The field has changes in the transaction
+              New;
+            _->
+              % Look up the field in the storage
+              {ok,S}=ecomet_field:get_storage(Map,Name),
+              #{S:=Values} = Storage,
+              maps:get(Name,Values,Default)
+          end,
+        {ok,Type}=ecomet_field:get_type(Map,Name),
+        Formatter(Type,Value)
     end
   end,Fields).
 
 % Read all object fields
-read_all(#object{map=Map}=Object)->
-  Fields=maps:keys(ecomet_pattern:get_fields(Map)),
-  read_fields(Object,Fields).
+read_all(Object)->
+  read_all(Object,#{}).
+read_all(#object{map=Map}=Object,Params) when is_map(Params)->
+  Fields=maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map)),
+  ct:pal("Fields ~p",[Fields]),
+  read_fields(Object,Fields,Params).
 
 % Edit object
-edit(#object{edit=false},_FieldList)->?ERROR(access_denied);
+edit(#object{edit=false},_Fields)->?ERROR(access_denied);
 edit(#object{oid=OID,map=Map}=Object,Fields)->
   OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
   NewFields=ecomet_field:merge(Map,OldFields,Fields),

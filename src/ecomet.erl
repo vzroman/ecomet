@@ -33,7 +33,8 @@
 -export([
   create_object/1,
   open/1,open/2,open/3,open_nolock/1,open_rlock/1,open_wlock/1,
-  read_field/2,read_field/3,read_fields/2,read_fields/1,
+  read_field/2,read_field/3,read_fields/2,
+  read_all/1,read_all/2,
   field_changes/2,
   edit_object/2,
   delete_object/1,
@@ -150,11 +151,12 @@ open_wlock(ID)->
 read_field(Object, Field) ->
   ecomet_object:read_field(Object, Field).
 
-% @edoc Return field value or default for given ecomet object
--spec read_field(Object :: object_handler(), Field :: field_key(), Default :: term()) -> {ok, field_value()} | {error, Error::term()}.
 
-read_field(Object, Field, Default) ->
-  ecomet_object:read_field(Object, Field, Default).
+% @edoc Return field value or default for given ecomet object
+-spec read_field(Object :: object_handler(), Field :: field_key(), Params :: map()) -> {ok, field_value()} | {error, Error::term()}.
+
+read_field(Object, Field, Params) ->
+  ecomet_object:read_field(Object, Field, Params).
 
 % @edoc Return fields for given ecomet object
 -spec read_fields(Object :: object_handler(), Fields :: [field_key()]) -> map().
@@ -162,8 +164,12 @@ read_field(Object, Field, Default) ->
 read_fields(Object, Fields)->
   ecomet_object:read_fields(Object, Fields).
 
-read_fields(Object)->
+read_all(Object)->
   ecomet_object:read_all(Object).
+
+read_all(Object,Params)->
+  ecomet_object:read_all(Object,Params).
+
 
 field_changes(Object, Field)->
   ecomet_object:field_changes(Object,Field).
