@@ -207,7 +207,7 @@ auto_value(#{default:=Default, autoincrement:=Increment, type := Type}, Key)->
         true ->
           ID = ecomet_schema:local_increment(Key),
           Value = ID bsl 16 + ecomet_node:get_unique_id(),
-          case ecomet_types:parse_value(Type, Value) of
+          case ecomet_types:parse_safe(Type, Value) of
             {ok, ParsedValue} ->
               ParsedValue;
             _ ->
@@ -505,7 +505,7 @@ check_default(Object,_IsEmpty)->
     {none,_Old}->ok;
     { NewDefault, _Old}->
       Type = get_type(to_schema(Object)),
-      case ecomet_types:parse_value(Type,NewDefault) of
+      case ecomet_types:parse_safe(Type,NewDefault) of
         {ok,Parsed}->
           ok = ecomet:edit_object(Object,#{<<"default">>=>Parsed});
         _->?ERROR(invalid_default_value)

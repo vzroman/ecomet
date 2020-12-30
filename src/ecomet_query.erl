@@ -1170,6 +1170,25 @@ compile_function(Arguments)->
       { Fun, Deps }
   end.
 
+%---------------Aggregate functions---------------------
+compile_function(ecomet_ql_util,count,[])->
+  count;
+compile_function(ecomet_ql_util,count,_)->
+  ?ERROR(wrong_count_arguments);
+compile_function(ecomet_ql_util,min,[Value])->
+  {min,Value};
+compile_function(ecomet_ql_util,min,_)->
+  ?ERROR(wrong_min_arguments);
+compile_function(ecomet_ql_util,max,[Value])->
+  {min,Value};
+compile_function(ecomet_ql_util,max,_)->
+  ?ERROR(wrong_max_arguments);
+compile_function(ecomet_ql_util,sum,[Value])->
+  {min,Value};
+compile_function(ecomet_ql_util,sum,_)->
+  ?ERROR(wrong_sum_arguments);
+
+%---------------Utility functions---------------------
 compile_function(Module,Function,Arguments)->
   case collect_deps(Arguments) of
     []->
