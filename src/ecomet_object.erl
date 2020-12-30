@@ -103,6 +103,8 @@
 % Create new object
 create(Fields)->
   create(Fields,#{}).
+create(Fields,Params) when is_list(Params)->
+  create(Fields,maps:from_list(Params));
 create(#{<<".pattern">>:=Pattern} = Fields,#{format:=Format}=Params)->
   PatternID = Format(link,Pattern),
   Map=ecomet_pattern:get_map(PatternID),
@@ -212,6 +214,8 @@ read_field(#object{oid=OID,map=Map}=Object,Field)->
           ecomet_field:get_value(Map,OID,Field)
       end
   end.
+read_field(Object,Field,Params) when is_list(Params)->
+  read_field(Object,Field,maps:from_list(Params));
 read_field(Object,Field,Params) when is_map(Params)->
   case read_field(Object,Field) of
     {ok,Value}->
@@ -231,6 +235,8 @@ read_fields(Object,Fields)->
 read_fields(Object,Fields,Params) when is_list(Fields)->
   FieldsMap = maps:from_list([ {Field,none} || Field <- Fields ]),
   read_fields(Object,FieldsMap,Params);
+read_fields(Object,Fields,Params) when is_list(Params)->
+  read_fields(Object,Fields,maps:from_list(Params));
 read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Fields),is_map(Params)->
 
   % Check if we have project with changes in transaction dict
@@ -286,6 +292,8 @@ read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Field
 % Read all object fields
 read_all(Object)->
   read_all(Object,#{}).
+read_all(Object,Params) when is_list(Params)->
+  read_all(Object,maps:from_list(Params));
 read_all(#object{map=Map}=Object,Params) when is_map(Params)->
   Fields=maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map)),
   ct:pal("Fields ~p",[Fields]),
@@ -294,6 +302,8 @@ read_all(#object{map=Map}=Object,Params) when is_map(Params)->
 % Edit object
 edit(Object,Fields)->
   edit(Object,Fields,#{}).
+edit(Object,Fields,Params) when is_list(Params)->
+  edit(Object,Fields,maps:from_list(Params));
 edit(#object{edit=false},_Fields,_Params)->?ERROR(access_denied);
 edit(#object{map=Map}=Object,Fields,#{format:=Format}=Params)->
   ParsedFields= parse_fields(Format,Map,Fields),
