@@ -56,8 +56,8 @@
 
 -export([
   get_alias/2,
-  read_fun/1,
-  read_map/1,
+  read_fun/2,
+  read_map/2,
   is_aggregate/1,
   read_up/1,
   insert_to_group/4,
@@ -221,15 +221,17 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
 
   #{
     stateless := Stateless,     % No initial query, only updates
-    no_feedback := NoFeedback    % Do not send updates back to the author process
+    no_feedback := NoFeedback,    % Do not send updates back to the author process
+    format := Formatter         % Format fields according to their types
   } = maps:merge(#{
     stateless => false,
-    no_feedback => false
+    no_feedback => false,
+    format => undefined
   },InParams),
 
   %----------Compile fields---------------------------
   % Per object reading plan
-  ReadMap=read_map(Fields),
+  ReadMap=read_map(Fields,Formatter),
 
   % Fields dependencies
   FieldsDeps=ordsets:union([field_args(F)|| {_,F}<-maps:to_list(ReadMap) ]),
@@ -539,7 +541,7 @@ compile_map_reduce(get,[<<".oid">>],Params)->
   {Map,Reduce};
 %%-----------COMMON VARIANTS. Objects are opened for reading------------
 compile_map_reduce(get,Fields,Params)->
-  ReadMap=read_map(Fields),
+  ReadMap=read_map(Fields,proplists:get_value(format,Params,undefined)),
   AliasMap=maps:fold(fun(ID,#field{alias=Alias},Acc)->Acc#{Alias=>ID} end,#{},ReadMap),
 
   % All columns to order by
@@ -602,11 +604,25 @@ compile_map_reduce(get,Fields,Params)->
   {Map,ReduceFun};
 
 compile_map_reduce(set,Fields,Params)->
+  Formatter = proplists:get_value(format,Params,undefined),
   Updates=
     [case Value of
        {Fun,ArgList} when is_function(Fun,1) and is_list(ArgList)->
-         {Field,read_fun(Value)};
-       _->{Field,Value}
+         {Field,read_fun(Value,undefined)};
+       _
+         when is_function(Formatter,2)->
+         % Formatted input
+         Fun =
+           fun(Object)->
+            {ok,Type} = ecomet_object:field_type(maps:get(object,Object),Field),
+            Formatter(Type,Value)
+           end,
+         {Field,#get{
+           value = Fun,
+           args = []
+         }};
+       _->
+         {Field,Value}
      end || {Field,Value} <- maps:to_list(Fields) ],
   % Fun to read object fields from storage, default lock is none (check rights is performed)
   ReadUp=read_up(proplists:get_value(lock,Params,none)),
@@ -936,16 +952,16 @@ map_reduce_plan(Params)->
   {MapFun,ReduceFun}.
 
 %%====================UTILITIES================================
-read_map(Fields)->
-  read_map(lists:zip(lists:seq(1,length(Fields)),Fields),#{}).
-read_map([{I,Field}|Rest],Acc)->
+read_map(Fields,Formatter)->
+  read_map(lists:zip(lists:seq(1,length(Fields)),Fields),Formatter,#{}).
+read_map([{I,Field}|Rest],Formatter,Acc)->
   {Alias,Value}=get_alias(Field,I),
-  Get=read_fun(Value),
-  read_map(Rest,Acc#{I=>#field{
+  Get=read_fun(Value,Formatter),
+  read_map(Rest,Formatter,Acc#{I=>#field{
     alias = Alias,
     value = Get
   }});
-read_map([],Acc)->Acc.
+read_map([],_Formatter,Acc)->Acc.
 
 get_alias(Field,I)->
   case Field of
@@ -954,7 +970,7 @@ get_alias(Field,I)->
     _->{integer_to_binary(I),Field}
   end.
 
-read_fun(count)->
+read_fun(count,_Formatter)->
   #get{
     value = fun(_Object)->1 end,
     args = [],
@@ -965,8 +981,8 @@ read_fun(count)->
       end
     end
   };
-read_fun({Aggregate,Value}) when (Aggregate=:=sum) or (Aggregate=:=max) or (Aggregate=:=min)->
-  Get=read_fun(Value),
+read_fun({Aggregate,Value},_Formatter) when (Aggregate=:=sum) or (Aggregate=:=max) or (Aggregate=:=min)->
+  Get=read_fun(Value,undefined),
   Fun=
     case Aggregate of
       sum->fun(V,Acc)->Acc+V end;
@@ -985,18 +1001,30 @@ read_fun({Aggregate,Value}) when (Aggregate=:=sum) or (Aggregate=:=max) or (Aggr
       end
     end,
   Get#get{ aggregate= AggregateFun};
-read_fun({Fun,Arguments}) when is_function(Fun,1)->
-  ArgumentList=[read_fun(Arg)||Arg<-Arguments],
+read_fun({Fun,Arguments},_Formatter) when is_function(Fun,1)->
+  ArgumentList=[read_fun(Arg,undefined)||Arg<-Arguments],
   #get{
     value = fun(Object)->Fun([ArgFun(Object)||#get{value=ArgFun}<-ArgumentList]) end,
     args = lists:foldl(fun(#get{args=Args},Acc)->ordsets:union(Args,Acc) end,[],ArgumentList)
   };
-read_fun(FieldName) when is_binary(FieldName)->
+read_fun(FieldName,Formatter) when is_binary(FieldName)->
+  Fun =
+    if
+      is_function(Formatter,2) ->
+        fun(Object)->
+          Value = maps:get(FieldName,Object),
+          {ok,Type}=ecomet_object:field_type(maps:get(object,Object),FieldName),
+          Formatter(Type,Value)
+        end;
+      true ->
+        fun(Object)->maps:get(FieldName,Object) end
+    end,
   #get{
-    value = fun(Object)->maps:get(FieldName,Object) end,
+    value = Fun,
     args = [FieldName]
   };
-read_fun(Field)->erlang:error({invalid_query_field,Field}).
+read_fun(Field,_Formatter)->erlang:error({invalid_query_field,Field}).
+
 
 field_read_fun(#field{value = Get})->Get#get.value.
 field_args(#field{value = Get})->Get#get.args.

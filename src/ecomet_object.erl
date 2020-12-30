@@ -48,6 +48,7 @@
   copy/2,
   read_field/2,read_field/3,read_fields/2,read_all/1,read_all/2,
   field_changes/2,
+  field_type/2,
   is_object/1,
   is_oid/1,
   get_oid/1,
@@ -327,6 +328,9 @@ parse_fields(Formatter,Map,Fields)->
 field_changes(#object{oid=OID,map=Map},Field)->
   Fields=ecomet_transaction:dict_get({OID,fields},#{}),
   ecomet_field:field_changes(Map,Fields,OID,Field).
+
+field_type(#object{map=Map},Field)->
+  ecomet_field:get_type(Map,Field).
 
 is_object(#object{})->
   true;

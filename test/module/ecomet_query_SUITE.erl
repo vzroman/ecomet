@@ -437,30 +437,30 @@ get_alias(_Config)->
 read_fun(_Config)->
   ecomet_user:on_init_state(),
   %-------count--------
-  #get{value=F1,args=[],aggregate=Agr1}=ecomet_query:read_fun(count),
+  #get{value=F1,args=[],aggregate=Agr1}=ecomet_query:read_fun(count,undefined),
   1=F1(#{}),
   2=Agr1(2,none),
   5=Agr1(2,3),
   %------field---------
-  #get{value=F2,args=[<<"name1">>],aggregate=undefined}=ecomet_query:read_fun(<<"name1">>),
+  #get{value=F2,args=[<<"name1">>],aggregate=undefined}=ecomet_query:read_fun(<<"name1">>,undefined),
   <<"value1">> =F2(#{<<"name1">>=><<"value1">>,<<"name2">>=>"value2"}),
   %-----error----------
-  ?assertError({invalid_query_field,_},ecomet_query:read_fun({some_invalid_stuff})),
+  ?assertError({invalid_query_field,_},ecomet_query:read_fun({some_invalid_stuff},undefined)),
   %-----{Fun,Arguments}------------
   ConcatFun=
     fun([V1,V2])-><<V1/binary,V2/binary>> end,
   % case 1. fields
   #get{value=F3,args=[<<"field1">>,<<"field2">>],aggregate=undefined}=
-    ecomet_query:read_fun({ConcatFun,[<<"field1">>,<<"field2">>]}),
+    ecomet_query:read_fun({ConcatFun,[<<"field1">>,<<"field2">>]},undefined),
   <<"value1value2">>=F3(#{<<"field1">>=><<"value1">>,<<"field2">>=><<"value2">>}),
   % case 2. embedded fun
   #get{value=F4,args=[<<"field1">>,<<"field2">>,<<"field3">>],aggregate=undefined}=
-    ecomet_query:read_fun({ConcatFun,[{ConcatFun,[<<"field1">>,<<"field2">>]},<<"field3">>]}),
+    ecomet_query:read_fun({ConcatFun,[{ConcatFun,[<<"field1">>,<<"field2">>]},<<"field3">>]},undefined),
   <<"value1value2value3">>=F4(#{<<"field1">>=><<"value1">>,<<"field2">>=><<"value2">>,<<"field3">>=><<"value3">>}),
   %-------{Aggr,Field}--------------
   % SUM
   #get{value=F5,args=[<<"field1">>],aggregate=Aggr5}=
-    ecomet_query:read_fun({sum,<<"field1">>}),
+    ecomet_query:read_fun({sum,<<"field1">>},undefined),
   5=F5(#{<<"field1">>=>5,<<"field2">>=>7}),
   none=Aggr5(none,none),
   10=Aggr5(none,10),
@@ -468,20 +468,20 @@ read_fun(_Config)->
   7=Aggr5(5,2),
   % MIN
   #get{value=F6,args=[<<"field1">>],aggregate=Aggr6}=
-    ecomet_query:read_fun({min,<<"field1">>}),
+    ecomet_query:read_fun({min,<<"field1">>},undefined),
   5=F6(#{<<"field1">>=>5,<<"field2">>=>7}),
   5=Aggr6(5,7),
   3=Aggr6(5,3),
   % MAX
   #get{value=F7,args=[<<"field1">>],aggregate=Aggr7}=
-    ecomet_query:read_fun({max,<<"field1">>}),
+    ecomet_query:read_fun({max,<<"field1">>},undefined),
   5=F7(#{<<"field1">>=>5,<<"field2">>=>7}),
   7=Aggr7(5,7),
   5=Aggr7(5,3),
   %-------{Aggr,Field}--------------
   MulFun=fun([V1,V2])->V1*V2 end,
   #get{value=F8,args=[<<"field1">>,<<"field2">>],aggregate=Aggr8}=
-    ecomet_query:read_fun({sum,{MulFun,[<<"field1">>,<<"field2">>]}}),
+    ecomet_query:read_fun({sum,{MulFun,[<<"field1">>,<<"field2">>]}},undefined),
   35=F8(#{<<"field1">>=>5,<<"field2">>=>7}),
   40=Aggr8(35,5).
 
@@ -494,7 +494,7 @@ read_map(_Config)->
     {<<"concat2">>,{FunConcat,[<<"field2">>,<<"field3">>]}},
     {FunConcat,[<<"field4">>,{FunConcat,[<<"field5">>,<<"field6">>]}]}
   ],
-  FieldsMap=ecomet_query:read_map(Fields),
+  FieldsMap=ecomet_query:read_map(Fields,undefined),
 
   #field{alias = <<"field1">>,value = Get1}=maps:get(1,FieldsMap),
   #get{args = [<<"field1">>],aggregate=undefined}=Get1,
@@ -513,7 +513,7 @@ is_aggregate(_Config)->
     {<<"sum2">>,{FunAdd,[<<"field2">>,<<"field3">>]}},
     {FunAdd,[<<"field4">>,{FunAdd,[<<"field5">>,<<"field6">>]}]}
   ],
-  FieldsMap1=ecomet_query:read_map(Fields1),
+  FieldsMap1=ecomet_query:read_map(Fields1,undefined),
   false=ecomet_query:is_aggregate(FieldsMap1),
 
   Fields2=[
@@ -521,7 +521,7 @@ is_aggregate(_Config)->
     {<<"sum2">>,{max,{FunAdd,[<<"field2">>,<<"field3">>]}}},
     {min,{FunAdd,[<<"field4">>,{FunAdd,[<<"field5">>,<<"field6">>]}]}}
   ],
-  FieldsMap2=ecomet_query:read_map(Fields2),
+  FieldsMap2=ecomet_query:read_map(Fields2,undefined),
   true=ecomet_query:is_aggregate(FieldsMap2),
 
   Fields3=[
@@ -529,7 +529,7 @@ is_aggregate(_Config)->
     {<<"sum2">>,{FunAdd,[<<"field2">>,<<"field3">>]}},
     {min,{FunAdd,[<<"field4">>,{FunAdd,[<<"field5">>,<<"field6">>]}]}}
   ],
-  FieldsMap3=ecomet_query:read_map(Fields3),
+  FieldsMap3=ecomet_query:read_map(Fields3,undefined),
   ?assertError(mix_aggegated_and_plain_fields,ecomet_query:is_aggregate(FieldsMap3)).
 
 read_up(Config)->
