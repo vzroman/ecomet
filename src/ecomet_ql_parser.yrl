@@ -147,6 +147,8 @@ GetFieldList -> GetField ',' GetFieldList: ['$1'|'$3'].
 
 GetField -> Field 'AS' text : { get_token('$3'), '$1' }.
 GetField -> Field : '$1'.
+GetField -> Function '(' ')' 'AS' text : { get_token('$5'), compile('$1',[]) }.
+GetField -> Function '(' ')' : compile('$1',[]).
 GetField -> Function '(' VariableList ')' 'AS' text : { get_token('$6'), compile('$1','$3') }.
 GetField -> Function '(' VariableList ')' : compile('$1','$3').
 
@@ -179,6 +181,7 @@ VariableList -> Variable ',' VariableList : ['$1'|'$3'].
 Variable -> ConstTerm : '$1'.
 Variable -> '$' Field : get_field('$2').
 Variable -> '[' VariableList ']': compile('$2').
+Variable -> Function '(' ')' : compile('$1',[]).
 Variable -> Function '(' VariableList ')' : compile('$1','$3').
 
 Function -> '$' Atom : { ecomet_ql_util ,'$2' }.

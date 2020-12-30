@@ -1180,11 +1180,11 @@ compile_function(ecomet_ql_util,min,[Value])->
 compile_function(ecomet_ql_util,min,_)->
   ?ERROR(wrong_min_arguments);
 compile_function(ecomet_ql_util,max,[Value])->
-  {min,Value};
+  {max,Value};
 compile_function(ecomet_ql_util,max,_)->
   ?ERROR(wrong_max_arguments);
 compile_function(ecomet_ql_util,sum,[Value])->
-  {min,Value};
+  {sum,Value};
 compile_function(ecomet_ql_util,sum,_)->
   ?ERROR(wrong_sum_arguments);
 
