@@ -152,15 +152,17 @@ run_statement({transaction,Statements},Acc)->
 %   {<<"alias">>,{fun,[Fields]}}    - alias for fun
 % ]
 get(DBs,Fields,Conditions)->
-  get(DBs,Fields,Conditions,[]).
+  get(DBs,Fields,Conditions,#{}).
+get(DBs,Fields,Conditions,Params) when is_list(Params)->
+  get(DBs,Fields,Conditions,maps:from_list(Params));
 get(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(get,Fields,Conditions,Params),
-  Union=proplists:get_value(union,Params,{'OR',ecomet_resultset:new()}),
+  Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
   execute(CompiledQuery,DBs,Union).
 
 system(DBs,Fields,Conditions)->
   Conditions1=ecomet_resultset:prepare(Conditions),
-  {Map,Reduce}=compile_map_reduce(get,Fields,[]),
+  {Map,Reduce}=compile_map_reduce(get,Fields,#{}),
   Compiled = #compiled_query{
     conditions = Conditions1,
     map = Map,
@@ -460,24 +462,30 @@ notify( Query, Log )->
 %   <<"field2">> => {fun,[Fields]}   - value as fun
 % }
 set(DBs,Fields,Conditions)->
-  set(DBs,Fields,Conditions,[]).
+  set(DBs,Fields,Conditions,#{}).
+set(DBs,Fields,Conditions,Params) when is_list(Params)->
+  set(DBs,Fields,Conditions,maps:from_list(Params));
 set(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(set,Fields,Conditions,Params),
-  Union=proplists:get_value(union,Params,{'OR',ecomet_resultset:new()}),
+  Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
   execute(CompiledQuery,DBs,Union).
 %%=====================================================================
 %%	DELETE
 %%=====================================================================
 delete(DBs,Conditions)->
-  delete(DBs,Conditions,[]).
+  delete(DBs,Conditions,#{}).
+delete(DBs,Conditions,Params) when is_list(Params)->
+  delete(DBs,Conditions,Params);
 delete(DBs,Conditions,Params)->
   CompiledQuery=compile(delete,none,Conditions,Params),
-  Union=proplists:get_value(union,Params,{'OR',ecomet_resultset:new()}),
+  Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
   execute(CompiledQuery,DBs,Union).
 %%=====================================================================
 %%	COMPILE
 %%=====================================================================
-compile(Type,Fields,Conditions)->compile(Type,Fields,Conditions,[]).
+compile(Type,Fields,Conditions)->compile(Type,Fields,Conditions,#{}).
+compile(Type,Fields,Conditions,Params) when is_list(Params)->
+  compile(Type,Fields,Conditions,maps:from_list(Params));
 compile(Type,Fields,Conditions,Params)->
   Conditions1=set_rights(Type,Conditions),
   Conditions2=ecomet_resultset:prepare(Conditions1),
@@ -497,11 +505,11 @@ execute(#compiled_query{conditions = Conditions,map = Map,reduce = Reduce},DBs,U
   ecomet_resultset:execute(DBs,Conditions,Map,Reduce,Union).
 
 %%-------------GET------------------------------------------------
-%% Search params:
-%%	- {page,{Number,ItemsPerPage}} - Paginating. Return only items for defined page
-%%	- {order,[{Field1,Order},{Field2,Order}]} - Sorting results
-%%	- {group,[Field1,Field2]} - Grouping results
-%%	- {lock,none|read|write} - lock level on objects
+%% Search params is a map:
+%%	- page => {Number,ItemsPerPage} - Paginating. Return only items for defined page
+%%	- order => [{Field1,Order},{Field2,Order}] - Sorting results
+%%	- group => [Field1,Field2] - Grouping results
+%%	- lock => none|read|write - lock level on objects
 %%-----------HIGHLY OPTIMIZED (no objects open)-------------------
 %% CASE 1. Raw result requested
 compile_map_reduce(get,rs,_Params)->
@@ -516,10 +524,10 @@ compile_map_reduce(get,[count],_Params)->
   {Map,Reduce};
 %% CASE 3. Only objects oid needed
 compile_map_reduce(get,[<<".oid">>],Params)->
-  Page=proplists:get_value(page,Params,none),
+  Page=maps:get(page,Params,none),
   Map=fun(RS)->RS	end,
   Order=
-    case proplists:get_value(order,Params,[]) of
+    case maps:get(order,Params,[]) of
       [{<<".oid">>,'DESC'}|_]->foldl;
       _->foldr
     end,
@@ -541,11 +549,11 @@ compile_map_reduce(get,[<<".oid">>],Params)->
   {Map,Reduce};
 %%-----------COMMON VARIANTS. Objects are opened for reading------------
 compile_map_reduce(get,Fields,Params)->
-  ReadMap=read_map(Fields,proplists:get_value(format,Params,undefined)),
+  ReadMap=read_map(Fields,maps:get(format,Params,undefined)),
   AliasMap=maps:fold(fun(ID,#field{alias=Alias},Acc)->Acc#{Alias=>ID} end,#{},ReadMap),
 
   % All columns to order by
-  OrderAll=[{maps:get(Name,AliasMap),OrderType}||{Name,OrderType}<-proplists:get_value(order,Params,[])],
+  OrderAll=[{maps:get(Name,AliasMap),OrderType}||{Name,OrderType}<-maps:get(order,Params,[])],
 
   %---Columns to group by---
   % Put sort order if defined.
@@ -563,10 +571,10 @@ compile_map_reduce(get,Fields,Params)->
       end,
       SortOrder=proplists:get_value(ID,OrderAll,none),
       {ID,SortOrder}
-    end,proplists:get_value(group,Params,[])),
+    end,maps:get(group,Params,[])),
   % Sorting within groups
   Order=
-    case {Group,proplists:get_value(order,Params,[])} of
+    case {Group,maps:get(order,Params,[])} of
       % No sorting, no grouping. Results from old to new
       {[],[]}->foldr;
       % OPTIMIZED. Sorting by oid, no grouping. No real sorting performed, task is solved while traversing search results
@@ -578,9 +586,9 @@ compile_map_reduce(get,Fields,Params)->
   % Define type of query (aggregated/search), check no mix of plain and aggregated fields
   Aggregate=is_aggregate(maps:without([ID||{ID,_}<-Group],ReadMap)),
   % Paginating
-  Page=proplists:get_value(page,Params,none),
-  % Fun to read object fields from storage, default lock is dirty (fastest)
-  ReadUp=read_up(proplists:get_value(lock,Params,dirty)),
+  Page=maps:get(page,Params,none),
+  % Fun to read object fields from storage, default lock is none (dirty operations)
+  ReadUp=read_up(maps:get(lock,Params,none)),
 
   % Build Map/Reduce plan
   {Map,Reduce}=map_reduce_plan(#{
@@ -604,7 +612,7 @@ compile_map_reduce(get,Fields,Params)->
   {Map,ReduceFun};
 
 compile_map_reduce(set,Fields,Params)->
-  Formatter = proplists:get_value(format,Params,undefined),
+  Formatter = maps:get(format,Params,undefined),
   Updates=
     [case Value of
        {Fun,ArgList} when is_function(Fun,1) and is_list(ArgList)->
@@ -625,7 +633,7 @@ compile_map_reduce(set,Fields,Params)->
          {Field,Value}
      end || {Field,Value} <- maps:to_list(Fields) ],
   % Fun to read object fields from storage, default lock is none (check rights is performed)
-  ReadUp=read_up(proplists:get_value(lock,Params,none)),
+  ReadUp=read_up(maps:get(lock,Params,none)),
   ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
   Map=
     fun(RS)->
@@ -646,7 +654,7 @@ compile_map_reduce(set,Fields,Params)->
 
 compile_map_reduce(delete,none,Params)->
   % Fun to read object fields from storage, default lock is none (check rights is performed)
-  ReadUp=read_up(proplists:get_value(lock,Params,none)),
+  ReadUp=read_up(maps:get(lock,Params,none)),
   Map=
     fun(RS)->
       ecomet_resultset:foldr(fun(OID,Acc)->
@@ -1041,14 +1049,6 @@ is_aggregate([Field|Rest],Result)->
 is_aggregate([],Result)->Result.
 
 
-read_up(dirty)->
-  fun(OID,Fields)->
-    Object=ecomet_object:construct(OID),
-    maps:merge(ecomet_object:read_fields(Object,Fields),#{
-      <<".oid">>=>OID,
-      object=>Object
-    })
-  end;
 read_up(Lock)->
   fun(OID,Fields)->
     Object=ecomet_object:open(OID,Lock),

@@ -703,13 +703,13 @@ read_up(Config)->
                 end,lists:zip(OIDList,Fields)),
 
   % dirty
-  ReadFun2=ecomet_query:read_up(dirty),
+  ReadFun2=ecomet_query:read_up(none),
   lists:foreach(fun({OID,{Pattern,Name}})->
     #{
       <<".pattern">>:=Pattern,
       <<".name">>:=Name
     }=ReadFun2(OID,[<<".pattern">>,<<".name">>])
-                end,lists:zip(OIDList,Fields)),
+  end,lists:zip(OIDList,Fields)),
 
   %-----ReadLock-----------
   ReadFun3=ecomet_query:read_up(read),
@@ -1348,7 +1348,7 @@ simple_no_sort(Config)->
   ],
   RS=ecomet_query:get([root],rs,{<<"string1">>,'=',<<"value1">>}),
   %----------No params--------------
-  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,[]),
+  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,#{}),
   LocalResult=Map1(RS),
   [
     [PatternID1,<<"test1">>,<<"value0_value0">>],
@@ -1374,17 +1374,17 @@ simple_no_sort(Config)->
   ]=LocalResult,
   {[<<".pattern">>,<<"alias1">>,<<"alias2">>],LocalResult}=Reduce1([LocalResult]),
   %----------Sorting by oid--------------
-  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],[{order,[{<<".oid">>,'ASC'}]}]),
+  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],#{order=>[{<<".oid">>,'ASC'}]}),
   LocalResult2=Map2(RS),
   LocalResult=[Tail||[_|Tail]<-LocalResult2],
   {[<<".oid">>,<<".pattern">>,<<"alias1">>,<<"alias2">>],LocalResult2}=Reduce2([LocalResult2]),
 
-  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],[{order,[{<<".oid">>,'DESC'}]}]),
+  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],#{order=>[{<<".oid">>,'DESC'}]}),
   LocalResult3=Map3(RS),
   LocalResult3=lists:reverse(LocalResult2),
   {[<<".oid">>,<<".pattern">>,<<"alias1">>,<<"alias2">>],LocalResult3}=Reduce3([LocalResult3]),
   %-----------Paging----------------------
-  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,Fields,[{page,{2,3}}]),
+  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,Fields,#{page=>{2,3}}),
   RS=Map4(RS),
   {20,{[<<".pattern">>,<<"alias1">>,<<"alias2">>],[
     [PatternID1,<<"test301">>,<<"value3_value0">>],
@@ -1392,7 +1392,10 @@ simple_no_sort(Config)->
     [PatternID1,<<"test501">>,<<"value5_value1">>]
   ]}}=Reduce4([RS]),
 
-  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],[{order,[{<<".oid">>,'DESC'}]},{page,{2,3}}]),
+  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],#{
+    order=>[{<<".oid">>,'DESC'}],
+    page=>{2,3}
+  }),
   RS=Map5(RS),
   {20,{[<<".oid">>,<<".pattern">>,<<"alias1">>,<<"alias2">>],[
     [_,PatternID2,<<"test601">>,<<"value6_value1">>],
@@ -1413,7 +1416,7 @@ grouping_sorting(Config)->
   ],
   RS=ecomet_query:get([root],rs,{<<"string1">>,'=',<<"value1">>}),
   %----------Sorting--------------
-  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,[{order,[{<<"alias2">>,'ASC'}]}]),
+  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,#{order=>[{<<"alias2">>,'ASC'}]}),
   LocalResult1=Map1(RS),
   [
     {<<"value0_value0">>,[
@@ -1482,7 +1485,7 @@ grouping_sorting(Config)->
   ]}=Reduce1([LocalResult1]),
 
   %----------Grouping--------------
-  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,Fields,[{group,[<<"alias1">>]}]),
+  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,Fields,#{group=>[<<"alias1">>]}),
   LocalResult2=Map2(RS),
   [
     {<<"test1">>,[
@@ -1570,7 +1573,10 @@ grouping_sorting(Config)->
     ]]
   ]}=Reduce2([LocalResult2]),
 
-  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,Fields,[{group,[<<"alias1">>]},{order,[{<<"alias1">>,'DESC'}]}]),
+  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,Fields,#{
+    group=>[<<"alias1">>],
+    order=>[{<<"alias1">>,'DESC'}]
+  }),
   LocalResult2=Map3(RS),  %% Local result always ascending order
 
   {[<<"alias1">>,<<".pattern">>,<<"alias2">>],[
@@ -1617,7 +1623,10 @@ grouping_sorting(Config)->
   ]}=Reduce3([LocalResult2]),
 
   %----------Grouping and sorting--------------
-  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,Fields,[{group,[<<"alias1">>]},{order,[{<<".pattern">>,'DESC'}]}]),
+  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,Fields,#{
+    group=>[<<"alias1">>],
+    order=>[{<<".pattern">>,'DESC'}]
+  }),
   LocalResult4=Map4(RS),
   [
     {<<"test1">>,[
@@ -1706,7 +1715,10 @@ grouping_sorting(Config)->
   ]}=Reduce4([LocalResult4]),
 
   %%-----------2 Level grouping-------------------------------
-  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,Fields,[{group,[<<"alias2">>,<<".pattern">>]},{order,[{<<".pattern">>,'DESC'}]}]),
+  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,Fields,#{
+    group=>[<<"alias2">>,<<".pattern">>],
+    order=>[{<<".pattern">>,'DESC'}]
+  }),
   LocalResult5=Map5(RS),
   [
     {<<"value0_value0">>,[
@@ -1795,7 +1807,9 @@ grouping_sorting(Config)->
   ]}=Reduce5([LocalResult5]),
 
   %%-----------2 Level sorting-------------------------------
-  {Map6,Reduce6}=ecomet_query:compile_map_reduce(get,Fields,[{order,[{<<"alias2">>,'ASC'},{<<".pattern">>,'DESC'}]}]),
+  {Map6,Reduce6}=ecomet_query:compile_map_reduce(get,Fields,#{
+    order=>[{<<"alias2">>,'ASC'},{<<".pattern">>,'DESC'}]
+  }),
   LocalResult5=Map6(RS),
 
   {[<<".pattern">>,<<"alias1">>,<<"alias2">>],[
@@ -1834,11 +1848,11 @@ grouping_sorting_page(Config)->
   ],
   RS=ecomet_query:get([root],rs,{<<"string1">>,'=',<<"value1">>}),
 
-  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,[
-    {group,[<<"alias2">>,<<".pattern">>]},
-    {order,[{<<".pattern">>,'DESC'}]},
-    {page,{2,3}}
-  ]),
+  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,#{
+    group=>[<<"alias2">>,<<".pattern">>],
+    order=>[{<<".pattern">>,'DESC'}],
+    page=>{2,3}
+  }),
   % Local result reads only fields needed to group and sort results, only oid is inserted as row,
   % Query manager reads other fields only for objects within requested page
   LocalResult1=Map1(RS),
@@ -1901,10 +1915,10 @@ grouping_sorting_page(Config)->
     ]]
   ]}=Result1,
 
-  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,Fields,[
-    {order,[{<<"alias2">>,'ASC'},{<<".pattern">>,'DESC'}]},
-    {page,{3,4}}
-  ]),
+  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,Fields,#{
+    order=>[{<<"alias2">>,'ASC'},{<<".pattern">>,'DESC'}],
+    page=>{3,4}
+  }),
   LocalResult1=Map2(RS),
 
   {20,Result2}=Reduce2([LocalResult1]),
@@ -1927,17 +1941,17 @@ aggregate(_Config)->
   RS=ecomet_query:get([root],rs,{<<"bool">>,'=',true}),
 
   %-----No grouping------------------------
-  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,[]),
+  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,#{}),
   LocalResult1=Map1(RS),
   [1000,99,1,_Sum]=LocalResult1,
 
   {[<<"count1">>,<<"max1">>,<<"min1">>,<<"sum1">>],LocalResult1}=Reduce1([LocalResult1]),
 
   %-----Grouping---------------------------
-  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,[<<"string2">>|Fields],[
-    {group,[<<"string2">>]},
-    {order,[{<<"string2">>,'DESC'}]}
-  ]),
+  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,[<<"string2">>|Fields],#{
+    group=>[<<"string2">>],
+    order=>[{<<"string2">>,'DESC'}]
+  }),
   LocalResult2=Map2(RS),
   [
     {<<"value0">>,[100,99,1,_]},
@@ -1967,10 +1981,10 @@ aggregate(_Config)->
   ]=Result2,
 
   %-------2 level grouping---------------
-  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,[<<"string2">>,<<"string3">>|Fields],[
-    {group,[<<"string3">>,<<"string2">>]},
-    {order,[{<<"string2">>,'DESC'}]}
-  ]),
+  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,[<<"string2">>,<<"string3">>|Fields],#{
+    group=>[<<"string3">>,<<"string2">>],
+    order=>[{<<"string2">>,'DESC'}]
+  }),
   LocalResult3=Map3(RS),
   [
     {<<"value0">>,[
@@ -2008,10 +2022,10 @@ aggregate(_Config)->
   ]=Result3,
 
   %-------Order by aggregated fields---------------
-  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,[<<"string2">>,<<"string3">>|Fields],[
-    {group,[<<"string3">>,<<"string2">>]},
-    {order,[{<<"sum1">>,'DESC'}]}
-  ]),
+  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,[<<"string2">>,<<"string3">>|Fields],#{
+    group=>[<<"string3">>,<<"string2">>],
+    order=>[{<<"sum1">>,'DESC'}]
+  }),
   LocalResult3=Map4(RS),
   {[<<"string3">>,<<"string2">>,<<"count1">>,<<"max1">>,<<"min1">>,<<"sum1">>],Result4}=Reduce4([LocalResult3]),
 
@@ -2034,11 +2048,11 @@ aggregate(_Config)->
   ]=Result4,
 
   %-------Paging---------------
-  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,[<<"string2">>|Fields],[
-    {group,[<<"string2">>]},
-    {order,[{<<"sum1">>,'DESC'}]},
-    {page,{3,3}}
-  ]),
+  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,[<<"string2">>|Fields],#{
+    group=>[<<"string2">>],
+    order=>[{<<"sum1">>,'DESC'}],
+    page=>{3,3}
+  }),
   LocalResult5=Map5(RS),
   [
     {<<"value0">>,[100,99,1,_]},
