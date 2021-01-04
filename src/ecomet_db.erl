@@ -58,7 +58,7 @@ get_databases()->
 
 get_by_name(Name) when is_binary(Name)->
   case ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
-    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.database">>)},
+    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.database">>)},
     {<<".name">>,'=',Name }
   ]}) of
     [OID]->{ok,OID};

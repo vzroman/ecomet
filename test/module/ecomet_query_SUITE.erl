@@ -271,8 +271,8 @@ end_per_suite(Config)->
   PatternID2=?config(pattern_id2,Config),
 
   ecomet_query:delete([root],{'OR',[
-    {<<".pattern">>,'=',PatternID1},
-    {<<".pattern">>,'=',PatternID2}
+    {<<".pattern">>,':=',PatternID1},
+    {<<".pattern">>,':=',PatternID2}
   ]}),
 
   ?BACKEND_STOP(30000),
@@ -426,12 +426,12 @@ get_count(Config)->
   20=ecomet_query:get([root],[count],{<<"string1">>,'=',<<"value1">>}),
 
   10=ecomet_query:get([root],[count],{'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'=',<<"value1">>}
   ]}),
 
   6=ecomet_query:get([root],[count],{'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'=',<<"value1">>},
     {'OR',[
       {<<"string2">>,'=',<<"value1">>},
@@ -700,7 +700,7 @@ read_up(Config)->
       <<".pattern">>:=Pattern,
       <<".name">>:=Name
     }=ReadFun1(OID,[<<".pattern">>,<<".name">>])
-                end,lists:zip(OIDList,Fields)),
+  end,lists:zip(OIDList,Fields)),
 
   % dirty
   ReadFun2=ecomet_query:read_up(none),

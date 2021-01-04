@@ -57,7 +57,7 @@
 on_start_node(Node)->
 
   NotClosed = ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
-    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.session">>)},
+    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.session">>)},
     {<<"node">>,'=',Node},
     {<<"close">>,'=',-1}
   ]}),
@@ -182,7 +182,7 @@ handle_call({remove_subscription, ID}, _From, #state{
 
   ?LOGDEBUG("remove subscription ~ts for user ~p",[ ID,User ]),
   ecomet_query:delete([?ROOT],{'AND',[
-    {<<".pattern">>,'=',PatternID},
+    {<<".pattern">>,':=',PatternID},
     {<<".folder">>,'=',?OID(Instance)},
     {<<".name">>,'=',ID}
   ]}),
@@ -228,7 +228,7 @@ terminate(Reason,#state{
 })->
   ?LOGINFO("terminating session for user ~p, reason ~p",[Name ,Reason]),
   ecomet_query:delete([?ROOT],{'AND',[
-    {<<".pattern">>,'=',PatternID},
+    {<<".pattern">>,':=',PatternID},
     {<<".folder">>,'=',?OID(Session)}
   ]}),
   ok = ecomet:edit_object(Session,#{ <<"close">> => ecomet_lib:ts() }),

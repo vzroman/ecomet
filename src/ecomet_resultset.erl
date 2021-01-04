@@ -238,10 +238,13 @@ direct_or([],_Fields)->
 %%
 %% Define conditions on patterns
 %%
-define_patterns({<<".pattern">>,'=',PatternID})->
+define_patterns({<<".pattern">>,':=',PatternID})->
 	ID=ecomet_object:get_id(PatternID),
 	Bit=ecomet_bits:set_bit(ID,none),
 	{'LEAF',{'=',<<".pattern">>,PatternID},Bit};
+define_patterns({<<".pattern">>,'=',PatternID})->
+	Patterns = [PatternID|ecomet_pattern:get_children(PatternID)],
+	define_patterns({'OR',[{<<".pattern">>,':=',P}||P<-Patterns]});
 % Leaf condition
 define_patterns({Field,Oper,Value}) when is_binary(Field)->
 	{'LEAF',{Oper,Field,Value},'UNDEFINED'};
