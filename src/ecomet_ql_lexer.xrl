@@ -43,6 +43,7 @@ WHERE       = (W|w)(H|h)(E|e)(R|r)(E|e)
 WRITE       = (W|w)(R|r)(I|i)(T|t)(E|e)
 STATELESS   = (S|s)(T|t)(A|a)(T|t)(E|e)(L|l)(E|e)(S|s)(S|s)
 NO_FEEDBACK = (N|n)(O|o)_(F|f)(E|e)(E|e)(D|d)(B|b)(A|a)(C|c)(K|k)
+FORMAT      = (F|f)(O|o)(R|r)(M|m)(A|a)(T|t)
 
 TEXT        = '(\\'|[^'])*'
 HEX         = 0x([0-9a-zA-Z]*)
@@ -98,6 +99,7 @@ Rules.
 {WRITE}       : {token, {write, TokenLine}}.
 {STATELESS}   : {token, {stateless, TokenLine}}.
 {NO_FEEDBACK} : {token, {no_feedback, TokenLine}}.
+{FORMAT}      : {token, {format, TokenLine}}.
 {S}           : {token, {'$', TokenLine}}.
 {ALL}         : {token, {'*', TokenLine}}.
 {EQ}          : {token, {'=', TokenLine}}.

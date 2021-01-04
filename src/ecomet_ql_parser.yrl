@@ -52,6 +52,7 @@ OrderDirection
 GroupByList
 GroupBy
 Lock
+Format
 .
 
 Terminals
@@ -80,6 +81,7 @@ where
 write
 stateless
 no_feedback
+format
 field
 atom
 integer
@@ -212,12 +214,14 @@ Param-> order by OrderByList : {order,'$3'}.
 Param-> group by GroupByList: {group,'$3'}.
 Param-> page integer ':' integer: {page,{ get_token('$2'), get_token('$4') }}.
 Param-> Lock : '$1'.
+Param-> Format : '$1'.
 
 SubParamList-> SubParam SubParamList: ['$1'|'$2'].
 SubParamList-> SubParam: ['$1'].
 
 SubParam-> stateless : {stateless,true}.
 SubParam-> no_feedback : {no_feedback,true}.
+SubParam-> Format : '$1'.
 
 Lock -> lock read : { lock , read }.
 Lock -> lock write : { lock , write }.
@@ -238,6 +242,9 @@ GroupByList -> GroupBy ',' GroupByList: ['$1'|'$3'].
 
 GroupBy -> Field : '$1'.
 GroupBy -> integer : get_token('$1').
+
+Format -> format '$' Atom ':' Atom : { format, fun '$3':'$5'/2 }.
+Format -> format '$' Atom : { format, fun ecomet_types:'$3'/2 }.
 
 Erlang code.
 

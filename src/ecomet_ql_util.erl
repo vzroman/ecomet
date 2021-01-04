@@ -33,6 +33,9 @@
   from_base64/1
 ]).
 
+%%====================================================================
+%%		Utilities
+%%====================================================================
 oid(List) when is_list(List)->
   [oid(I)||I<-List];
 oid(ID)->
@@ -85,3 +88,4 @@ from_base64(Value) when is_binary(Value)->
   base64:decode(Value);
 from_base64(Items) when is_list(Items)->
   [from_base64(I)||I<-Items].
+

@@ -23,12 +23,24 @@
 %% API functions
 %% ====================================================================
 -export([
-  parse/2,parse_safe/2,
-  to_string/2,
+  parse_safe/2,
   check_value/2,
   string_to_term/1,
   term_to_string/1,
   get_supported_types/0
+]).
+
+%% ====================================================================
+%% Formatters
+%% ====================================================================
+-export([
+  %-------String-----------------
+  to_string/2,
+  from_string/2,
+
+  %-------JSON-----------------
+  to_json/2,
+  from_json/2
 ]).
 
 %%---------------------------------------------------------------------
@@ -40,147 +52,10 @@ parse_safe(_Type,none)->
   {ok,none};
 parse_safe(Type,Value)->
   try
-    {ok,parse(Type,Value)}
+    {ok,from_string(Type,Value)}
   catch
       _:_ ->{error,invalid_value}
   end.
-%---------String-----------------------
-parse(string,Value)
-  when is_binary(Value);is_list(Value)->
-  unicode:characters_to_binary(Value);
-parse(string,Value) when is_integer(Value)->
-  integer_to_binary(Value);
-parse(string,Value) when is_float(Value)->
-  float_to_binary(Value);
-parse(string,Value) when is_atom(Value)->
-  atom_to_binary(Value,utf8);
-parse(string,Term)->
-  term_to_string(Term);
-%---------Integer----------------------
-parse(integer,Value) when is_integer(Value)->
-  Value;
-parse(integer,Value) when is_float(Value)->
-  round(Value);
-parse(integer,Value) when is_binary(Value)->
-  binary_to_integer(Value);
-parse(integer,Value) when is_list(Value)->
-  list_to_integer(Value);
-parse(integer,Invalid)->
-  ?ERROR(Invalid);
-%---------Float----------------------
-parse(float,Value) when is_float(Value)->
-  Value;
-parse(float,Value) when is_integer(Value)->
-  1.0*Value;
-parse(float,Value) when is_binary(Value)->
-  try binary_to_float(Value)
-  catch
-    _:_->1.0*binary_to_integer(Value)
-  end;
-parse(float,Value) when is_list(Value)->
-  try list_to_float(Value)
-  catch
-    _:_->1.0*list_to_integer(Value)
-  end;
-parse(float,Invalid)->
-  ?ERROR(Invalid);
-%---------Bool----------------------
-parse(bool,true)->
-  true;
-parse(bool,false)->
-  true;
-parse(bool,<<"true">>)->
-  true;
-parse(bool,<<"false">>)->
-  false;
-parse(bool,"true")->
-  true;
-parse(bool,"false")->
-  false;
-parse(bool,1)->
-  true;
-parse(bool,0)->
-  false;
-parse(bool,Invalid)->
-  ?ERROR(Invalid);
-%---------Atom----------------------
-parse(atom,Value) when is_atom(Value)->
-  Value;
-parse(atom,Value) when is_binary(Value)->
-  binary_to_atom(Value,utf8);
-parse(atom,Value) when is_list(Value)->
-  list_to_atom(Value);
-parse(atom,Invalid)->
-  ?ERROR(Invalid);
-%---------Binary----------------------
-parse(binary,Value) when is_binary(Value)->
-  try
-    base64:decode(Value)
-  catch
-      _:_->Value
-  end;
-parse(binary,Value) when is_list(Value)->
-  parse(binary,list_to_binary(Value));
-parse(binary,Invalid)->
-  ?ERROR(Invalid);
-%---------Term----------------------
-parse(term,Value) when is_binary(Value)->
-  case string_to_term(Value) of
-    {ok,Term}->Term;
-    _->Value
-  end;
-parse(term,Value)->
-  Value;
-%---------Link----------------------
-parse(link,Value) when is_binary(Value)->
-  {ok,OID}=ecomet_folder:path2oid(Value),
-  OID;
-parse(link,OID)->
-  case ecomet_object:is_oid(OID) of
-    true->OID;
-    _->?ERROR(OID)
-  end;
-%---------List----------------------
-parse({list,Type},Value) when is_list(Value)->
-  [case parse_safe(Type,Item) of
-     {ok,ItemValue}->ItemValue;
-     _->?ERROR(Item)
-   end||Item <- Value];
-parse({list,Type},Value) when is_binary(Value)->
-  case string_to_term(Value) of
-    {ok,List} when is_list(List)->
-      parse({list,Type},List);
-    _->?ERROR(invalid_list)
-  end;
-parse({list,_Type},Invalid)->
-  ?ERROR(Invalid).
-
-%%---------------------------------------------------------------------
-%%	Convert value from ecomet internal type to string
-%%---------------------------------------------------------------------
-to_string(_Type,none)->
-  <<>>;
-to_string(string,Value)->
-  Value;
-to_string(integer,Value)->
-  integer_to_binary(Value);
-to_string(float,Value)->
-  float_to_binary(1.0*Value);
-to_string(bool,true)->
-  <<"true">>;
-to_string(bool,false)->
-  <<"false">>;
-to_string(atom,Value)->
-  atom_to_binary(Value,utf8);
-to_string(binary,Value)->
-  base64:encode(Value);
-to_string(link,Value)->
-  ecomet_folder:oid2path(Value);
-to_string(term,Value)->
-  term_to_string(Value);
-to_string({list,Type},Value)->
-  List= [ to_string(Type,Item) || Item <- Value ],
-  ecomet_json:to_json(List).
 
 %%-------------------------------------------------------------------
 %%		Check value
@@ -234,3 +109,173 @@ get_supported_types()->
   ],
   Primitives ++ [ {list, P} || P <- Primitives ].
 
+%% ====================================================================
+%% STRING FORMATTER
+%% ====================================================================
+%---------String-----------------------
+from_string(string,Value)
+  when is_binary(Value);is_list(Value)->
+  unicode:characters_to_binary(Value);
+from_string(string,Value) when is_integer(Value)->
+  integer_to_binary(Value);
+from_string(string,Value) when is_float(Value)->
+  float_to_binary(Value);
+from_string(string,Value) when is_atom(Value)->
+  atom_to_binary(Value,utf8);
+from_string(string,Term)->
+  term_to_string(Term);
+%---------Integer----------------------
+from_string(integer,Value) when is_integer(Value)->
+  Value;
+from_string(integer,Value) when is_float(Value)->
+  round(Value);
+from_string(integer,Value) when is_binary(Value)->
+  binary_to_integer(Value);
+from_string(integer,Value) when is_list(Value)->
+  list_to_integer(Value);
+from_string(integer,Invalid)->
+  ?ERROR(Invalid);
+%---------Float----------------------
+from_string(float,Value) when is_float(Value)->
+  Value;
+from_string(float,Value) when is_integer(Value)->
+  1.0*Value;
+from_string(float,Value) when is_binary(Value)->
+  try binary_to_float(Value)
+  catch
+    _:_->1.0*binary_to_integer(Value)
+  end;
+from_string(float,Value) when is_list(Value)->
+  try list_to_float(Value)
+  catch
+    _:_->1.0*list_to_integer(Value)
+  end;
+from_string(float,Invalid)->
+  ?ERROR(Invalid);
+%---------Bool----------------------
+from_string(bool,true)->
+  true;
+from_string(bool,false)->
+  true;
+from_string(bool,<<"true">>)->
+  true;
+from_string(bool,<<"false">>)->
+  false;
+from_string(bool,"true")->
+  true;
+from_string(bool,"false")->
+  false;
+from_string(bool,1)->
+  true;
+from_string(bool,0)->
+  false;
+from_string(bool,<<"1">>)->
+  true;
+from_string(bool,<<"0">>)->
+  false;
+from_string(bool,"1")->
+  true;
+from_string(bool,"0")->
+  false;
+from_string(bool,Invalid)->
+  ?ERROR(Invalid);
+%---------Atom----------------------
+from_string(atom,Value) when is_atom(Value)->
+  Value;
+from_string(atom,Value) when is_binary(Value)->
+  binary_to_atom(Value,utf8);
+from_string(atom,Value) when is_list(Value)->
+  list_to_atom(Value);
+from_string(atom,Invalid)->
+  ?ERROR(Invalid);
+%---------Binary----------------------
+from_string(binary,Value) when is_binary(Value)->
+  try
+    base64:decode(Value)
+  catch
+    _:_->Value
+  end;
+from_string(binary,Value) when is_list(Value)->
+  from_string(binary,list_to_binary(Value));
+from_string(binary,Invalid)->
+  ?ERROR(Invalid);
+%---------Term----------------------
+from_string(term,Value) when is_binary(Value)->
+  case string_to_term(Value) of
+    {ok,Term}->Term;
+    _->Value
+  end;
+from_string(term,Value)->
+  Value;
+%---------Link----------------------
+from_string(link,Value) when is_binary(Value)->
+  {ok,OID}=ecomet_folder:path2oid(Value),
+  OID;
+from_string(link,OID)->
+  case ecomet_object:is_oid(OID) of
+    true->OID;
+    _->?ERROR(OID)
+  end;
+%---------List----------------------
+from_string({list,Type},Value) when is_list(Value)->
+  [case parse_safe(Type,Item) of
+     {ok,ItemValue}->ItemValue;
+     _->?ERROR(Item)
+   end||Item <- Value];
+from_string({list,Type},Value) when is_binary(Value)->
+  case string_to_term(Value) of
+    {ok,List} when is_list(List)->
+      from_string({list,Type},List);
+    _->?ERROR(invalid_list)
+  end;
+from_string({list,_Type},Invalid)->
+  ?ERROR(Invalid).
+
+%%---------------------------------------------------------------------
+%%	Convert value from ecomet internal type to string
+%%---------------------------------------------------------------------
+to_string(_Type,none)->
+  <<>>;
+to_string(string,Value)->
+  Value;
+to_string(integer,Value)->
+  integer_to_binary(Value);
+to_string(float,Value)->
+  float_to_binary(1.0*Value);
+to_string(bool,true)->
+  <<"true">>;
+to_string(bool,false)->
+  <<"false">>;
+to_string(atom,Value)->
+  atom_to_binary(Value,utf8);
+to_string(binary,Value)->
+  base64:encode(Value);
+to_string(link,Value)->
+  ecomet_folder:oid2path(Value);
+to_string(term,Value)->
+  term_to_string(Value);
+to_string({list,Type},Value)->
+  List= [ to_string(Type,Item) || Item <- Value ],
+  ecomet_json:to_json(List).
+
+%% ====================================================================
+%% JSON FORMATTER
+%% ====================================================================
+from_json(Type,Value)->
+  % The default from_string parser is flexible enough
+  from_string(Type,Value).
+
+to_json(_Type,none)->
+  null;
+% JSON friendly types
+to_json(bool,Value)->
+  Value;
+to_json(integer,Value)->
+  Value;
+to_json(float,Value)->
+  Value(1.0*Value);
+to_json({list,Type},Value)->
+  [ to_json(Type,Item) || Item <- Value ];
+% Other types are converted to a string
+to_json(Type,Value)->
+  to_string(Type,Value).
