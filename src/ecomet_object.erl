@@ -92,7 +92,8 @@
   end).
 -define(SERVICE_FIELDS,#{
   <<".oid">>=>fun ecomet_lib:to_oid/1,
-  <<".path">>=>fun ecomet_lib:to_path/1
+  <<".path">>=>fun ecomet_lib:to_path/1,
+  <<".object">>=>fun ecomet_lib:dummy/1
 }).
 %%=================================================================
 %%	Data API
@@ -467,7 +468,7 @@ commit(OID,Dict)->
       [ ok = ecomet_backend:delete(DB,?DATA,Type,OID,none) || Type <- maps:keys(Storages) ],
       % The log record
       #ecomet_log{
-        object = #{ <<".oid">> => OID },
+        object = ecomet_query:object_map(Object,#{}),
         db = DB,
         ts=ecomet_lib:log_ts(),
         tags={[],[],Tags},
@@ -532,7 +533,7 @@ commit(OID,Dict)->
 
           % The log record
           #ecomet_log{
-            object = NewVersion#{ <<".oid">> => OID },
+            object = ecomet_query:object_map(Object,NewVersion),
             db = DB,
             ts=TS,
             tags={ Add, Unchanged, Del},

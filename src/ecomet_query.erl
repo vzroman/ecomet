@@ -32,6 +32,7 @@
   subscribe/4,subscribe/5,
   unsubscribe/1,
   on_commit/1,
+  object_map/2,
   notify/2,
   set/3,set/4,
   delete/2,delete/3,
@@ -362,12 +363,14 @@ match_log( New, Old, Del, NewObject, OldObject, Match )->
 
 init_subscription_state(ID,DBs,Deps,Conditions,Read)->
   F=
-    fun([OID|Values])->
-      Object = maps:from_list(lists:zip(Deps,Values)),
-      ?SUBSCRIPTION(ID,create,OID,Read(Deps,Object))
+    fun([Object|Values])->
+      Values1 = maps:from_list(lists:zip(Deps,Values)),
+      ObjectMap=object_map(Object,Values1),
+      OID = ecomet_object:get_oid(Object),
+      ?SUBSCRIPTION(ID,create,OID,Read(Deps,ObjectMap))
     end,
-  Fields = [<<".ts">>,{F, [<<".oid">>|Deps]}],
-  {_Header, Objects}=ecomet_query:get(DBs,Fields,Conditions,[{order,[{<<".ts">>,'ASC'}]}]),
+  Fields = [<<".ts">>,{F, [<<".object">>|Deps]}],
+  {_Header, Objects}=ecomet_query:get(DBs,Fields,Conditions,#{order=>[{<<".ts">>,'ASC'}]}),
 
   % Send the results
   Self=self(),
@@ -1052,11 +1055,15 @@ is_aggregate([],Result)->Result.
 read_up(Lock)->
   fun(OID,Fields)->
     Object=ecomet_object:open(OID,Lock),
-    maps:merge(ecomet_object:read_fields(Object,Fields),#{
-      <<".oid">>=>OID,
-      object=>Object
-    })
+    object_map(Object,ecomet_object:read_fields(Object,Fields))
   end.
+
+object_map(Object,Fields)->
+  Fields#{
+    <<".oid">>=>ecomet_object:get_oid(Object),
+    object=>Object
+  }.
+
 %%--------Local presorting----------------------------------
 % Tree level is sorted list of tuples - { Key, ItemList }.
 % ItemList can be subtree.

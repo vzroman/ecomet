@@ -30,7 +30,8 @@
   to_path/1,
   pipe/2,
   module_exists/1,
-  guid/0
+  guid/0,
+  dummy/1
 ]).
 
 % The result of
@@ -154,3 +155,6 @@ guid() ->
       end,
     Acc ++ S
   end,[],lists:seq(1, 16)).
+
+dummy(Value)->
+  Value.
