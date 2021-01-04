@@ -42,10 +42,12 @@ Constant
 ConstantList
 Variable
 VariableList
-ParamList
-Param
+GetParamList
+GetParam
 SubParamList
 SubParam
+SetParamList
+SetParam
 OrderByList
 OrderBy
 OrderDirection
@@ -123,19 +125,20 @@ Statement -> transaction_start : transaction_start.
 Statement -> transaction_commit : transaction_commit.
 Statement -> transaction_rollback : transaction_rollback.
 
-Get -> get GetFieldList from Databases where Condition ParamList: {get,'$2','$4','$6','$7'}.
-Get -> get GetFieldList from Databases where Condition: {get,'$2','$4','$6',[]}.
+Get -> get GetFieldList from Databases where Condition GetParamList: {get,'$2','$4','$6',maps:from_list('$7')}.
+Get -> get GetFieldList from Databases where Condition: {get,'$2','$4','$6',#{}}.
 
-Subscribe -> subscribe text get GetFieldList from Databases where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$8','$9'}.
-Subscribe -> subscribe text get GetFieldList from Databases where Condition: {subscribe,get_token('$2'),'$4','$6','$8',[]}.
+Subscribe -> subscribe text get GetFieldList from Databases where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$8',maps:from_list('$9')}.
+Subscribe -> subscribe text get GetFieldList from Databases where Condition: {subscribe,get_token('$2'),'$4','$6','$8',#{}}.
 
-Set-> set SetFieldList in Databases where Condition Lock: {set,maps:from_list('$2'),'$4','$6',['$7']}.
-Set-> set SetFieldList in Databases where Condition: {set,maps:from_list('$2'),'$4','$6',[]}.
+Set-> set SetFieldList in Databases where Condition SetParamList : {set,maps:from_list('$2'),'$4','$6',maps:from_list('$7')}.
+Set-> set SetFieldList in Databases where Condition: {set,maps:from_list('$2'),'$4','$6',#{}}.
 
-Insert -> insert SetFieldList : { insert, maps:from_list('$2') }.
+Insert -> insert SetFieldList SetParamList : { insert, maps:from_list('$2') ,maps:from_list('$3') }.
+Insert -> insert SetFieldList : { insert, maps:from_list('$2') ,#{} }.
 
-Delete -> delete from Databases where Condition Lock : { delete, '$3', '$5', ['$6']}.
-Delete -> delete from Databases where Condition : { delete, '$3','$5', []}.
+Delete -> delete from Databases where Condition Lock : { delete, '$3', '$5', maps:from_list(['$6'])}.
+Delete -> delete from Databases where Condition : { delete, '$3','$5', #{} }.
 
 Databases -> '*' : ecomet_db:get_databases().
 Databases -> Database : ['$1'].
@@ -207,14 +210,14 @@ Operator -> ':<>' : ':<>'.
 Operator -> 'LIKE' : 'LIKE'.
 Operator -> ':LIKE' : ':LIKE'.
 
-ParamList-> Param ParamList: ['$1'|'$2'].
-ParamList-> Param: ['$1'].
+GetParamList-> GetParam GetParamList: ['$1'|'$2'].
+GetParamList-> GetParam: ['$1'].
 
-Param-> order by OrderByList : {order,'$3'}.
-Param-> group by GroupByList: {group,'$3'}.
-Param-> page integer ':' integer: {page,{ get_token('$2'), get_token('$4') }}.
-Param-> Lock : '$1'.
-Param-> Format : '$1'.
+GetParam-> order by OrderByList : {order,'$3'}.
+GetParam-> group by GroupByList: {group,'$3'}.
+GetParam-> page integer ':' integer: {page,{ get_token('$2'), get_token('$4') }}.
+GetParam-> Lock : '$1'.
+GetParam-> Format : '$1'.
 
 SubParamList-> SubParam SubParamList: ['$1'|'$2'].
 SubParamList-> SubParam: ['$1'].
@@ -222,6 +225,12 @@ SubParamList-> SubParam: ['$1'].
 SubParam-> stateless : {stateless,true}.
 SubParam-> no_feedback : {no_feedback,true}.
 SubParam-> Format : '$1'.
+
+SetParamList-> SetParam SetParamList: ['$1'|'$2'].
+SetParamList-> SetParam: ['$1'].
+
+SetParam-> Lock : '$1'.
+SetParam-> Format : '$1'.
 
 Lock -> lock read : { lock , read }.
 Lock -> lock write : { lock , write }.

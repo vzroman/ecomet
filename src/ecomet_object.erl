@@ -40,7 +40,7 @@
 %%	Data API
 %%=================================================================
 -export([
-  create/1,
+  create/1,create/2,
   delete/1,
   open/1,open/2,open/3,
   construct/1,

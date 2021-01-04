@@ -118,8 +118,8 @@ run_statement({subscribe,ID,Fields,DBs,Condition,Params},Acc)->
   [subscribe(ID,DBs,Fields,Condition,Params)|Acc];
 run_statement({set,Fields,DBs,Condition,Params},Acc)->
   [set(DBs,Fields,Condition,Params)|Acc];
-run_statement({insert,Fields},Acc)->
-  Object=ecomet_object:create(Fields),
+run_statement({insert,Fields,Params},Acc)->
+  Object=ecomet_object:create(Fields,Params),
   [ecomet_object:get_oid(Object)|Acc];
 run_statement({delete,DBs,Condition,Params},Acc)->
   [delete(DBs,Condition,Params)|Acc];
