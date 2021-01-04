@@ -297,7 +297,6 @@ read_all(Object,Params) when is_list(Params)->
   read_all(Object,maps:from_list(Params));
 read_all(#object{map=Map}=Object,Params) when is_map(Params)->
   Fields=maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map)),
-  ct:pal("Fields ~p",[Fields]),
   read_fields(Object,Fields,Params).
 
 % Edit object
