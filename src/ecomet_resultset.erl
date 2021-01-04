@@ -323,6 +323,35 @@ build_tag_config(Patterns,Field)->
 			{error,undefined_field}->{AccPatterns,AccStorages}
 		end
 	end,{none,[]},Patterns,{none,none})).
+build_leaf({'=',<<".path">>,Value},Config)->
+	case re:run(Value,"(?<F>.*)/(?<N>[^/]+)",[{capture,['F','N'],binary}]) of
+		{match,[Folder,Name]}->
+			case ecomet_folder:path2oid(Folder) of
+				{ok,FolderID}->
+					ANDConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
+					{{'AND',[
+						{'TAG',{<<".folder">>,FolderID,'simple'},Config},
+						{'TAG',{<<".name">>,Name,'simple'},Config}
+					],ANDConfig},false};
+				_->
+					?ERROR({invalid_path,Value})
+			end;
+		_->
+			?ERROR({invalid_path,Value})
+	end;
+build_leaf({'=',<<".oid">>,Value},Config)->
+	Object = ecomet_object:construct(Value),
+	#{
+		<<".name">>:=Name,
+		<<".folder">>:=Folder
+	} = ecomet:read_fields(Object,[<<".name">>,<<".folder">>]),
+
+	ANDConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
+	{{'AND',[
+		{'TAG',{<<".folder">>,Folder,'simple'},Config},
+		{'TAG',{<<".name">>,Name,'simple'},Config}
+	],ANDConfig},false};
+
 build_leaf({'=',Field,Value},Config)->
 	{{'TAG',{Field,Value,simple},Config},false};
 build_leaf({'LIKE',Field,Value},Config)->
