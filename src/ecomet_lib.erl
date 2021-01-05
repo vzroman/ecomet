@@ -46,6 +46,7 @@
     0,0,0,0,0,0,0,0,0,0,107,120,0,39,94,9,29,125,25,120,0,105,0>>
 }).
 
+
 dt_to_string(DT)->
   DT1 =
     if
@@ -62,7 +63,8 @@ parse_dt(DT) when is_integer(DT)-> DT;
 parse_dt(DT) when is_binary(DT)->
   parse_dt(unicode:characters_to_list(DT));
 parse_dt(DT) when is_list(DT)->
-  calendar:rfc3339_to_system_time(DT,[{unit,millisecond}]).
+  {M,S,Mi} = ec_date:nparse(DT),
+  (M * 1000000 + S) * 1000 + Mi div 1000.
 
 ts()->
   erlang:system_time(millisecond).

@@ -42,6 +42,7 @@ Constant
 ConstantList
 Variable
 VariableList
+Date
 GetParamList
 GetParam
 SubParamList
@@ -196,6 +197,7 @@ ConditionList -> Condition: ['$1'].
 ConditionList -> Condition ',' ConditionList: ['$1'|'$3'].
 
 Condition -> Field Operator Constant : { '$1', '$2', '$3' }.
+Condition -> Field '[' Date ':' Date ']' : { '$1', 'DATETIME', ['$3','$5'] }.
 Condition -> 'AND' '(' ConditionList ')' : { 'AND', '$3' }.
 Condition -> 'OR' '(' ConditionList ')' : { 'OR', '$3' }.
 Condition -> 'ANDNOT' '(' Condition ',' Condition ')' : { 'ANDNOT', '$3', '$5' }.
@@ -209,6 +211,9 @@ Operator -> ':=<' : ':=<'.
 Operator -> ':<>' : ':<>'.
 Operator -> 'LIKE' : 'LIKE'.
 Operator -> ':LIKE' : ':LIKE'.
+
+Date -> integer : get_token('$1').
+Date -> text : ecomet_lib:parse_dt(get_token('$1')).
 
 GetParamList-> GetParam GetParamList: ['$1'|'$2'].
 GetParamList-> GetParam: ['$1'].

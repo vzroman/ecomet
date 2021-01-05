@@ -28,6 +28,10 @@
   delete_object/2,
   read_tag/4,
   get_supported_types/0,
+
+  build_3gram/2,
+  build_dt/2,
+
   % only for tests
   build_bitmap/7
 ]).
@@ -41,8 +45,7 @@
   build_back_tags/2,
   merge_backtags/2,
   dump_log/2,
-  get_unchanged/2,
-  split_3grams/1
+  get_unchanged/2
 ]).
 -endif.
 
@@ -106,7 +109,7 @@ build_values('3gram',Values)->
   % ngram index for string values. Fuzzy search
   build_3gram(Values,[]);
 build_values(datetime,Values)->
-  % ngram index for string values. Fuzzy search
+  % Datetime index for integer values. Trapezoid search
   build_dt(Values,[]).
 
 %------ngram index----------------------

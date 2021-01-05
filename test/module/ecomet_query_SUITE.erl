@@ -72,7 +72,8 @@
   grouping_sorting_page/1,
   aggregate/1,
   query_get/1,
-  query_get_format/1
+  query_get_format/1,
+  datetime_search/1
 ]).
 
 %% SET
@@ -143,7 +144,8 @@ groups()->
         grouping_sorting_page,
         aggregate,
         query_get,
-        query_get_format
+        query_get_format,
+        datetime_search
       ]
     },
     {set,
@@ -188,7 +190,8 @@ init_per_suite(Config)->
     <<"integer">> => ecomet_field:build_description(#{ type=>integer,index=>[simple],storage=>ram }),
     <<"float">> => ecomet_field:build_description(#{ type=>float,index=>[simple],storage=>ramdisc }),
     <<"atom">> => ecomet_field:build_description(#{ type=>atom,index=>[simple],storage=>disc }),
-    <<"bool">> => ecomet_field:build_description(#{ type=>bool,index=>[simple],storage=>ram })
+    <<"bool">> => ecomet_field:build_description(#{ type=>bool,index=>[simple],storage=>ram }),
+    <<"datetime">> => ecomet_field:build_description(#{ type=>integer,index=>[datetime],storage=>disc })
   },
   ecomet_schema:register_type(PatternID1, Pattern1Map),
   %--------Pattern2-------------------------------------------
@@ -214,6 +217,7 @@ init_per_suite(Config)->
   %%-----------Build test database-------------------
   FolderOID1={2,1001},
   FolderOID2={2,1002},
+  Now = ecomet_lib:ts(),
   lists:foreach(
     fun(I)->
       if ((I rem 500)==0)->ct:pal("created ~p",[I*2]); true->ok end,
@@ -228,6 +232,7 @@ init_per_suite(Config)->
       Float= I/7,
       Atom=list_to_atom(binary_to_list(String3)),
       Bool=((I rem 2)==1),
+      Datetime = Now - Integer * 86400000,
       % Pattern1 object
       ecomet:create_object(#{
         <<".name">> => <<"test", IB/binary>>,
@@ -240,7 +245,8 @@ init_per_suite(Config)->
         <<"integer">> => Integer,
         <<"float">> => Float,
         <<"atom">> => Atom,
-        <<"bool">> => Bool
+        <<"bool">> => Bool,
+        <<"datetime">>=>Datetime
       }),
       ecomet:create_object(#{
         <<".name">> => <<"test", IB/binary>>,
@@ -2247,6 +2253,28 @@ query_get_format(_Config)->
       [<<"value5">>,100,99,1,_]
     ]]
   ]=Rows4,
+
+  ok.
+
+datetime_search(_Config)->
+  ecomet_user:on_init_state(),
+
+  Now = ecomet_lib:ts(),
+
+  From = Now - 30 * 86400000,
+  To = Now - 5 * 86400000,
+
+  %--------No params------------------------
+  ct:pal("datetime search from ~p, to ~p",[ecomet_lib:dt_to_string(From),ecomet_lib:dt_to_string(To)]),
+  {Header1,Rows1}=ecomet_query:get([root],[<<".name">>,<<"datetime">>],{<<"datetime">>,'DATETIME',[From,To]}),
+  ct:pal("datetime result ~p",[{Header1,Rows1}]),
+
+  [<<".name">>,<<"datetime">>]=Header1,
+
+  [if
+     T>=From,T=<To -> ok ;
+     true -> ?ERROR(io_lib:format("~s has datetime value ~p outside range [~p:~p]",[N,T,From,To]))
+   end|| [N,T]<-Rows1],
 
   ok.
 
