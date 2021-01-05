@@ -157,14 +157,14 @@ get_parents(Pattern)->
 get_children(Pattern)->
   OID=?OID(Pattern),
   ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
-    {<<".pattern">>,'=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
+    {<<".pattern">>,':=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
     {<<"parent_pattern">>,'=',OID}
   ]}).
 
 get_children_recursive(Pattern)->
   OID=?OID(Pattern),
   ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
-    {<<".pattern">>,'=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
+    {<<".pattern">>,':=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
     {<<"parents">>,'=',OID}
   ]}).
 

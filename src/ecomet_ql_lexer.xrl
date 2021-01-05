@@ -28,7 +28,9 @@ GROUP       = (G|g)(R|r)(O|o)(U|u)(P|p)
 GET         = (G|g)(E|e)(T|t)
 FROM        = (F|f)(R|r)(O|o)(M|m)
 SUBSCRIBE   = (S|s)(U|u)(B|b)(S|s)(C|c)(R|r)(I|i)(B|b)(E|e)
+UNSUBSCRIBE = (U|u)(N|n)(S|s)(U|u)(B|b)(S|s)(C|c)(R|r)(I|i)(B|b)(E|e)
 INSERT      = (I|i)(N|n)(S|s)(E|e)(R|r)(T|t)
+UPDATE      = (U|u)(P|p)(D|d)(A|a)(T|t)(E|e)
 LOCK        = (L|l)(O|o)(C|c)(K|k)
 OR          = (O|o)(R|r)
 ORDER       = (O|o)(R|r)(D|d)(E|e)(R|r)
@@ -43,6 +45,7 @@ WHERE       = (W|w)(H|h)(E|e)(R|r)(E|e)
 WRITE       = (W|w)(R|r)(I|i)(T|t)(E|e)
 STATELESS   = (S|s)(T|t)(A|a)(T|t)(E|e)(L|l)(E|e)(S|s)(S|s)
 NO_FEEDBACK = (N|n)(O|o)_(F|f)(E|e)(E|e)(D|d)(B|b)(A|a)(C|c)(K|k)
+FORMAT      = (F|f)(O|o)(R|r)(M|m)(A|a)(T|t)
 
 TEXT        = '(\\'|[^'])*'
 HEX         = 0x([0-9a-zA-Z]*)
@@ -81,9 +84,11 @@ Rules.
 {DELETE}      : {token, {delete, TokenLine}}.
 {DESC}        : {token, {'DESC', TokenLine}}.
 {INSERT}      : {token, {insert, TokenLine}}.
+{UPDATE}      : {token, {update, TokenLine}}.
 {GET}         : {token, {get, TokenLine}}.
 {FROM}        : {token, {from, TokenLine}}.
 {SUBSCRIBE}   : {token, {subscribe, TokenLine}}.
+{UNSUBSCRIBE} : {token, {unsubscribe, TokenLine}}.
 {GROUP}       : {token, {group, TokenLine}}.
 {OR}          : {token, {'OR', TokenLine}}.
 {ORDER}       : {token, {order, TokenLine}}.
@@ -98,6 +103,7 @@ Rules.
 {WRITE}       : {token, {write, TokenLine}}.
 {STATELESS}   : {token, {stateless, TokenLine}}.
 {NO_FEEDBACK} : {token, {no_feedback, TokenLine}}.
+{FORMAT}      : {token, {format, TokenLine}}.
 {S}           : {token, {'$', TokenLine}}.
 {ALL}         : {token, {'*', TokenLine}}.
 {EQ}          : {token, {'=', TokenLine}}.

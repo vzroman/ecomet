@@ -53,7 +53,7 @@
 -define(OID(ID),ecomet_lib:to_oid(ID)).
 -define(PATH(ID),ecomet_lib:to_path(ID)).
 
--define(ENV(Key,Default),application:get_env(dlss,Key,Default)).
+-define(ENV(Key,Default),application:get_env(ecomet,Key,Default)).
 -define(ENV(OS,Config,Default),
   (fun()->
     case os:getenv(OS) of
@@ -64,9 +64,10 @@
 ).
 
 -define(SUBSCRIPTION(ID,Action,OID,Fields),{ecomet, ID, Action, OID, Fields }).
--define(SUBSCRIPTION(ID,Action,OID),{ecomet, ID, Action, OID }).
 
+-define(B2A(Value),if is_atom(Value)->Value; true->list_to_atom(unicode:characters_to_list(Value)) end).
 -define(A2B(Atom),unicode:characters_to_binary(atom_to_list(Atom))).
+-define(T2B(Term),if is_binary(Term)->Term; true->unicode:characters_to_binary(io_lib:format("~p",[Term])) end).
 
 -define(LOGERROR(Text),lager:error(Text)).
 -define(LOGERROR(Text,Params),lager:error(Text,Params)).

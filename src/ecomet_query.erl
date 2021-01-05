@@ -31,10 +31,12 @@
   get/3,get/4,
   subscribe/4,subscribe/5,
   unsubscribe/1,
-  on_commit/1,
-  notify/2,
   set/3,set/4,
+  insert/2,
   delete/2,delete/3,
+  on_commit/1,
+  object_map/2,
+  notify/2,
   execute/2,execute/3,
   compile/3,compile/4,
   system/3
@@ -56,8 +58,8 @@
 
 -export([
   get_alias/2,
-  read_fun/1,
-  read_map/1,
+  read_fun/2,
+  read_map/2,
   is_aggregate/1,
   read_up/1,
   insert_to_group/4,
@@ -116,11 +118,12 @@ run_statement({get,Fields,DBs,Condition,Params},Acc)->
   [get(DBs,Fields,Condition,Params)|Acc];
 run_statement({subscribe,ID,Fields,DBs,Condition,Params},Acc)->
   [subscribe(ID,DBs,Fields,Condition,Params)|Acc];
+run_statement({unsubscribe,ID},Acc)->
+  [unsubscribe(ID)|Acc];
 run_statement({set,Fields,DBs,Condition,Params},Acc)->
   [set(DBs,Fields,Condition,Params)|Acc];
-run_statement({insert,Fields},Acc)->
-  Object=ecomet_object:create(Fields),
-  [ecomet_object:get_oid(Object)|Acc];
+run_statement({insert,Fields,Params},Acc)->
+  [insert(Fields,Params)|Acc];
 run_statement({delete,DBs,Condition,Params},Acc)->
   [delete(DBs,Condition,Params)|Acc];
 run_statement(transaction_start,Acc)->
@@ -152,15 +155,17 @@ run_statement({transaction,Statements},Acc)->
 %   {<<"alias">>,{fun,[Fields]}}    - alias for fun
 % ]
 get(DBs,Fields,Conditions)->
-  get(DBs,Fields,Conditions,[]).
+  get(DBs,Fields,Conditions,#{}).
+get(DBs,Fields,Conditions,Params) when is_list(Params)->
+  get(DBs,Fields,Conditions,maps:from_list(Params));
 get(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(get,Fields,Conditions,Params),
-  Union=proplists:get_value(union,Params,{'OR',ecomet_resultset:new()}),
+  Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
   execute(CompiledQuery,DBs,Union).
 
 system(DBs,Fields,Conditions)->
   Conditions1=ecomet_resultset:prepare(Conditions),
-  {Map,Reduce}=compile_map_reduce(get,Fields,[]),
+  {Map,Reduce}=compile_map_reduce(get,Fields,#{}),
   Compiled = #compiled_query{
     conditions = Conditions1,
     map = Map,
@@ -221,15 +226,17 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
 
   #{
     stateless := Stateless,     % No initial query, only updates
-    no_feedback := NoFeedback    % Do not send updates back to the author process
+    no_feedback := NoFeedback,    % Do not send updates back to the author process
+    format := Formatter         % Format fields according to their types
   } = maps:merge(#{
     stateless => false,
-    no_feedback => false
+    no_feedback => false,
+    format => undefined
   },InParams),
 
   %----------Compile fields---------------------------
   % Per object reading plan
-  ReadMap=read_map(Fields),
+  ReadMap=read_map(Fields,Formatter),
 
   % Fields dependencies
   FieldsDeps=ordsets:union([field_args(F)|| {_,F}<-maps:to_list(ReadMap) ]),
@@ -332,7 +339,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
                   TagsResult =:= add;RightsResult=:=add ->
                     Self!?SUBSCRIPTION(ID,create,OID,Read(Deps,Object));
                   TagsResult =:= del;RightsResult=:=del ->
-                    Self!?SUBSCRIPTION(ID,delete,OID);
+                    Self!?SUBSCRIPTION(ID,delete,OID,#{});
                   true ->
                     Self!?SUBSCRIPTION(ID,update,OID,Read(ordsets:from_list(maps:keys(Changes)),Object))
                 end
@@ -358,12 +365,14 @@ match_log( New, Old, Del, NewObject, OldObject, Match )->
 
 init_subscription_state(ID,DBs,Deps,Conditions,Read)->
   F=
-    fun([OID|Values])->
-      Object = maps:from_list(lists:zip(Deps,Values)),
-      ?SUBSCRIPTION(ID,create,OID,Read(Deps,Object))
+    fun([Object|Values])->
+      Values1 = maps:from_list(lists:zip(Deps,Values)),
+      ObjectMap=object_map(Object,Values1),
+      OID = ecomet_object:get_oid(Object),
+      ?SUBSCRIPTION(ID,create,OID,Read(Deps,ObjectMap))
     end,
-  Fields = [<<".ts">>,{F, [<<".oid">>|Deps]}],
-  {_Header, Objects}=ecomet_query:get(DBs,Fields,Conditions,[{order,[{<<".ts">>,'ASC'}]}]),
+  Fields = [<<".ts">>,{F, [<<".object">>|Deps]}],
+  {_Header, Objects}=ecomet_query:get(DBs,Fields,Conditions,#{order=>[{<<".ts">>,'ASC'}]}),
 
   % Send the results
   Self=self(),
@@ -458,24 +467,65 @@ notify( Query, Log )->
 %   <<"field2">> => {fun,[Fields]}   - value as fun
 % }
 set(DBs,Fields,Conditions)->
-  set(DBs,Fields,Conditions,[]).
+  set(DBs,Fields,Conditions,#{}).
+set(DBs,Fields,Conditions,Params) when is_list(Params)->
+  set(DBs,Fields,Conditions,maps:from_list(Params));
 set(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(set,Fields,Conditions,Params),
-  Union=proplists:get_value(union,Params,{'OR',ecomet_resultset:new()}),
+  Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
   execute(CompiledQuery,DBs,Union).
+
+%%=====================================================================
+%%	INSERT
+%%=====================================================================
+% Fields the same format as for 'set',
+% Params = #{
+%   update => true|false,
+%   lock  => none|read|write,
+%   format => fun/2
+% }
+insert(Fields,Params) when is_list(Params)->
+  insert(Fields,maps:from_list(Params));
+insert(#{<<".folder">>:=Folder,<<".name">>:=Name }=Fields, #{update:=true}=Params)->
+  % If update is allowed then try to find and update the object
+  {Folder1, Name1 }=
+    case Params of
+      #{format:=Formatter}->
+        { Formatter(link,Folder), Formatter(string,Name) };
+      _->
+        { Folder, Name }
+    end,
+  case ecomet_folder:find_object_system(Folder1,Name1) of
+    {ok,OID}->
+      % This is an update
+      Object = ecomet:open(OID,maps:get(lock,Params,none)),
+      ok = ecomet:edit_object(Object,Fields,Params),
+      OID;
+    _->
+      % Create a new object
+      insert(Fields,maps:remove(update,Params))
+  end;
+insert(Fields,Params)->
+  Object = ecomet:create_object(Fields,Params),
+  ecomet:to_oid(Object).
+
 %%=====================================================================
 %%	DELETE
 %%=====================================================================
 delete(DBs,Conditions)->
-  delete(DBs,Conditions,[]).
+  delete(DBs,Conditions,#{}).
+delete(DBs,Conditions,Params) when is_list(Params)->
+  delete(DBs,Conditions,Params);
 delete(DBs,Conditions,Params)->
   CompiledQuery=compile(delete,none,Conditions,Params),
-  Union=proplists:get_value(union,Params,{'OR',ecomet_resultset:new()}),
+  Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
   execute(CompiledQuery,DBs,Union).
 %%=====================================================================
 %%	COMPILE
 %%=====================================================================
-compile(Type,Fields,Conditions)->compile(Type,Fields,Conditions,[]).
+compile(Type,Fields,Conditions)->compile(Type,Fields,Conditions,#{}).
+compile(Type,Fields,Conditions,Params) when is_list(Params)->
+  compile(Type,Fields,Conditions,maps:from_list(Params));
 compile(Type,Fields,Conditions,Params)->
   Conditions1=set_rights(Type,Conditions),
   Conditions2=ecomet_resultset:prepare(Conditions1),
@@ -495,11 +545,11 @@ execute(#compiled_query{conditions = Conditions,map = Map,reduce = Reduce},DBs,U
   ecomet_resultset:execute(DBs,Conditions,Map,Reduce,Union).
 
 %%-------------GET------------------------------------------------
-%% Search params:
-%%	- {page,{Number,ItemsPerPage}} - Paginating. Return only items for defined page
-%%	- {order,[{Field1,Order},{Field2,Order}]} - Sorting results
-%%	- {group,[Field1,Field2]} - Grouping results
-%%	- {lock,none|read|write} - lock level on objects
+%% Search params is a map:
+%%	- page => {Number,ItemsPerPage} - Paginating. Return only items for defined page
+%%	- order => [{Field1,Order},{Field2,Order}] - Sorting results
+%%	- group => [Field1,Field2] - Grouping results
+%%	- lock => none|read|write - lock level on objects
 %%-----------HIGHLY OPTIMIZED (no objects open)-------------------
 %% CASE 1. Raw result requested
 compile_map_reduce(get,rs,_Params)->
@@ -514,10 +564,10 @@ compile_map_reduce(get,[count],_Params)->
   {Map,Reduce};
 %% CASE 3. Only objects oid needed
 compile_map_reduce(get,[<<".oid">>],Params)->
-  Page=proplists:get_value(page,Params,none),
+  Page=maps:get(page,Params,none),
   Map=fun(RS)->RS	end,
   Order=
-    case proplists:get_value(order,Params,[]) of
+    case maps:get(order,Params,[]) of
       [{<<".oid">>,'DESC'}|_]->foldl;
       _->foldr
     end,
@@ -539,11 +589,11 @@ compile_map_reduce(get,[<<".oid">>],Params)->
   {Map,Reduce};
 %%-----------COMMON VARIANTS. Objects are opened for reading------------
 compile_map_reduce(get,Fields,Params)->
-  ReadMap=read_map(Fields),
+  ReadMap=read_map(Fields,maps:get(format,Params,undefined)),
   AliasMap=maps:fold(fun(ID,#field{alias=Alias},Acc)->Acc#{Alias=>ID} end,#{},ReadMap),
 
   % All columns to order by
-  OrderAll=[{maps:get(Name,AliasMap),OrderType}||{Name,OrderType}<-proplists:get_value(order,Params,[])],
+  OrderAll=[{maps:get(Name,AliasMap),OrderType}||{Name,OrderType}<-maps:get(order,Params,[])],
 
   %---Columns to group by---
   % Put sort order if defined.
@@ -561,10 +611,10 @@ compile_map_reduce(get,Fields,Params)->
       end,
       SortOrder=proplists:get_value(ID,OrderAll,none),
       {ID,SortOrder}
-    end,proplists:get_value(group,Params,[])),
+    end,maps:get(group,Params,[])),
   % Sorting within groups
   Order=
-    case {Group,proplists:get_value(order,Params,[])} of
+    case {Group,maps:get(order,Params,[])} of
       % No sorting, no grouping. Results from old to new
       {[],[]}->foldr;
       % OPTIMIZED. Sorting by oid, no grouping. No real sorting performed, task is solved while traversing search results
@@ -576,9 +626,9 @@ compile_map_reduce(get,Fields,Params)->
   % Define type of query (aggregated/search), check no mix of plain and aggregated fields
   Aggregate=is_aggregate(maps:without([ID||{ID,_}<-Group],ReadMap)),
   % Paginating
-  Page=proplists:get_value(page,Params,none),
-  % Fun to read object fields from storage, default lock is dirty (fastest)
-  ReadUp=read_up(proplists:get_value(lock,Params,dirty)),
+  Page=maps:get(page,Params,none),
+  % Fun to read object fields from storage, default lock is none (dirty operations)
+  ReadUp=read_up(maps:get(lock,Params,none)),
 
   % Build Map/Reduce plan
   {Map,Reduce}=map_reduce_plan(#{
@@ -602,14 +652,28 @@ compile_map_reduce(get,Fields,Params)->
   {Map,ReduceFun};
 
 compile_map_reduce(set,Fields,Params)->
+  Formatter = maps:get(format,Params,undefined),
   Updates=
     [case Value of
        {Fun,ArgList} when is_function(Fun,1) and is_list(ArgList)->
-         {Field,read_fun(Value)};
-       _->{Field,Value}
+         {Field,read_fun(Value,undefined)};
+       _
+         when is_function(Formatter,2)->
+         % Formatted input
+         Fun =
+           fun(Object)->
+            {ok,Type} = ecomet_object:field_type(maps:get(object,Object),Field),
+            Formatter(Type,Value)
+           end,
+         {Field,#get{
+           value = Fun,
+           args = []
+         }};
+       _->
+         {Field,Value}
      end || {Field,Value} <- maps:to_list(Fields) ],
   % Fun to read object fields from storage, default lock is none (check rights is performed)
-  ReadUp=read_up(proplists:get_value(lock,Params,none)),
+  ReadUp=read_up(maps:get(lock,Params,none)),
   ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
   Map=
     fun(RS)->
@@ -630,7 +694,7 @@ compile_map_reduce(set,Fields,Params)->
 
 compile_map_reduce(delete,none,Params)->
   % Fun to read object fields from storage, default lock is none (check rights is performed)
-  ReadUp=read_up(proplists:get_value(lock,Params,none)),
+  ReadUp=read_up(maps:get(lock,Params,none)),
   Map=
     fun(RS)->
       ecomet_resultset:foldr(fun(OID,Acc)->
@@ -936,16 +1000,16 @@ map_reduce_plan(Params)->
   {MapFun,ReduceFun}.
 
 %%====================UTILITIES================================
-read_map(Fields)->
-  read_map(lists:zip(lists:seq(1,length(Fields)),Fields),#{}).
-read_map([{I,Field}|Rest],Acc)->
+read_map(Fields,Formatter)->
+  read_map(lists:zip(lists:seq(1,length(Fields)),Fields),Formatter,#{}).
+read_map([{I,Field}|Rest],Formatter,Acc)->
   {Alias,Value}=get_alias(Field,I),
-  Get=read_fun(Value),
-  read_map(Rest,Acc#{I=>#field{
+  Get=read_fun(Value,Formatter),
+  read_map(Rest,Formatter,Acc#{I=>#field{
     alias = Alias,
     value = Get
   }});
-read_map([],Acc)->Acc.
+read_map([],_Formatter,Acc)->Acc.
 
 get_alias(Field,I)->
   case Field of
@@ -954,7 +1018,7 @@ get_alias(Field,I)->
     _->{integer_to_binary(I),Field}
   end.
 
-read_fun(count)->
+read_fun(count,_Formatter)->
   #get{
     value = fun(_Object)->1 end,
     args = [],
@@ -965,8 +1029,8 @@ read_fun(count)->
       end
     end
   };
-read_fun({Aggregate,Value}) when (Aggregate=:=sum) or (Aggregate=:=max) or (Aggregate=:=min)->
-  Get=read_fun(Value),
+read_fun({Aggregate,Value},_Formatter) when (Aggregate=:=sum) or (Aggregate=:=max) or (Aggregate=:=min)->
+  Get=read_fun(Value,undefined),
   Fun=
     case Aggregate of
       sum->fun(V,Acc)->Acc+V end;
@@ -985,18 +1049,30 @@ read_fun({Aggregate,Value}) when (Aggregate=:=sum) or (Aggregate=:=max) or (Aggr
       end
     end,
   Get#get{ aggregate= AggregateFun};
-read_fun({Fun,Arguments}) when is_function(Fun,1)->
-  ArgumentList=[read_fun(Arg)||Arg<-Arguments],
+read_fun({Fun,Arguments},_Formatter) when is_function(Fun,1)->
+  ArgumentList=[read_fun(Arg,undefined)||Arg<-Arguments],
   #get{
     value = fun(Object)->Fun([ArgFun(Object)||#get{value=ArgFun}<-ArgumentList]) end,
     args = lists:foldl(fun(#get{args=Args},Acc)->ordsets:union(Args,Acc) end,[],ArgumentList)
   };
-read_fun(FieldName) when is_binary(FieldName)->
+read_fun(FieldName,Formatter) when is_binary(FieldName)->
+  Fun =
+    if
+      is_function(Formatter,2) ->
+        fun(Object)->
+          Value = maps:get(FieldName,Object),
+          {ok,Type}=ecomet_object:field_type(maps:get(object,Object),FieldName),
+          Formatter(Type,Value)
+        end;
+      true ->
+        fun(Object)->maps:get(FieldName,Object) end
+    end,
   #get{
-    value = fun(Object)->maps:get(FieldName,Object) end,
+    value = Fun,
     args = [FieldName]
   };
-read_fun(Field)->erlang:error({invalid_query_field,Field}).
+read_fun(Field,_Formatter)->erlang:error({invalid_query_field,Field}).
+
 
 field_read_fun(#field{value = Get})->Get#get.value.
 field_args(#field{value = Get})->Get#get.args.
@@ -1013,22 +1089,18 @@ is_aggregate([Field|Rest],Result)->
 is_aggregate([],Result)->Result.
 
 
-read_up(dirty)->
-  fun(OID,Fields)->
-    Object=ecomet_object:construct(OID),
-    maps:merge(ecomet_object:read_fields(Object,Fields),#{
-      <<".oid">>=>OID,
-      object=>Object
-    })
-  end;
 read_up(Lock)->
   fun(OID,Fields)->
     Object=ecomet_object:open(OID,Lock),
-    maps:merge(ecomet_object:read_fields(Object,Fields),#{
-      <<".oid">>=>OID,
-      object=>Object
-    })
+    object_map(Object,ecomet_object:read_fields(Object,Fields))
   end.
+
+object_map(Object,Fields)->
+  Fields#{
+    <<".oid">>=>ecomet_object:get_oid(Object),
+    object=>Object
+  }.
+
 %%--------Local presorting----------------------------------
 % Tree level is sorted list of tuples - { Key, ItemList }.
 % ItemList can be subtree.
@@ -1142,6 +1214,25 @@ compile_function(Arguments)->
       { Fun, Deps }
   end.
 
+%---------------Aggregate functions---------------------
+compile_function(ecomet_ql_util,count,[])->
+  count;
+compile_function(ecomet_ql_util,count,_)->
+  ?ERROR(wrong_count_arguments);
+compile_function(ecomet_ql_util,min,[Value])->
+  {min,Value};
+compile_function(ecomet_ql_util,min,_)->
+  ?ERROR(wrong_min_arguments);
+compile_function(ecomet_ql_util,max,[Value])->
+  {max,Value};
+compile_function(ecomet_ql_util,max,_)->
+  ?ERROR(wrong_max_arguments);
+compile_function(ecomet_ql_util,sum,[Value])->
+  {sum,Value};
+compile_function(ecomet_ql_util,sum,_)->
+  ?ERROR(wrong_sum_arguments);
+
+%---------------Utility functions---------------------
 compile_function(Module,Function,Arguments)->
   case collect_deps(Arguments) of
     []->

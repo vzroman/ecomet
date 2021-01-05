@@ -28,9 +28,14 @@
   path/1,
   concat/2,concat/1,
   string/1,
-  term/1
+  term/1,
+  to_base64/1,
+  from_base64/1
 ]).
 
+%%====================================================================
+%%		Utilities
+%%====================================================================
 oid(List) when is_list(List)->
   [oid(I)||I<-List];
 oid(ID)->
@@ -46,7 +51,9 @@ concat(Value) when is_binary(Value)->
 concat([Value|Rest])->
   <<(concat(Value))/binary,(concat(Rest))/binary>>;
 concat([])->
-  <<>>.
+  <<>>;
+concat(_)->
+  ?ERROR(bad_arg).
 
 concat(Value1,Value2) when is_binary(Value1),is_binary(Value2)->
   <<Value1/binary,Value2/binary>>;
@@ -55,7 +62,9 @@ concat(Head,Items) when is_binary(Head),is_list(Items)->
 concat(Items,Tail) when is_list(Items),is_binary(Tail)->
   [concat(concat(I),Tail)||I<-Items];
 concat(Items1,Items2) when is_list(Items1),is_list(Items2)->
-  [concat(I1,I2)||I1<-Items1,I2<-Items2].
+  [concat(I1,I2)||I1<-Items1,I2<-Items2];
+concat(_,_)->
+  ?ERROR(bad_arg).
 
 string(Term)->
   ecomet_types:term_to_string(Term).
@@ -68,4 +77,15 @@ term(String) when is_binary(String)->
 term(Term)->
   Term.
 
+to_base64(Value) when is_binary(Value)->
+  base64:encode(Value);
+to_base64(Items) when is_list(Items)->
+  [to_base64(I)||I<-Items];
+to_base64(_)->
+  ?ERROR(bad_arg).
+
+from_base64(Value) when is_binary(Value)->
+  base64:decode(Value);
+from_base64(Items) when is_list(Items)->
+  [from_base64(I)||I<-Items].
 

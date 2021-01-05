@@ -18,6 +18,7 @@
 
 -module(ecomet_query_SUITE).
 
+-include_lib("ecomet.hrl").
 -include_lib("ecomet_schema.hrl").
 -include_lib("ecomet_test.hrl").
 
@@ -45,7 +46,9 @@
 -export([
   get_alias/1,
   read_fun/1,
+  read_fun_format/1,
   read_map/1,
+  read_map_format/1,
   is_aggregate/1,
   read_up/1,
   reorder_fields/1
@@ -68,17 +71,21 @@
   grouping_sorting/1,
   grouping_sorting_page/1,
   aggregate/1,
-  query_get/1
+  query_get/1,
+  query_get_format/1,
+  datetime_search/1
 ]).
 
 %% SET
 -export([
-  set/1
+  set/1,
+  set_format/1
 ]).
 
 %% parse
 -export([
   parse_get/1,
+  parse_get_aggr/1,
   parse_set/1,
   parse_insert/1,
   parse_delete/1
@@ -90,7 +97,7 @@ all()->
     {group,get_util},
     {group,get_util_grouping},
     {group,search},
-    set,
+    {group,set},
     {group, parse}
   ].
 
@@ -109,7 +116,9 @@ groups()->
       [
         get_alias,
         read_fun,
+        read_fun_format,
         read_map,
+        read_map_format,
         is_aggregate,
         read_up,
         reorder_fields
@@ -134,13 +143,23 @@ groups()->
         grouping_sorting,
         grouping_sorting_page,
         aggregate,
-        query_get
+        query_get,
+        query_get_format,
+        datetime_search
+      ]
+    },
+    {set,
+      [sequence],
+      [
+        set,
+        set_format
       ]
     },
     {parse,
       [parallel],
       [
         parse_get,
+        parse_get_aggr,
         parse_set,
         parse_insert,
         parse_delete
@@ -171,7 +190,8 @@ init_per_suite(Config)->
     <<"integer">> => ecomet_field:build_description(#{ type=>integer,index=>[simple],storage=>ram }),
     <<"float">> => ecomet_field:build_description(#{ type=>float,index=>[simple],storage=>ramdisc }),
     <<"atom">> => ecomet_field:build_description(#{ type=>atom,index=>[simple],storage=>disc }),
-    <<"bool">> => ecomet_field:build_description(#{ type=>bool,index=>[simple],storage=>ram })
+    <<"bool">> => ecomet_field:build_description(#{ type=>bool,index=>[simple],storage=>ram }),
+    <<"datetime">> => ecomet_field:build_description(#{ type=>integer,index=>[datetime],storage=>disc })
   },
   ecomet_schema:register_type(PatternID1, Pattern1Map),
   %--------Pattern2-------------------------------------------
@@ -197,6 +217,7 @@ init_per_suite(Config)->
   %%-----------Build test database-------------------
   FolderOID1={2,1001},
   FolderOID2={2,1002},
+  Now = ecomet_lib:ts(),
   lists:foreach(
     fun(I)->
       if ((I rem 500)==0)->ct:pal("created ~p",[I*2]); true->ok end,
@@ -211,6 +232,7 @@ init_per_suite(Config)->
       Float= I/7,
       Atom=list_to_atom(binary_to_list(String3)),
       Bool=((I rem 2)==1),
+      Datetime = Now - Integer * 86400000,
       % Pattern1 object
       ecomet:create_object(#{
         <<".name">> => <<"test", IB/binary>>,
@@ -223,7 +245,8 @@ init_per_suite(Config)->
         <<"integer">> => Integer,
         <<"float">> => Float,
         <<"atom">> => Atom,
-        <<"bool">> => Bool
+        <<"bool">> => Bool,
+        <<"datetime">>=>Datetime
       }),
       ecomet:create_object(#{
         <<".name">> => <<"test", IB/binary>>,
@@ -254,8 +277,8 @@ end_per_suite(Config)->
   PatternID2=?config(pattern_id2,Config),
 
   ecomet_query:delete([root],{'OR',[
-    {<<".pattern">>,'=',PatternID1},
-    {<<".pattern">>,'=',PatternID2}
+    {<<".pattern">>,':=',PatternID1},
+    {<<".pattern">>,':=',PatternID2}
   ]}),
 
   ?BACKEND_STOP(30000),
@@ -409,12 +432,12 @@ get_count(Config)->
   20=ecomet_query:get([root],[count],{<<"string1">>,'=',<<"value1">>}),
 
   10=ecomet_query:get([root],[count],{'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'=',<<"value1">>}
   ]}),
 
   6=ecomet_query:get([root],[count],{'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'=',<<"value1">>},
     {'OR',[
       {<<"string2">>,'=',<<"value1">>},
@@ -437,30 +460,30 @@ get_alias(_Config)->
 read_fun(_Config)->
   ecomet_user:on_init_state(),
   %-------count--------
-  #get{value=F1,args=[],aggregate=Agr1}=ecomet_query:read_fun(count),
+  #get{value=F1,args=[],aggregate=Agr1}=ecomet_query:read_fun(count,undefined),
   1=F1(#{}),
   2=Agr1(2,none),
   5=Agr1(2,3),
   %------field---------
-  #get{value=F2,args=[<<"name1">>],aggregate=undefined}=ecomet_query:read_fun(<<"name1">>),
+  #get{value=F2,args=[<<"name1">>],aggregate=undefined}=ecomet_query:read_fun(<<"name1">>,undefined),
   <<"value1">> =F2(#{<<"name1">>=><<"value1">>,<<"name2">>=>"value2"}),
   %-----error----------
-  ?assertError({invalid_query_field,_},ecomet_query:read_fun({some_invalid_stuff})),
+  ?assertError({invalid_query_field,_},ecomet_query:read_fun({some_invalid_stuff},undefined)),
   %-----{Fun,Arguments}------------
   ConcatFun=
     fun([V1,V2])-><<V1/binary,V2/binary>> end,
   % case 1. fields
   #get{value=F3,args=[<<"field1">>,<<"field2">>],aggregate=undefined}=
-    ecomet_query:read_fun({ConcatFun,[<<"field1">>,<<"field2">>]}),
+    ecomet_query:read_fun({ConcatFun,[<<"field1">>,<<"field2">>]},undefined),
   <<"value1value2">>=F3(#{<<"field1">>=><<"value1">>,<<"field2">>=><<"value2">>}),
   % case 2. embedded fun
   #get{value=F4,args=[<<"field1">>,<<"field2">>,<<"field3">>],aggregate=undefined}=
-    ecomet_query:read_fun({ConcatFun,[{ConcatFun,[<<"field1">>,<<"field2">>]},<<"field3">>]}),
+    ecomet_query:read_fun({ConcatFun,[{ConcatFun,[<<"field1">>,<<"field2">>]},<<"field3">>]},undefined),
   <<"value1value2value3">>=F4(#{<<"field1">>=><<"value1">>,<<"field2">>=><<"value2">>,<<"field3">>=><<"value3">>}),
   %-------{Aggr,Field}--------------
   % SUM
   #get{value=F5,args=[<<"field1">>],aggregate=Aggr5}=
-    ecomet_query:read_fun({sum,<<"field1">>}),
+    ecomet_query:read_fun({sum,<<"field1">>},undefined),
   5=F5(#{<<"field1">>=>5,<<"field2">>=>7}),
   none=Aggr5(none,none),
   10=Aggr5(none,10),
@@ -468,22 +491,81 @@ read_fun(_Config)->
   7=Aggr5(5,2),
   % MIN
   #get{value=F6,args=[<<"field1">>],aggregate=Aggr6}=
-    ecomet_query:read_fun({min,<<"field1">>}),
+    ecomet_query:read_fun({min,<<"field1">>},undefined),
   5=F6(#{<<"field1">>=>5,<<"field2">>=>7}),
   5=Aggr6(5,7),
   3=Aggr6(5,3),
   % MAX
   #get{value=F7,args=[<<"field1">>],aggregate=Aggr7}=
-    ecomet_query:read_fun({max,<<"field1">>}),
+    ecomet_query:read_fun({max,<<"field1">>},undefined),
   5=F7(#{<<"field1">>=>5,<<"field2">>=>7}),
   7=Aggr7(5,7),
   5=Aggr7(5,3),
   %-------{Aggr,Field}--------------
   MulFun=fun([V1,V2])->V1*V2 end,
   #get{value=F8,args=[<<"field1">>,<<"field2">>],aggregate=Aggr8}=
-    ecomet_query:read_fun({sum,{MulFun,[<<"field1">>,<<"field2">>]}}),
+    ecomet_query:read_fun({sum,{MulFun,[<<"field1">>,<<"field2">>]}},undefined),
   35=F8(#{<<"field1">>=>5,<<"field2">>=>7}),
   40=Aggr8(35,5).
+
+
+read_fun_format(_Config)->
+  ecomet_user:on_init_state(),
+  meck:new(ecomet_object, [non_strict,no_link,passthrough]),
+  meck:expect(ecomet_object, field_type, fun(Fields,Name)->
+    {ok,maps:get(Name,Fields)}
+  end),
+
+  Types=#{
+    <<"string_field">>=>string,
+    <<"integer_field">>=>integer,
+    <<"term_field">>=>term,
+    <<"link_field">>=>link,
+    <<"list_link_field">>=>{list,link}
+  },
+
+  %-----------------Functions--------------------------------------------
+  % Output of aggregates or other functions is not formatted
+  #get{value=F1,args=[],aggregate=Agr1}=ecomet_query:read_fun(count,fun ecomet_types:to_string/2),
+  1=F1(#{}),
+  2=Agr1(2,none),
+  5=Agr1(2,3),
+
+  SumFun=
+    fun([V1,V2])->V1+V2 end,
+  #get{value=F2,args=[<<"integer_field">>,<<"term_field">>],aggregate=undefined}=
+    ecomet_query:read_fun({SumFun,[<<"integer_field">>,<<"term_field">>]},fun ecomet_types:to_string/2),
+  12=F2(#{<<"integer_field">>=>5,<<"term_field">>=>7}),
+
+  %------------string----------------
+  #get{value=F3,args=[<<"string_field">>],aggregate=undefined}=ecomet_query:read_fun(<<"string_field">>,fun ecomet_types:to_string/2),
+  <<"value1">> =F3(#{<<"string_field">>=><<"value1">>,object=>Types}),
+
+  %------------Integer----------------
+  #get{value=F4,args=[<<"integer_field">>],aggregate=undefined}=ecomet_query:read_fun(<<"integer_field">>,fun ecomet_types:to_string/2),
+  <<"23">> =F4(#{<<"integer_field">>=>23,object=>Types}),
+
+  %------------Term----------------
+  #get{value=F5,args=[<<"term_field">>],aggregate=undefined}=ecomet_query:read_fun(<<"term_field">>,fun ecomet_types:to_string/2),
+  <<"{some_term}">> =F5(#{<<"term_field">>=>{some_term},object=>Types}),
+
+  %------------Link----------------
+  #get{value=F6,args=[<<"link_field">>],aggregate=undefined}=ecomet_query:read_fun(<<"link_field">>,fun ecomet_types:to_string/2),
+  <<"/root/.databases">> =F6(#{<<"link_field">>=>?OID(<<"/root/.databases">>),object=>Types}),
+
+  %------------List of Links----------------
+  #get{value=F7,args=[<<"list_link_field">>],aggregate=undefined}=ecomet_query:read_fun(<<"list_link_field">>,fun ecomet_types:to_string/2),
+  <<"[\"/root/.databases\",\"/root/.patterns\"]">> =F7(#{
+    <<"list_link_field">>=>[
+      ?OID(<<"/root/.databases">>),
+      ?OID(<<"/root/.patterns">>)
+    ],
+    object=>Types
+  }),
+
+  meck:unload(ecomet_object),
+
+  ok.
 
 -record(field,{alias,value}).
 read_map(_Config)->
@@ -494,7 +576,7 @@ read_map(_Config)->
     {<<"concat2">>,{FunConcat,[<<"field2">>,<<"field3">>]}},
     {FunConcat,[<<"field4">>,{FunConcat,[<<"field5">>,<<"field6">>]}]}
   ],
-  FieldsMap=ecomet_query:read_map(Fields),
+  FieldsMap=ecomet_query:read_map(Fields,undefined),
 
   #field{alias = <<"field1">>,value = Get1}=maps:get(1,FieldsMap),
   #get{args = [<<"field1">>],aggregate=undefined}=Get1,
@@ -505,6 +587,60 @@ read_map(_Config)->
   #field{alias = <<"3">>,value = Get3}=maps:get(3,FieldsMap),
   #get{args = [<<"field4">>,<<"field5">>,<<"field6">>],aggregate=undefined}=Get3.
 
+read_map_format(_Config)->
+  ecomet_user:on_init_state(),
+
+  meck:new(ecomet_object, [non_strict,no_link,passthrough]),
+  meck:expect(ecomet_object, field_type, fun(Fields,Name)->
+    {ok,maps:get(Name,Fields)}
+  end),
+
+  Types=#{
+    <<"string_field">>=>string,
+    <<"integer_field">>=>integer,
+    <<"integer_field2">>=>integer,
+    <<"term_field">>=>term,
+    <<"link_field">>=>link,
+    <<"list_link_field">>=>{list,link}
+  },
+
+  SumFun=
+    fun([V1,V2])->V1+V2 end,
+
+  Fields=[
+    <<"string_field">>,
+    <<"integer_field">>,
+    {SumFun,[<<"integer_field">>,<<"integer_field2">>]},
+    <<"term_field">>,
+    <<"link_field">>
+  ],
+
+  FieldsMap=ecomet_query:read_map(Fields,fun ecomet_types:to_string/2),
+
+  #field{alias = <<"string_field">>,value = Get1}=maps:get(1,FieldsMap),
+  #get{value=F1,args=[<<"string_field">>]}=Get1,
+  <<"value1">> =F1(#{<<"string_field">>=><<"value1">>,object=>Types}),
+
+  #field{alias = <<"integer_field">>,value = Get2}=maps:get(2,FieldsMap),
+  #get{value=F2,args=[<<"integer_field">>]}=Get2,
+  <<"45">> =F2(#{<<"integer_field">>=>45,object=>Types}),
+
+  % Output of functions is not formatted
+  #field{alias = <<"3">>,value = Get3} =maps:get(3,FieldsMap),
+  #get{value=F3,args=[<<"integer_field">>,<<"integer_field2">>]}=Get3,
+  12=F3(#{<<"integer_field">>=>5,<<"integer_field2">>=>7}),
+
+  #field{alias = <<"term_field">>,value = Get4}=maps:get(4,FieldsMap),
+  #get{value=F4,args=[<<"term_field">>]}=Get4,
+  <<"{some_term}">> =F4(#{<<"term_field">>=>{some_term},object=>Types}),
+
+  #field{alias = <<"link_field">>,value = Get5}=maps:get(5,FieldsMap),
+  #get{value=F5,args=[<<"link_field">>]}=Get5,
+  <<"/root/.databases">> =F5(#{<<"link_field">>=>?OID(<<"/root/.databases">>),object=>Types}),
+
+  meck:unload(ecomet_object),
+  ok.
+
 is_aggregate(_Config)->
   ecomet_user:on_init_state(),
   FunAdd=fun([V1,V2])->V1+V2 end,
@@ -513,7 +649,7 @@ is_aggregate(_Config)->
     {<<"sum2">>,{FunAdd,[<<"field2">>,<<"field3">>]}},
     {FunAdd,[<<"field4">>,{FunAdd,[<<"field5">>,<<"field6">>]}]}
   ],
-  FieldsMap1=ecomet_query:read_map(Fields1),
+  FieldsMap1=ecomet_query:read_map(Fields1,undefined),
   false=ecomet_query:is_aggregate(FieldsMap1),
 
   Fields2=[
@@ -521,7 +657,7 @@ is_aggregate(_Config)->
     {<<"sum2">>,{max,{FunAdd,[<<"field2">>,<<"field3">>]}}},
     {min,{FunAdd,[<<"field4">>,{FunAdd,[<<"field5">>,<<"field6">>]}]}}
   ],
-  FieldsMap2=ecomet_query:read_map(Fields2),
+  FieldsMap2=ecomet_query:read_map(Fields2,undefined),
   true=ecomet_query:is_aggregate(FieldsMap2),
 
   Fields3=[
@@ -529,7 +665,7 @@ is_aggregate(_Config)->
     {<<"sum2">>,{FunAdd,[<<"field2">>,<<"field3">>]}},
     {min,{FunAdd,[<<"field4">>,{FunAdd,[<<"field5">>,<<"field6">>]}]}}
   ],
-  FieldsMap3=ecomet_query:read_map(Fields3),
+  FieldsMap3=ecomet_query:read_map(Fields3,undefined),
   ?assertError(mix_aggegated_and_plain_fields,ecomet_query:is_aggregate(FieldsMap3)).
 
 read_up(Config)->
@@ -570,16 +706,16 @@ read_up(Config)->
       <<".pattern">>:=Pattern,
       <<".name">>:=Name
     }=ReadFun1(OID,[<<".pattern">>,<<".name">>])
-                end,lists:zip(OIDList,Fields)),
+  end,lists:zip(OIDList,Fields)),
 
   % dirty
-  ReadFun2=ecomet_query:read_up(dirty),
+  ReadFun2=ecomet_query:read_up(none),
   lists:foreach(fun({OID,{Pattern,Name}})->
     #{
       <<".pattern">>:=Pattern,
       <<".name">>:=Name
     }=ReadFun2(OID,[<<".pattern">>,<<".name">>])
-                end,lists:zip(OIDList,Fields)),
+  end,lists:zip(OIDList,Fields)),
 
   %-----ReadLock-----------
   ReadFun3=ecomet_query:read_up(read),
@@ -1218,7 +1354,7 @@ simple_no_sort(Config)->
   ],
   RS=ecomet_query:get([root],rs,{<<"string1">>,'=',<<"value1">>}),
   %----------No params--------------
-  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,[]),
+  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,#{}),
   LocalResult=Map1(RS),
   [
     [PatternID1,<<"test1">>,<<"value0_value0">>],
@@ -1244,17 +1380,17 @@ simple_no_sort(Config)->
   ]=LocalResult,
   {[<<".pattern">>,<<"alias1">>,<<"alias2">>],LocalResult}=Reduce1([LocalResult]),
   %----------Sorting by oid--------------
-  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],[{order,[{<<".oid">>,'ASC'}]}]),
+  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],#{order=>[{<<".oid">>,'ASC'}]}),
   LocalResult2=Map2(RS),
   LocalResult=[Tail||[_|Tail]<-LocalResult2],
   {[<<".oid">>,<<".pattern">>,<<"alias1">>,<<"alias2">>],LocalResult2}=Reduce2([LocalResult2]),
 
-  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],[{order,[{<<".oid">>,'DESC'}]}]),
+  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],#{order=>[{<<".oid">>,'DESC'}]}),
   LocalResult3=Map3(RS),
   LocalResult3=lists:reverse(LocalResult2),
   {[<<".oid">>,<<".pattern">>,<<"alias1">>,<<"alias2">>],LocalResult3}=Reduce3([LocalResult3]),
   %-----------Paging----------------------
-  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,Fields,[{page,{2,3}}]),
+  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,Fields,#{page=>{2,3}}),
   RS=Map4(RS),
   {20,{[<<".pattern">>,<<"alias1">>,<<"alias2">>],[
     [PatternID1,<<"test301">>,<<"value3_value0">>],
@@ -1262,7 +1398,10 @@ simple_no_sort(Config)->
     [PatternID1,<<"test501">>,<<"value5_value1">>]
   ]}}=Reduce4([RS]),
 
-  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],[{order,[{<<".oid">>,'DESC'}]},{page,{2,3}}]),
+  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,[<<".oid">>|Fields],#{
+    order=>[{<<".oid">>,'DESC'}],
+    page=>{2,3}
+  }),
   RS=Map5(RS),
   {20,{[<<".oid">>,<<".pattern">>,<<"alias1">>,<<"alias2">>],[
     [_,PatternID2,<<"test601">>,<<"value6_value1">>],
@@ -1283,7 +1422,7 @@ grouping_sorting(Config)->
   ],
   RS=ecomet_query:get([root],rs,{<<"string1">>,'=',<<"value1">>}),
   %----------Sorting--------------
-  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,[{order,[{<<"alias2">>,'ASC'}]}]),
+  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,#{order=>[{<<"alias2">>,'ASC'}]}),
   LocalResult1=Map1(RS),
   [
     {<<"value0_value0">>,[
@@ -1352,7 +1491,7 @@ grouping_sorting(Config)->
   ]}=Reduce1([LocalResult1]),
 
   %----------Grouping--------------
-  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,Fields,[{group,[<<"alias1">>]}]),
+  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,Fields,#{group=>[<<"alias1">>]}),
   LocalResult2=Map2(RS),
   [
     {<<"test1">>,[
@@ -1440,7 +1579,10 @@ grouping_sorting(Config)->
     ]]
   ]}=Reduce2([LocalResult2]),
 
-  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,Fields,[{group,[<<"alias1">>]},{order,[{<<"alias1">>,'DESC'}]}]),
+  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,Fields,#{
+    group=>[<<"alias1">>],
+    order=>[{<<"alias1">>,'DESC'}]
+  }),
   LocalResult2=Map3(RS),  %% Local result always ascending order
 
   {[<<"alias1">>,<<".pattern">>,<<"alias2">>],[
@@ -1487,7 +1629,10 @@ grouping_sorting(Config)->
   ]}=Reduce3([LocalResult2]),
 
   %----------Grouping and sorting--------------
-  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,Fields,[{group,[<<"alias1">>]},{order,[{<<".pattern">>,'DESC'}]}]),
+  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,Fields,#{
+    group=>[<<"alias1">>],
+    order=>[{<<".pattern">>,'DESC'}]
+  }),
   LocalResult4=Map4(RS),
   [
     {<<"test1">>,[
@@ -1576,7 +1721,10 @@ grouping_sorting(Config)->
   ]}=Reduce4([LocalResult4]),
 
   %%-----------2 Level grouping-------------------------------
-  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,Fields,[{group,[<<"alias2">>,<<".pattern">>]},{order,[{<<".pattern">>,'DESC'}]}]),
+  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,Fields,#{
+    group=>[<<"alias2">>,<<".pattern">>],
+    order=>[{<<".pattern">>,'DESC'}]
+  }),
   LocalResult5=Map5(RS),
   [
     {<<"value0_value0">>,[
@@ -1665,7 +1813,9 @@ grouping_sorting(Config)->
   ]}=Reduce5([LocalResult5]),
 
   %%-----------2 Level sorting-------------------------------
-  {Map6,Reduce6}=ecomet_query:compile_map_reduce(get,Fields,[{order,[{<<"alias2">>,'ASC'},{<<".pattern">>,'DESC'}]}]),
+  {Map6,Reduce6}=ecomet_query:compile_map_reduce(get,Fields,#{
+    order=>[{<<"alias2">>,'ASC'},{<<".pattern">>,'DESC'}]
+  }),
   LocalResult5=Map6(RS),
 
   {[<<".pattern">>,<<"alias1">>,<<"alias2">>],[
@@ -1704,11 +1854,11 @@ grouping_sorting_page(Config)->
   ],
   RS=ecomet_query:get([root],rs,{<<"string1">>,'=',<<"value1">>}),
 
-  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,[
-    {group,[<<"alias2">>,<<".pattern">>]},
-    {order,[{<<".pattern">>,'DESC'}]},
-    {page,{2,3}}
-  ]),
+  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,#{
+    group=>[<<"alias2">>,<<".pattern">>],
+    order=>[{<<".pattern">>,'DESC'}],
+    page=>{2,3}
+  }),
   % Local result reads only fields needed to group and sort results, only oid is inserted as row,
   % Query manager reads other fields only for objects within requested page
   LocalResult1=Map1(RS),
@@ -1771,10 +1921,10 @@ grouping_sorting_page(Config)->
     ]]
   ]}=Result1,
 
-  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,Fields,[
-    {order,[{<<"alias2">>,'ASC'},{<<".pattern">>,'DESC'}]},
-    {page,{3,4}}
-  ]),
+  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,Fields,#{
+    order=>[{<<"alias2">>,'ASC'},{<<".pattern">>,'DESC'}],
+    page=>{3,4}
+  }),
   LocalResult1=Map2(RS),
 
   {20,Result2}=Reduce2([LocalResult1]),
@@ -1797,17 +1947,17 @@ aggregate(_Config)->
   RS=ecomet_query:get([root],rs,{<<"bool">>,'=',true}),
 
   %-----No grouping------------------------
-  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,[]),
+  {Map1,Reduce1}=ecomet_query:compile_map_reduce(get,Fields,#{}),
   LocalResult1=Map1(RS),
   [1000,99,1,_Sum]=LocalResult1,
 
   {[<<"count1">>,<<"max1">>,<<"min1">>,<<"sum1">>],LocalResult1}=Reduce1([LocalResult1]),
 
   %-----Grouping---------------------------
-  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,[<<"string2">>|Fields],[
-    {group,[<<"string2">>]},
-    {order,[{<<"string2">>,'DESC'}]}
-  ]),
+  {Map2,Reduce2}=ecomet_query:compile_map_reduce(get,[<<"string2">>|Fields],#{
+    group=>[<<"string2">>],
+    order=>[{<<"string2">>,'DESC'}]
+  }),
   LocalResult2=Map2(RS),
   [
     {<<"value0">>,[100,99,1,_]},
@@ -1837,10 +1987,10 @@ aggregate(_Config)->
   ]=Result2,
 
   %-------2 level grouping---------------
-  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,[<<"string2">>,<<"string3">>|Fields],[
-    {group,[<<"string3">>,<<"string2">>]},
-    {order,[{<<"string2">>,'DESC'}]}
-  ]),
+  {Map3,Reduce3}=ecomet_query:compile_map_reduce(get,[<<"string2">>,<<"string3">>|Fields],#{
+    group=>[<<"string3">>,<<"string2">>],
+    order=>[{<<"string2">>,'DESC'}]
+  }),
   LocalResult3=Map3(RS),
   [
     {<<"value0">>,[
@@ -1878,10 +2028,10 @@ aggregate(_Config)->
   ]=Result3,
 
   %-------Order by aggregated fields---------------
-  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,[<<"string2">>,<<"string3">>|Fields],[
-    {group,[<<"string3">>,<<"string2">>]},
-    {order,[{<<"sum1">>,'DESC'}]}
-  ]),
+  {Map4,Reduce4}=ecomet_query:compile_map_reduce(get,[<<"string2">>,<<"string3">>|Fields],#{
+    group=>[<<"string3">>,<<"string2">>],
+    order=>[{<<"sum1">>,'DESC'}]
+  }),
   LocalResult3=Map4(RS),
   {[<<"string3">>,<<"string2">>,<<"count1">>,<<"max1">>,<<"min1">>,<<"sum1">>],Result4}=Reduce4([LocalResult3]),
 
@@ -1904,11 +2054,11 @@ aggregate(_Config)->
   ]=Result4,
 
   %-------Paging---------------
-  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,[<<"string2">>|Fields],[
-    {group,[<<"string2">>]},
-    {order,[{<<"sum1">>,'DESC'}]},
-    {page,{3,3}}
-  ]),
+  {Map5,Reduce5}=ecomet_query:compile_map_reduce(get,[<<"string2">>|Fields],#{
+    group=>[<<"string2">>],
+    order=>[{<<"sum1">>,'DESC'}],
+    page=>{3,3}
+  }),
   LocalResult5=Map5(RS),
   [
     {<<"value0">>,[100,99,1,_]},
@@ -2035,6 +2185,99 @@ query_get(Config)->
   ]=Rows4,
   ok.
 
+query_get_format(_Config)->
+  ecomet_user:on_init_state(),
+
+  SomeFun=
+    fun([_V1,_V2])->fun_result end,
+  Fields=[
+    {<<"alias1">>,<<".name">>},
+    <<"integer">>,
+    {<<"alias2">>,{ SomeFun, [<<"string2">>,<<"string3">>] }}
+  ],
+
+  %--------No params------------------------
+  {Header1,Rows1}=ecomet_query:get([root],Fields,{<<"string1">>,'=',<<"value1">>},[{format,fun ecomet_types:to_string/2}]),
+  [<<"alias1">>,<<"integer">>,<<"alias2">>]=Header1,
+  [
+    [<<"test1">>,<<"1">>,fun_result],
+    [<<"test101">>,<<"1">>,fun_result],
+    [<<"test201">>,<<"1">>,fun_result],
+    [<<"test301">>,<<"1">>,fun_result],
+    [<<"test401">>,<<"1">>,fun_result],
+    [<<"test501">>,<<"1">>,fun_result],
+    [<<"test601">>,<<"1">>,fun_result],
+    [<<"test701">>,<<"1">>,fun_result],
+    [<<"test801">>,<<"1">>,fun_result],
+    [<<"test901">>,<<"1">>,fun_result],
+    [<<"test1">>,<<"1">>,fun_result],
+    [<<"test101">>,<<"1">>,fun_result],
+    [<<"test201">>,<<"1">>,fun_result],
+    [<<"test301">>,<<"1">>,fun_result],
+    [<<"test401">>,<<"1">>,fun_result],
+    [<<"test501">>,<<"1">>,fun_result],
+    [<<"test601">>,<<"1">>,fun_result],
+    [<<"test701">>,<<"1">>,fun_result],
+    [<<"test801">>,<<"1">>,fun_result],
+    [<<"test901">>,<<"1">>,fun_result]
+  ]=Rows1,
+
+  %----------Aggregated query-----------------------------
+  % Output of functions is not formatted
+  AggregatedFields=[
+    {<<"count1">>,count},
+    {<<"max1">>,{max,<<"integer">>}},
+    {<<"min1">>,{min,<<"integer">>}},
+    {<<"sum1">>,{sum,<<"float">>}}
+  ],
+
+  {Header4,Rows4}=ecomet_query:get([root],[<<"string2">>,<<"string3">>|AggregatedFields],{<<"bool">>,'=',true},[
+    {group,[<<"string3">>,<<"string2">>]},
+    {order,[{<<"sum1">>,'DESC'}]}
+  ]),
+  [<<"string3">>,<<"string2">>,<<"count1">>,<<"max1">>,<<"min1">>,<<"sum1">>]=Header4,
+
+  [
+    [<<"value0">>,[
+      [<<"value4">>,100,99,1,_],
+      [<<"value3">>,100,99,1,_],
+      [<<"value2">>,100,99,1,_],
+      [<<"value1">>,100,99,1,_],
+      [<<"value0">>,100,99,1,_]
+    ]],
+    [<<"value1">>,[
+      [<<"value9">>,100,99,1,_],
+      [<<"value8">>,100,99,1,_],
+      [<<"value7">>,100,99,1,_],
+      [<<"value6">>,100,99,1,_],
+      [<<"value5">>,100,99,1,_]
+    ]]
+  ]=Rows4,
+
+  ok.
+
+datetime_search(_Config)->
+  ecomet_user:on_init_state(),
+
+  Now = ecomet_lib:ts(),
+
+  From = Now - 30 * 86400000,
+  To = Now - 5 * 86400000,
+
+  %--------No params------------------------
+  ct:pal("datetime search from ~p, to ~p",[ecomet_lib:dt_to_string(From),ecomet_lib:dt_to_string(To)]),
+  {Header1,Rows1}=ecomet_query:get([root],[<<".name">>,<<"datetime">>],{<<"datetime">>,'DATETIME',[From,To]}),
+  ct:pal("datetime result ~p",[{Header1,Rows1}]),
+
+  [<<".name">>,<<"datetime">>]=Header1,
+
+  [if
+     T>=From,T=<To -> ok ;
+     true -> ?ERROR(io_lib:format("~s has datetime value ~p outside range [~p:~p]",[N,T,From,To]))
+   end|| [N,T]<-Rows1],
+
+  ok.
+
 set(_Config)->
   ecomet_user:on_init_state(),
   % Before update
@@ -2058,67 +2301,135 @@ set(_Config)->
   Count=ecomet_query:set([root],#{<<"integer">> => {fun([V])->V-5 end,[<<"integer">>]}},{<<"string1">>,'=',<<"value1">>}),
   {_,[SumBefore]}=ecomet_query:get([root],[{sum,<<"integer">>}],{<<"string1">>,'=',<<"value1">>}).
 
+
+set_format(_Config)->
+  ecomet_user:on_init_state(),
+  % Before update
+  {_,[Count,SumBefore]}=ecomet_query:get([root],[count,{sum,<<"integer">>}],{<<"string1">>,'=',<<"value1">>}),
+
+  % Update
+  SetFields=#{
+    <<"atom">> => <<"test_set_value">>,
+    <<"integer">> => {fun([V])->V+5 end,[<<"integer">>]}
+  },
+  Count=ecomet_query:set([root],SetFields,{<<"string1">>,'=',<<"value1">>},[{format,fun ecomet_types:from_string/2}]),
+
+  % Check after update
+  SumAfter=SumBefore+Count*5,
+  {_,[Count,SumAfter]}=ecomet_query:get([root],[count,{sum,<<"integer">>}],{<<"string1">>,'=',<<"value1">>}),
+  {[<<"atom">>],Rows}=ecomet_query:get([root],[<<"atom">>],{<<"string1">>,'=',<<"value1">>}),
+  Count=length(Rows),
+  [test_set_value]=ordsets:union(Rows),
+
+  % Return
+  Count=ecomet_query:set([root],#{<<"integer">> => {fun([V])->V-5 end,[<<"integer">>]}},{<<"string1">>,'=',<<"value1">>}),
+  {_,[SumBefore]}=ecomet_query:get([root],[{sum,<<"integer">>}],{<<"string1">>,'=',<<"value1">>}),
+  ok.
+
 parse_get(_Config) ->
 
-  [{get, [{<<"alias">>, <<"foo">>}],[root], {'AND', [{<<"buz">>, ':>', 123}]}, []}]=
+  [{get, [{<<"alias">>, <<"foo">>}],[root], {'AND', [{<<"buz">>, ':>', 123}]}, #{}}]=
     ecomet_query:parse("get foo AS 'alias' from root where AND ( buz :> 123 )"),
 
-  [{get, [<<"foo1">>, <<"foo2">>], [db1,db2],{'OR', [{<<"buz">>, ':LIKE', <<"f">>}, {<<"bar">>, '=', -42}]}, []}]=
+  [{get, [<<"foo1">>, <<"foo2">>], [db1,db2],{'OR', [{<<"buz">>, ':LIKE', <<"f">>}, {<<"bar">>, '=', -42}]}, #{}}]=
     ecomet_query:parse("get foo1, foo2 from db1,db2 where OR ( buz :LIKE 'f', bar = -42 )"),
 
-  [{get, [<<"foo">>],['TEST'], {'ANDNOT', {<<"buz">>, ':=', 45.5},{<<"bar">>, ':<', 4}}, [{order, [{<<"foo3">>, 'DESC'}]}]}]=
+  [{get, [<<"foo">>],['TEST'], {'ANDNOT', {<<"buz">>, ':=', 45.5},{<<"bar">>, ':<', 4}}, #{order:=[{<<"foo3">>, 'DESC'}]}}]=
     ecomet_query:parse("get foo from 'TEST' where ANDNOT (buz := 45.5, bar :< 4) order by foo3 DESC"),
 
-  [{get, [<<"foo">>], [root],{'AND', [{<<"buz">>, ':=', 1}]}, [{page, {5, 10}}]}]=
+  [{get, [<<"foo">>], [root],{'AND', [{<<"buz">>, ':=', 1}]}, #{page:={5, 10}}}]=
     ecomet_query:parse("get foo from root where AND (buz := 1) page 5:10"),
 
-  [{get, [<<"foo">>], [root],{'AND', [{<<"bar">>, ':<', 4}]}, [{page, {5, 10}},{lock, read}]}]=
+  [{get, [<<"foo">>], [root],{'AND', [{<<"bar">>, ':<', 4}]}, #{page:= {5, 10},lock:=read}}]=
     ecomet_query:parse("get foo from * where AND (bar :< 4) page 5:10 lock read"),
 
-  [{get, [<<"foo1">>],[d1,d2,'D3'],{'AND', [{<<"bar">>, ':<', 4}]}, [{group, [<<"foo2">>, <<"buz2">>]}, {order, [{<<"foo3">>, 'ASC'}, {<<"buz3">>,'DESC'}]}]}]=
+  [{get, [<<"foo1">>],[d1,d2,'D3'],{'AND', [{<<"bar">>, ':<', 4}]}, #{
+    group:=[<<"foo2">>, <<"buz2">>],
+    order:= [{<<"foo3">>, 'ASC'}, {<<"buz3">>,'DESC'}]
+  }}]=
     ecomet_query:parse("get foo1 from d1,d2,'D3' where AND (bar :< 4) group by foo2, buz2 order by foo3, buz3 DESC"),
 
-  [{get, [<<"foo1">>],[root], {'AND', [{<<"bar">>, ':<', 4}]}, [{group, [1]},{order, [{2, 'DESC'}]}]}]=
+  [{get, [<<"foo1">>],[root], {'AND', [{<<"bar">>, ':<', 4}]}, #{
+    group:= [1],
+    order:= [{2, 'DESC'}]
+  }}]=
     ecomet_query:parse("get foo1 from root where AND (bar :< 4) group by 1 order by 2 DESC"),
 
-  [{get,[{Concat, [<<"buz">>,<<"foo">>]}, {<<"fun">>, {test}}],[root], {'AND', [{<<"bar">>, ':<', 4}]}, []}]=
+  [{get, [<<"foo1">>],[root], {'AND', [{<<"bar">>, ':<', 4}]}, #{
+    format:=EcometFormatter
+  }}]=
+    ecomet_query:parse("get foo1 from root where AND (bar :< 4) format $json"),
+  true = is_function(EcometFormatter,2),
+
+  [{get, [<<"foo1">>],[root], {'AND', [{<<"bar">>, ':<', 4}]}, #{
+    format:=ExternalFormatter
+  }}]=
+    ecomet_query:parse("get foo1 from root where AND (bar :< 4) format $my_lib:my_fun"),
+  true = is_function(ExternalFormatter,2),
+
+  [{get,[{Concat, [<<"buz">>,<<"foo">>]}, {<<"fun">>, {test}}],[root], {'AND', [{<<"bar">>, ':<', 4}]}, #{}}]=
     ecomet_query:parse("get $concat($buz,$foo), $term('{test}') AS 'fun' from root where AND (bar :< 4)"),
 
   <<"str1str2">> = Concat([<<"str1">>,<<"str2">>]),
 
   ok.
 
+parse_get_aggr(_Config) ->
+
+  [{get, [{<<"alias">>, count}],[root], {'AND', [{<<"buz">>, ':>', 123}]}, #{}}]=
+    ecomet_query:parse("get $count() AS 'alias' from root where AND ( buz :> 123 )"),
+
+  ReadField = fun erlang:hd/1,
+  [{get, [{sum,{ReadField,[<<"int_field">>]}}],[root], {'AND', [{<<"buz">>, ':>', 123}]}, #{}}]=
+    ecomet_query:parse("get $sum($int_field) from root where AND ( buz :> 123 )"),
+
+  [{get, [{max,{ReadField,[<<"float_field">>]}}],[root], {'AND', [{<<"buz">>, ':>', 123}]}, #{}}]=
+    ecomet_query:parse("get $max($float_field) from root where AND ( buz :> 123 )"),
+
+  [{get, [{min,{ReadField,[<<"float_field">>]}}],[root], {'AND', [{<<"buz">>, ':>', 123}]}, #{}}]=
+    ecomet_query:parse("get $min($float_field) from root where AND ( buz :> 123 )"),
+
+  ok.
+
 parse_set(_Config) ->
-  [{set, #{<<"foo">>:={ FieldValue,[<<"hello">>] }},[root], {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}]=
+  [{set, #{<<"foo">>:={ FieldValue,[<<"hello">>] }},[root], {'AND', [{<<"bar">>, ':<', 1}]}, #{lock:= write}}]=
     ecomet_query:parse("set foo=$hello in root where AND (bar :< 1) lock write"),
   <<"value">>=FieldValue([<<"value">>]),
 
-  [{set,#{<<"foo">>:={Concat,[<<"buz">>]}},[root], {'OR',[{<<"bar">>,':>',1}]}, [{lock,read}]}]=
+  [{set,#{<<"foo">>:={Concat,[<<"buz">>]}},[root], {'OR',[{<<"bar">>,':>',1}]}, #{lock:=read}}]=
     ecomet_query:parse("set foo=$concat($buz,'_test') in * where OR (bar :> 1) lock read"),
   <<"value_test">> = Concat([<<"value">>]),
 
-  [{set, #{<<"foo1">>:= 123, <<"foo2">>:= {Term,[<<"buz">>]} },[db1,db2], {'AND', [{<<"bar">>, ':LIKE', <<"1">>}]}, []}]=
+  [{set, #{<<"foo1">>:= 123, <<"foo2">>:= {Term,[<<"buz">>]} },[db1,db2], {'AND', [{<<"bar">>, ':LIKE', <<"1">>}]}, #{}}]=
     ecomet_query:parse("set foo1=123, foo2=$term(['{test}',$buz]) in db1,db2 where AND (bar :LIKE '1')"),
 
   [{test},value] = Term([value]),
 
+  [{set, #{<<"foo">>:={ FieldValue,[<<"hello">>] }},[root], {'AND', [{<<"bar">>, ':<', 1}]}, #{format:= InternalFormatter}}]=
+    ecomet_query:parse("set foo=$hello in root where AND (bar :< 1) format $from_json"),
+  true = is_function(InternalFormatter,2),
+
   ok.
 
 parse_insert(_Config) ->
-  [{insert, #{<<"foo1">>:=123, <<"foo2">>:=buz}}]=
+  [{insert, #{<<"foo1">>:=123, <<"foo2">>:=buz},#{}}]=
     ecomet_query:parse("insert foo1=123, foo2=$term('buz')"),
+
+  [{insert, #{<<"foo1">>:=123, <<"foo2">>:=buz},#{format:=InternalFormatter}}]=
+    ecomet_query:parse("insert foo1=123, foo2=$term('buz') format $from_string"),
+  true = is_function(InternalFormatter,2),
 
   ok.
 
 parse_delete(_Config) ->
 
-  [{delete,[root], {'AND', [{<<"bar">>, ':<', 1}]}, [{lock, write}]}]=
+  [{delete,[root], {'AND', [{<<"bar">>, ':<', 1}]}, #{lock:= write}}]=
     ecomet_query:parse("delete from root where AND (bar :< 1) lock write"),
 
-  [{delete,[root], {'OR', [{<<"bar">>, ':>', 1.0}]}, [{lock, read}]}]=
+  [{delete,[root], {'OR', [{<<"bar">>, ':>', 1.0}]}, #{lock:= read}}]=
     ecomet_query:parse("delete from * where OR (bar :> 1.0) lock read"),
 
-  [{delete,[db1,db2], {'ANDNOT', {<<"bar">>, ':LIKE', <<"1">>}, {<<"buz">>, ':=', foo}}, []}]=
+  [{delete,[db1,db2], {'ANDNOT', {<<"bar">>, ':LIKE', <<"1">>}, {<<"buz">>, ':=', foo}}, #{}}]=
     ecomet_query:parse("delete from db1,db2 where ANDNOT (bar :LIKE '1', buz := foo)"),
 
   ok.

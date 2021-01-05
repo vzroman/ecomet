@@ -238,10 +238,13 @@ direct_or([],_Fields)->
 %%
 %% Define conditions on patterns
 %%
-define_patterns({<<".pattern">>,'=',PatternID})->
+define_patterns({<<".pattern">>,':=',PatternID})->
 	ID=ecomet_object:get_id(PatternID),
 	Bit=ecomet_bits:set_bit(ID,none),
 	{'LEAF',{'=',<<".pattern">>,PatternID},Bit};
+define_patterns({<<".pattern">>,'=',PatternID})->
+	Patterns = [PatternID|ecomet_pattern:get_children(PatternID)],
+	define_patterns({'OR',[{<<".pattern">>,':=',P}||P<-Patterns]});
 % Leaf condition
 define_patterns({Field,Oper,Value}) when is_binary(Field)->
 	{'LEAF',{Oper,Field,Value},'UNDEFINED'};
@@ -264,7 +267,8 @@ define_patterns({'ANDNOT',Condition1,Condition2})->
 %%
 %% Building conditions
 %%
-build_conditions({'LEAF',{Oper,Field,Value},IntBits},ExtBits) when (Oper=='=') or (Oper=='LIKE')->
+build_conditions({'LEAF',{Oper,Field,Value},IntBits},ExtBits)
+	when (Oper=='=');(Oper=='LIKE');(Oper=='DATETIME')->
 	Config=
 	case pbits_oper('AND',IntBits,ExtBits) of
 		'UNDEFINED'->'UNDEFINED';
@@ -320,17 +324,60 @@ build_tag_config(Patterns,Field)->
 			{error,undefined_field}->{AccPatterns,AccStorages}
 		end
 	end,{none,[]},Patterns,{none,none})).
+
+%------------Service fields-----------------------------------
+build_leaf({'=',<<".path">>,Value},Config)->
+	case re:run(Value,"(?<F>.*)/(?<N>[^/]+)",[{capture,['F','N'],binary}]) of
+		{match,[Folder,Name]}->
+			case ecomet_folder:path2oid(Folder) of
+				{ok,FolderID}->
+					ANDConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
+					{{'AND',[
+						{'TAG',{<<".folder">>,FolderID,'simple'},Config},
+						{'TAG',{<<".name">>,Name,'simple'},Config}
+					],ANDConfig},false};
+				_->
+					?ERROR({invalid_path,Value})
+			end;
+		_->
+			?ERROR({invalid_path,Value})
+	end;
+build_leaf({'=',<<".oid">>,Value},Config)->
+	Object = ecomet_object:construct(Value),
+	#{
+		<<".name">>:=Name,
+		<<".folder">>:=Folder
+	} = ecomet:read_fields(Object,[<<".name">>,<<".folder">>]),
+
+	ANDConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
+	{{'AND',[
+		{'TAG',{<<".folder">>,Folder,'simple'},Config},
+		{'TAG',{<<".name">>,Name,'simple'},Config}
+	],ANDConfig},false};
+
+%-----------------Simple index search-------------------------
 build_leaf({'=',Field,Value},Config)->
 	{{'TAG',{Field,Value,simple},Config},false};
+%----------------3gram index search---------------------------
 build_leaf({'LIKE',Field,Value},Config)->
 	ANDConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
 	% We drop first and last 3grams, it's ^start, end$
-	case ecomet_index:split_3grams(Value) of
+	case ecomet_index:build_3gram([Value],[]) of
 		% String is too short, use direct analog
 		[]->{{'DIRECT',{':LIKE',Field,Value},'UNDEFINED'},true};
 		[_PhraseEnd|NGrams]->
 			{{'AND',[{'TAG',{Field,Gram,'3gram'},Config}||Gram<-lists:droplast(NGrams)],ANDConfig},false}
-	end.
+	end;
+%-------------datetime index search---------------------------
+build_leaf({'DATETIME',Field,[From,To]},Config)->
+
+	% Build an index on the time points
+	FromIndex = ecomet_index:build_dt([From],[]),
+	ToIndex = ecomet_index:build_dt([To],[]),
+
+	% Building the query
+	dt_query(Field,FromIndex,ToIndex,Config).
+
 
 pbits_oper('AND',X1,X2)->
 	case {X1,X2} of
@@ -972,4 +1019,156 @@ get_branch([],Value)->
 		Bits->Bits
 	end.
 
+%%=====================================================================
+%%	Datetime range conditions
+%%=====================================================================
+dt_query(Field,I1,I2,Config)->
+	Cap=get_cap(I1,I2,[]),
+	Trapezoid =
+		if
+			length(Cap)=:=length(I1)-> [];
+			true ->
+				[{L,V1}|TLeft]=I1--Cap,
+				[{L,V2}|TRight]=I2--Cap,
+				EdgeLeft=edge(TLeft,left),
+				EdgeRight=edge(TRight,right),
+				[{'OR',
+						[triangle_left(EdgeLeft,{L,V1})]++
+						[{L,I}||I<-lists:seq(V1+1,V2-1)]++
+						[triangle_right(EdgeRight,{L,V2})]
+				}]
+		end,
+	{ set_query_field({'AND',Cap++Trapezoid},Field,Config), _Direct = false}.
+
+get_cap([V|T1],[V|T2],Acc)->
+	get_cap(T1,T2,[V|Acc]);
+get_cap(_T1,_T2,Acc)->
+	lists:reverse(Acc).
+
+edge(Levels,Side)->
+	edge(lists:reverse(Levels),Side,[]).
+
+edge([{L,V}|T],Side,[])->
+	Limit=
+		if
+			Side=:=left ->level_min(L);
+			true -> level_max(L)
+		end,
+	if
+		V=:=Limit ->edge(T,Side,[]) ;
+		true -> edge(T,Side,[{L,V}])
+	end;
+edge([I|T],Side,Acc)->
+	edge(T,Side,[I|Acc]);
+edge([],_Side,Acc)->
+	Acc.
+
+triangle_left([{L,V}|Tail],Vertex)->
+	Min=level_min(L),
+	Max=level_max(L),
+	if
+		V=:=Min->
+			% Add the whole level
+			if
+				length(Tail)=:=0 ->
+					% No filtering for the sub-levels is needed, add the whole vertex
+					Vertex;
+				true->
+					% The edge element must be calculated separately
+					{'OR',[
+						{'ANDNOT',Vertex,{L,V}},	% Total level except for the first element
+						{'AND',[Vertex,triangle_left(Tail,{L,V})]}	% Add triangle of the first element
+					]}
+			end;
+		V=:=Max->
+			% Take only triangle of the last element
+			{'AND',[Vertex,triangle_left(Tail,{L,V})]};
+		(V-Min)<(Max-V)->
+			% It is easier to subtract excessive items from the whole level
+			if
+				length(Tail)=:=0->
+					% No filtering for the sub-levels is needed, add the whole vertex
+					{'ANDNOT',Vertex,{'OR',[{L,I}||I<-lists:seq(Min,V-1)]}};
+				true->
+					% The edge element must be calculated separately
+					{'OR',[
+						{'ANDNOT',Vertex,{'OR',[{L,I}||I<-lists:seq(Min,V)]}},	% The level after subtraction not included bundles
+						{'AND',[Vertex,triangle_left(Tail,{L,V})]}	% Add triangle of the edge element
+					]}
+			end;
+		true ->
+			% Add level bundles
+			{'AND',[Vertex,{'OR',[
+				triangle_left(Tail,{L,V})|
+				[{L,I}||I<-lists:seq(V+1,Max)]
+			]}]}
+	end;
+triangle_left([],Vertex)->
+	Vertex.
+
+triangle_right([{L,V}|Tail],Vertex)->
+	Min=level_min(L),
+	Max=level_max(L),
+	if
+		V=:=Max->
+			% Add the whole level
+			if
+				length(Tail)=:=0 ->
+					% No filtering for the sub-levels is needed, add the whole vertex
+					Vertex;
+				true->
+					% The edge element must be calculated separately
+					{'OR',[
+						{'ANDNOT',Vertex,{L,V}},	% Total level except for the first element
+						{'AND',[Vertex,triangle_right(Tail,{L,V})]}	% Add triangle of the first element
+					]}
+			end;
+		V=:=Min->
+			% Take only triangle of the first element
+			{'AND',[Vertex,triangle_right(Tail,{L,V})]};
+		(V-Min)>(Max-V)->
+			% It is easier to subtract excessive items from the whole level
+			if
+				length(Tail)=:=0 ->
+					% No filtering for the sub-levels is needed, add the whole vertex
+					{'ANDNOT',Vertex,{'OR',[{L,I}||I<-lists:seq(V+1,Max)]}};
+				true ->
+					{'OR',[
+						{'ANDNOT',Vertex,{'OR',[{L,I}||I<-lists:seq(V,Max)]}},	% The level after subtraction not included bundles
+						{'AND',[Vertex,triangle_right(Tail,{L,V})]}	% Add triangle of the edge element
+					]}
+			end;
+		true ->
+			% Add level bundles
+			{'AND',[Vertex,{'OR',
+					[{L,I}||I<-lists:seq(Min,V-1)]++
+					[triangle_right(Tail,{L,V})]
+			}]}
+	end;
+triangle_right([],Vertex)->
+	Vertex.
+
+level_max(m)->12;
+level_max(d)->31;
+level_max(h)->23;
+level_max(mi)->59;
+level_max(s)->59.
+
+level_min(m)->1;
+level_min(d)->1;
+level_min(h)->0;
+level_min(mi)->0;
+level_min(s)->0.
+
+set_query_field({'AND',Items},Field,Config)->
+	GroupConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
+	{'AND',[set_query_field(I,Field,Config)||I<-Items],GroupConfig};
+set_query_field({'OR',Items},Field,Config)->
+	GroupConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
+	{'OR',[set_query_field(I,Field,Config)||I<-Items],GroupConfig};
+set_query_field({'ANDNOT',Item1,Item2},Field,Config)->
+	GroupConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
+	{'ANDNOT',{set_query_field(Item1,Field,Config),set_query_field(Item2,Field,Config)},GroupConfig};
+set_query_field(Item,Field,Config)->
+	{'TAG',{Field,Item,datetime},Config}.
 

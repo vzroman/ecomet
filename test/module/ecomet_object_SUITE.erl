@@ -83,12 +83,7 @@ groups()->[
 init_per_suite(Config)->
   ?BACKEND_INIT(),
   SuitePID=?SUITE_PROCESS_START(),
-  ?SUITE_PROCESS_EXECUTE(SuitePID,fun()->
-    % local params table
-    ets:new(local_params,[named_table,public,set]),
-    ets:insert(local_params,{node_unique_id,10}),
-    ets:insert(local_params,{dTS,0})
-  end),
+
   FolderOID={2,1000},
   PatternOID={3,1000},
 
@@ -118,7 +113,6 @@ init_per_suite(Config)->
 
 end_per_suite(Config)->
   ?SUITE_PROCESS_STOP(?GET(suite_pid,Config)),
-  ets:delete(local_params),
   ?BACKEND_STOP(30000),
   ok.
 

@@ -22,6 +22,7 @@ StatementList
 Statement
 Get
 Subscribe
+Unsubscribe
 Set
 Insert
 Delete
@@ -42,16 +43,22 @@ Constant
 ConstantList
 Variable
 VariableList
-ParamList
-Param
+Date
+GetParamList
+GetParam
 SubParamList
 SubParam
+SetParamList
+SetParam
+InsertParamList
+InsertParam
 OrderByList
 OrderBy
 OrderDirection
 GroupByList
 GroupBy
 Lock
+Format
 .
 
 Terminals
@@ -63,8 +70,10 @@ by
 delete
 'DESC'
 insert
+update
 get
 subscribe
+unsubscribe
 group
 'OR'
 order
@@ -80,6 +89,7 @@ where
 write
 stateless
 no_feedback
+format
 field
 atom
 integer
@@ -114,6 +124,7 @@ StatementList-> Statement ';' StatementList : ['$1'|'$3'].
 
 Statement -> Get : '$1'.
 Statement -> Subscribe : '$1'.
+Statement -> Unsubscribe : '$1'.
 Statement -> Set : '$1'.
 Statement -> Insert : '$1'.
 Statement -> Delete : '$1'.
@@ -121,19 +132,22 @@ Statement -> transaction_start : transaction_start.
 Statement -> transaction_commit : transaction_commit.
 Statement -> transaction_rollback : transaction_rollback.
 
-Get -> get GetFieldList from Databases where Condition ParamList: {get,'$2','$4','$6','$7'}.
-Get -> get GetFieldList from Databases where Condition: {get,'$2','$4','$6',[]}.
+Get -> get GetFieldList from Databases where Condition GetParamList: {get,'$2','$4','$6',maps:from_list('$7')}.
+Get -> get GetFieldList from Databases where Condition: {get,'$2','$4','$6',#{}}.
 
-Subscribe -> subscribe text get GetFieldList from Databases where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$8','$9'}.
-Subscribe -> subscribe text get GetFieldList from Databases where Condition: {subscribe,get_token('$2'),'$4','$6','$8',[]}.
+Subscribe -> subscribe text get GetFieldList from Databases where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$8',maps:from_list('$9')}.
+Subscribe -> subscribe text get GetFieldList from Databases where Condition: {subscribe,get_token('$2'),'$4','$6','$8',#{}}.
 
-Set-> set SetFieldList in Databases where Condition Lock: {set,maps:from_list('$2'),'$4','$6',['$7']}.
-Set-> set SetFieldList in Databases where Condition: {set,maps:from_list('$2'),'$4','$6',[]}.
+Unsubscribe -> unsubscribe text : { unsubscribe, get_token('$2') }.
 
-Insert -> insert SetFieldList : { insert, maps:from_list('$2') }.
+Set-> set SetFieldList in Databases where Condition SetParamList : {set,maps:from_list('$2'),'$4','$6',maps:from_list('$7')}.
+Set-> set SetFieldList in Databases where Condition: {set,maps:from_list('$2'),'$4','$6',#{}}.
 
-Delete -> delete from Databases where Condition Lock : { delete, '$3', '$5', ['$6']}.
-Delete -> delete from Databases where Condition : { delete, '$3','$5', []}.
+Insert -> insert SetFieldList InsertParamList : { insert, maps:from_list('$2') ,maps:from_list('$3') }.
+Insert -> insert SetFieldList : { insert, maps:from_list('$2') ,#{} }.
+
+Delete -> delete from Databases where Condition Lock : { delete, '$3', '$5', maps:from_list(['$6'])}.
+Delete -> delete from Databases where Condition : { delete, '$3','$5', #{} }.
 
 Databases -> '*' : ecomet_db:get_databases().
 Databases -> Database : ['$1'].
@@ -147,6 +161,8 @@ GetFieldList -> GetField ',' GetFieldList: ['$1'|'$3'].
 
 GetField -> Field 'AS' text : { get_token('$3'), '$1' }.
 GetField -> Field : '$1'.
+GetField -> Function '(' ')' 'AS' text : { get_token('$5'), compile('$1',[]) }.
+GetField -> Function '(' ')' : compile('$1',[]).
 GetField -> Function '(' VariableList ')' 'AS' text : { get_token('$6'), compile('$1','$3') }.
 GetField -> Function '(' VariableList ')' : compile('$1','$3').
 
@@ -179,6 +195,7 @@ VariableList -> Variable ',' VariableList : ['$1'|'$3'].
 Variable -> ConstTerm : '$1'.
 Variable -> '$' Field : get_field('$2').
 Variable -> '[' VariableList ']': compile('$2').
+Variable -> Function '(' ')' : compile('$1',[]).
 Variable -> Function '(' VariableList ')' : compile('$1','$3').
 
 Function -> '$' Atom : { ecomet_ql_util ,'$2' }.
@@ -188,6 +205,7 @@ ConditionList -> Condition: ['$1'].
 ConditionList -> Condition ',' ConditionList: ['$1'|'$3'].
 
 Condition -> Field Operator Constant : { '$1', '$2', '$3' }.
+Condition -> Field '[' Date ':' Date ']' : { '$1', 'DATETIME', ['$3','$5'] }.
 Condition -> 'AND' '(' ConditionList ')' : { 'AND', '$3' }.
 Condition -> 'OR' '(' ConditionList ')' : { 'OR', '$3' }.
 Condition -> 'ANDNOT' '(' Condition ',' Condition ')' : { 'ANDNOT', '$3', '$5' }.
@@ -202,19 +220,37 @@ Operator -> ':<>' : ':<>'.
 Operator -> 'LIKE' : 'LIKE'.
 Operator -> ':LIKE' : ':LIKE'.
 
-ParamList-> Param ParamList: ['$1'|'$2'].
-ParamList-> Param: ['$1'].
+Date -> integer : get_token('$1').
+Date -> text : ecomet_lib:parse_dt(get_token('$1')).
 
-Param-> order by OrderByList : {order,'$3'}.
-Param-> group by GroupByList: {group,'$3'}.
-Param-> page integer ':' integer: {page,{ get_token('$2'), get_token('$4') }}.
-Param-> Lock : '$1'.
+GetParamList-> GetParam GetParamList: ['$1'|'$2'].
+GetParamList-> GetParam: ['$1'].
+
+GetParam-> order by OrderByList : {order,'$3'}.
+GetParam-> group by GroupByList: {group,'$3'}.
+GetParam-> page integer ':' integer: {page,{ get_token('$2'), get_token('$4') }}.
+GetParam-> Lock : '$1'.
+GetParam-> Format : '$1'.
 
 SubParamList-> SubParam SubParamList: ['$1'|'$2'].
 SubParamList-> SubParam: ['$1'].
 
 SubParam-> stateless : {stateless,true}.
 SubParam-> no_feedback : {no_feedback,true}.
+SubParam-> Format : '$1'.
+
+SetParamList-> SetParam SetParamList: ['$1'|'$2'].
+SetParamList-> SetParam: ['$1'].
+
+SetParam-> Lock : '$1'.
+SetParam-> Format : '$1'.
+
+InsertParamList-> InsertParam InsertParamList: ['$1'|'$2'].
+InsertParamList-> InsertParam: ['$1'].
+
+InsertParam-> update : { update, true }.
+InsertParam-> Lock : '$1'.
+InsertParam-> Format : '$1'.
 
 Lock -> lock read : { lock , read }.
 Lock -> lock write : { lock , write }.
@@ -235,6 +271,9 @@ GroupByList -> GroupBy ',' GroupByList: ['$1'|'$3'].
 
 GroupBy -> Field : '$1'.
 GroupBy -> integer : get_token('$1').
+
+Format -> format '$' Atom ':' Atom : { format, fun '$3':'$5'/2 }.
+Format -> format '$' Atom : { format, fun ecomet_types:'$3'/2 }.
 
 Erlang code.
 

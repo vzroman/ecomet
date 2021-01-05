@@ -29,8 +29,10 @@
   to_oid/1,
   to_path/1,
   pipe/2,
+  is_exported/3,
   module_exists/1,
-  guid/0
+  guid/0,
+  dummy/1
 ]).
 
 % The result of
@@ -61,7 +63,8 @@ parse_dt(DT) when is_integer(DT)-> DT;
 parse_dt(DT) when is_binary(DT)->
   parse_dt(unicode:characters_to_list(DT));
 parse_dt(DT) when is_list(DT)->
-  calendar:rfc3339_to_system_time(DT,[{unit,millisecond}]).
+  {M,S,Mi} = ec_date:nparse(DT),
+  (M * 1000000 + S) * 1000 + Mi div 1000.
 
 ts()->
   erlang:system_time(millisecond).
@@ -125,6 +128,16 @@ pipe([H|T],Acc,Step)->
 pipe([],Acc,_Step)->
   {ok,Acc}.
 
+is_exported(Module,Method,Arity)->
+  case module_exists(Module) of
+    false->{error,invalid_module};
+    true->
+      case erlang:function_exported(Module,Method,Arity) of
+        false->{error,invalid_function};
+        true->{ok,fun Module:Method/Arity}
+      end
+  end.
+
 %% Utility for checking if the module is available
 module_exists(Module)->
   case code:is_loaded(Module) of
@@ -154,3 +167,6 @@ guid() ->
       end,
     Acc ++ S
   end,[],lists:seq(1, 16)).
+
+dummy(Value)->
+  Value.

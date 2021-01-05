@@ -40,14 +40,15 @@
 %%	Data API
 %%=================================================================
 -export([
-  create/1,
+  create/1,create/2,
   delete/1,
   open/1,open/2,open/3,
   construct/1,
-  edit/2,
+  edit/2,edit/3,
   copy/2,
-  read_field/2,read_field/3,read_fields/2,read_all/1,
+  read_field/2,read_field/3,read_fields/2,read_fields/3,read_all/1,read_all/2,
   field_changes/2,
+  field_type/2,
   is_object/1,
   is_oid/1,
   get_oid/1,
@@ -95,7 +96,8 @@
   end).
 -define(SERVICE_FIELDS,#{
   <<".oid">>=>fun ecomet_lib:to_oid/1,
-  <<".path">>=>fun ecomet_lib:to_path/1
+  <<".path">>=>fun ecomet_lib:to_path/1,
+  <<".object">>=>fun ecomet_lib:dummy/1
 }).
 %%=================================================================
 %%	Data API
@@ -104,7 +106,19 @@
 %% Main functions
 %%============================================================================
 % Create new object
-create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields)->
+create(Fields)->
+  create(Fields,#{}).
+create(Fields,Params) when is_list(Params)->
+  create(Fields,maps:from_list(Params));
+create(#{<<".pattern">>:=Pattern} = Fields,#{format:=Format}=Params)->
+  PatternID = Format(link,Pattern),
+  Map=ecomet_pattern:get_map(PatternID),
+  ParsedFields = parse_fields(Format,Map,maps:remove(<<".pattern">>,Fields)),
+  Params1 = maps:remove(format,Params),
+  Fields1 = ParsedFields#{<<".pattern">>=>PatternID},
+  create(Fields1,Params1);
+create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params)->
+
   % Get folder rights
   Folder = construct(FolderID),
   % Check rights
@@ -205,16 +219,30 @@ read_field(#object{oid=OID,map=Map}=Object,Field)->
           ecomet_field:get_value(Map,OID,Field)
       end
   end.
-read_field(Object,Field,Default)->
+read_field(Object,Field,Params) when is_list(Params)->
+  read_field(Object,Field,maps:from_list(Params));
+read_field(Object,Field,Params) when is_map(Params)->
   case read_field(Object,Field) of
-    {ok,none}->{ok,Default};
+    {ok,Value}->
+      case {Params,Value} of
+        { #{default:=Default}, none}->{ok,Default};
+        { #{format:=Format}, _ }->
+          {ok,Type}=ecomet_field:get_type(Object#object.map,Field),
+          {ok,Format(Type,Value)};
+        _->
+          {ok,Value}
+      end;
     Other->Other
   end.
 
-read_fields(Object,Fields) when is_list(Fields)->
-  Map = maps:from_list([ {Field,none} || Field <- Fields ]),
-  read_fields(Object, Map);
-read_fields(#object{oid = OID,map = Map}=Object,Fields) when is_map(Fields)->
+read_fields(Object,Fields)->
+  read_fields(Object,Fields,#{}).
+read_fields(Object,Fields,Params) when is_list(Fields)->
+  FieldsMap = maps:from_list([ {Field,none} || Field <- Fields ]),
+  read_fields(Object,FieldsMap,Params);
+read_fields(Object,Fields,Params) when is_list(Params)->
+  read_fields(Object,Fields,maps:from_list(Params));
+read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Fields),is_map(Params)->
 
   % Check if we have project with changes in transaction dict
   Project=ecomet_transaction:dict_get({OID,fields},#{}),
@@ -235,31 +263,59 @@ read_fields(#object{oid = OID,map = Map}=Object,Fields) when is_map(Fields)->
       end
     end,#{},maps:without(maps:keys(ToLoad),Fields)),
 
+  Formatter=
+    case Params of
+      #{format:=Format}->Format;
+      _->fun(_Type,Value)->Value end
+    end,
+
   maps:map(fun(Name,Default)->
-    case Project of
-      #{Name:=none}->Default;
-      #{Name:=Value}->Value;
+    case ?SERVICE_FIELDS of
+      #{Name:=Fun}->
+        % The field is a virtual field
+        Fun(Object);
       _->
-        case ToLoad of
-          #{Name:=Fun}->Fun(Object);
-          _->
-            % Look up the field in the storage
-            {ok,S}=ecomet_field:get_storage(Map,Name),
-            #{S:=Values} = Storage,
-            maps:get(Name,Values,Default)
-        end
+        % The real field
+        Value=
+          case Project of
+            #{ Name:= none }->
+              Default;
+            #{ Name:= New }->
+              % The field has changes in the transaction
+              New;
+            _->
+              % Look up the field in the storage
+              {ok,S}=ecomet_field:get_storage(Map,Name),
+              #{S:=Values} = Storage,
+              maps:get(Name,Values,Default)
+          end,
+        {ok,Type}=ecomet_field:get_type(Map,Name),
+        Formatter(Type,Value)
     end
   end,Fields).
 
 % Read all object fields
-read_all(#object{map=Map}=Object)->
-  Fields=maps:keys(ecomet_pattern:get_fields(Map)),
-  read_fields(Object,Fields).
+read_all(Object)->
+  read_all(Object,#{}).
+read_all(Object,Params) when is_list(Params)->
+  read_all(Object,maps:from_list(Params));
+read_all(#object{map=Map}=Object,Params) when is_map(Params)->
+  Fields=maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map)),
+  read_fields(Object,Fields,Params).
 
 % Edit object
-edit(#object{edit=false},_FieldList)->?ERROR(access_denied);
-edit(#object{oid=OID,map=Map}=Object,Fields)->
+edit(Object,Fields)->
+  edit(Object,Fields,#{}).
+edit(Object,Fields,Params) when is_list(Params)->
+  edit(Object,Fields,maps:from_list(Params));
+edit(#object{edit=false},_Fields,_Params)->?ERROR(access_denied);
+edit(#object{map=Map}=Object,Fields,#{format:=Format}=Params)->
+  ParsedFields= parse_fields(Format,Map,Fields),
+  Params1 = maps:remove(format,Params),
+  edit(Object,ParsedFields,Params1);
+edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
   OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
+
   NewFields=ecomet_field:merge(Map,OldFields,Fields),
   case ecomet_transaction:dict_get({OID,handler},none) of
     none->
@@ -275,10 +331,20 @@ copy(Object, Replace)->
   New = maps:merge(Original, Replace),
   create(New).
 
+parse_fields(Formatter,Map,Fields)->
+  maps:map(fun(Name,Value)->
+    {ok,Type}=ecomet_field:get_type(Map,Name),
+    Formatter(Type,Value)
+  end,Fields).
+
+
 % Check changes for the field within the transaction
 field_changes(#object{oid=OID,map=Map},Field)->
   Fields=ecomet_transaction:dict_get({OID,fields},#{}),
   ecomet_field:field_changes(Map,Fields,OID,Field).
+
+field_type(#object{map=Map},Field)->
+  ecomet_field:get_type(Map,Field).
 
 is_object(#object{})->
   true;
@@ -405,7 +471,7 @@ commit(OID,Dict)->
       [ ok = ecomet_backend:delete(DB,?DATA,Type,OID,none) || Type <- maps:keys(Storages) ],
       % The log record
       #ecomet_log{
-        object = #{ <<".oid">> => OID },
+        object = ecomet_query:object_map(Object,#{}),
         db = DB,
         ts=ecomet_lib:log_ts(),
         tags={[],[],Tags},
@@ -470,7 +536,7 @@ commit(OID,Dict)->
 
           % The log record
           #ecomet_log{
-            object = NewVersion#{ <<".oid">> => OID },
+            object = ecomet_query:object_map(Object,NewVersion),
             db = DB,
             ts=TS,
             tags={ Add, Unchanged, Del},

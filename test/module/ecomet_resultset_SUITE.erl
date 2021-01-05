@@ -176,11 +176,11 @@ end_per_suite(Config)->
   PatternID4=?config(pattern_id4,Config),
   PatternID5=?config(pattern_id5,Config),
   ecomet_query:delete([root],{'OR',[
-    {<<".pattern">>,'=',PatternID1},
-    {<<".pattern">>,'=',PatternID2},
-    {<<".pattern">>,'=',PatternID3},
-    {<<".pattern">>,'=',PatternID4},
-    {<<".pattern">>,'=',PatternID5}
+    {<<".pattern">>,':=',PatternID1},
+    {<<".pattern">>,':=',PatternID2},
+    {<<".pattern">>,':=',PatternID3},
+    {<<".pattern">>,':=',PatternID4},
+    {<<".pattern">>,':=',PatternID5}
   ]}),
   ?BACKEND_STOP(30000),
   ok.
@@ -245,8 +245,8 @@ end_per_group(search,Config)->
   PatternID4=?config(pattern_id4,Config),
   PatternID5=?config(pattern_id5,Config),
   Query=ecomet_resultset:prepare({'OR',[
-    {<<".pattern">>,'=',PatternID4},
-    {<<".pattern">>,'=',PatternID5}
+    {<<".pattern">>,':=',PatternID4},
+    {<<".pattern">>,':=',PatternID5}
   ]}),
   Delete=
     fun(RS)->
@@ -275,14 +275,14 @@ define_patterns(_Config)->
   Defined=ecomet_resultset:define_patterns({'OR',[
     {'AND',[
       {<<"field1">>,'=',<<"value1">>},
-      {<<".pattern">>,'=',PatternID1}
+      {<<".pattern">>,':=',PatternID1}
     ]},
     {'AND',[
       {<<"field1">>,'=',<<"value1">>},
       {<<"field2">>,'=',<<"value2">>}
     ]},
     {'ANDNOT',
-      {<<".pattern">>,'=',PatternID2},
+      {<<".pattern">>,':=',PatternID2},
       {<<"field1">>,':>',<<"value1">>}
     }
   ]}),
@@ -1085,17 +1085,17 @@ prepare_summary(Config)->
   % Simple tag
   {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}=ecomet_resultset:prepare({<<"field1">>,'=',<<"value1">>}),
   % Pattern tag
-  {'TAG',{<<".pattern">>,PatternID1,simple},S2Config}=ecomet_resultset:prepare({<<".pattern">>,'=',PatternID1}),
+  {'TAG',{<<".pattern">>,PatternID1,simple},S2Config}=ecomet_resultset:prepare({<<".pattern">>,':=',PatternID1}),
   {Ext1,[{disc,Ext1,[]}]}=S2Config,
   ?assertError(no_base_conditions,ecomet_resultset:prepare({<<"field1">>,':=',<<"value1">>})),
   % Patterns are not defined
   {'AND',S4ANDList,'UNDEFINED'}=ecomet_resultset:prepare({'AND',[
     {'OR',[
-      {<<".pattern">>,'=',PatternID1},
+      {<<".pattern">>,':=',PatternID1},
       {<<"field1">>,'=',<<"value1">>}
     ]},
     {'OR',[
-      {<<".pattern">>,'=',PatternID2},
+      {<<".pattern">>,':=',PatternID2},
       {<<"field2">>,'=',<<"value2">>}
     ]}
   ]}),
@@ -1112,11 +1112,11 @@ prepare_summary(Config)->
   % Patterns are defined
   {'OR',[S5AND1,S5AND2],{Ext12,[]}}=ecomet_resultset:prepare({'OR',[
     {'AND',[
-      {<<".pattern">>,'=',PatternID1},
+      {<<".pattern">>,':=',PatternID1},
       {<<"field1">>,'=',<<"value1">>}
     ]},
     {'AND',[
-      {<<".pattern">>,'=',PatternID2},
+      {<<".pattern">>,':=',PatternID2},
       {<<"field2">>,'=',<<"value2">>}
     ]}
   ]}),
@@ -1132,7 +1132,7 @@ prepare_summary(Config)->
   % AND2 contains no base conditions and can not be attached to any
   ?assertError(no_base_conditions,ecomet_resultset:prepare({'OR',[
     {'AND',[
-      {<<".pattern">>,'=',PatternID1},
+      {<<".pattern">>,':=',PatternID1},
       {<<"field1">>,'=',<<"value1">>}
     ]},
     {'AND',[
@@ -1142,7 +1142,7 @@ prepare_summary(Config)->
   ]})),
   % Patterns spread to branch
   {'AND',[S6AND1,S6AND2],{Ext1,[]}}=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {'ANDNOT',
       {<<"field1">>,'=',<<"value1">>},
       {<<"field2">>,'=',<<"value2">>}
@@ -1155,7 +1155,7 @@ prepare_summary(Config)->
   },{Ext1,[]}}=S6AND2,
   % Direct conditions needs query normalization
   {'OR',[S7Norm1],{Ext1,[]}}=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"field2">>,':>',<<"value2">>}
   ]}),
   {'NORM',{{S7N1TAND,S7N1TANDNOT},{S7N1DAND,[]}},{Ext1,[]}}=S7Norm1,
@@ -1168,7 +1168,7 @@ prepare_summary(Config)->
   {'OR',[S8Norm1,S8Norm2],'UNDEFINED'}=ecomet_resultset:prepare({'OR',[
     {<<"field1">>,'=',<<"value1">>},
     {'AND',[
-      {<<".pattern">>,'=',PatternID1},
+      {<<".pattern">>,':=',PatternID1},
       {<<"field3">>,':>',<<"value3">>}
     ]}
   ]}),
@@ -1227,7 +1227,7 @@ search_patterns(Config)->
   Ext12=ecomet_bits:set_bit(IDP2,Ext1),
 
   % S1. Single tag, pattern is defined
-  S1Query=ecomet_resultset:prepare({<<".pattern">>,'=',PatternID1}),
+  S1Query=ecomet_resultset:prepare({<<".pattern">>,':=',PatternID1}),
   S1Res=ecomet_resultset:search_patterns(S1Query,root,'UNDEFINED'),
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=S1Res,
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=ecomet_resultset:search_patterns(S1Query,root,Ext12),
@@ -1241,7 +1241,7 @@ search_patterns(Config)->
 
   % S3. AND, pattern is defined
   S3Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'=',<<"value1">>}
   ]}),
   {'AND',[
@@ -1277,7 +1277,7 @@ search_patterns(Config)->
   % S5. ANDNOT, pattern not defined
   S5Query=ecomet_resultset:prepare({'ANDNOT',
     {'OR',[
-      {<<".pattern">>,'=',PatternID1},
+      {<<".pattern">>,':=',PatternID1},
       {<<"string1">>,'=',<<"value1">>}
     ]},
     {<<"string2">>,'=',<<"value2">>}
@@ -1292,7 +1292,7 @@ search_patterns(Config)->
 
   % S6. ANDNOT is actual only for patterns in condition1
   S6Query=ecomet_resultset:prepare({'ANDNOT',
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {'OR',[
       {<<"string1">>,'=',<<"value1">>},
       {<<"string2">>,'=',<<"value2">>}
@@ -1309,7 +1309,7 @@ search_patterns(Config)->
   % S7. OR on AND + ANDNOT
   S7Query=ecomet_resultset:prepare({'OR',[
     {'AND',[
-      {<<".pattern">>,'=',PatternID1},
+      {<<".pattern">>,':=',PatternID1},
       {<<"string1">>,'=',<<"value1">>}
     ]},
     {'ANDNOT',
@@ -1331,7 +1331,7 @@ search_patterns(Config)->
   % S8. ANDNOT with directs
   S8Query=ecomet_resultset:prepare({'ANDNOT',
     {'AND',[
-      {<<".pattern">>,'=',PatternID1},
+      {<<".pattern">>,':=',PatternID1},
       {<<"string1">>,':>',<<"value1">>}
     ]},
     {'OR',[
@@ -1367,7 +1367,7 @@ search_idhs(Config)->
   IDH1 = ecomet_bits:set_bit(IDH1_0,none),
 
   % S1. tag on pattern
-  S1Query=ecomet_resultset:prepare({<<".pattern">>,'=',PatternID1}),
+  S1Query=ecomet_resultset:prepare({<<".pattern">>,':=',PatternID1}),
   {IDH1,S1P1TAG}=ecomet_resultset:seacrh_idhs(S1Query,root,IDP1),
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[
     {IDP1,IDH1}
@@ -1391,7 +1391,7 @@ search_idhs(Config)->
 
   % S3. AND with pattern
   S3Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'=',<<"value1">>}
   ]}),
   % No need to search patterns
@@ -1408,7 +1408,7 @@ search_idhs(Config)->
 
   % S4. AND with direct
   S4Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,':>',<<"value1">>}
   ]}),
   % Pattern is defined, search idhs
@@ -1508,7 +1508,7 @@ search_simple(Config)->
 
   % S2. AND
   S2Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'=',<<"value1">>}
   ]}),
   S2Res=ecomet_resultset:execute_local(root,S2Query,FunPatName,{'OR',ecomet_resultset:new()}),
@@ -1540,7 +1540,7 @@ search_simple(Config)->
 
   % S4. AND with OR branch
   S4Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'=',<<"value1">>},
     {'OR',[
       {<<"string2">>,'=',<<"value1">>},
@@ -1562,7 +1562,7 @@ search_simple(Config)->
   % S5. ANDNOT
   S5Query=ecomet_resultset:prepare({'ANDNOT',
     {'AND',[
-      {<<".pattern">>,'=',PatternID2},
+      {<<".pattern">>,':=',PatternID2},
       {<<"string1">>,'=',<<"value5">>},
       {<<"string3">>,'=',<<"value0">>}
     ]},
@@ -1577,7 +1577,7 @@ search_simple(Config)->
 
   % S6. Direct
   S6Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,':=',<<"value1">>}
   ]}),
   S6Res=ecomet_resultset:execute_local(root,S6Query,FunPatName,{'OR',ecomet_resultset:new()}),
@@ -1596,7 +1596,7 @@ search_simple(Config)->
   ]),
   % S6_A. Direct not equal
   S6_AQuery=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,':=',<<"value1">>},
     {<<".name">>,':<>',<<"test1">>}
   ]}),
@@ -1616,7 +1616,7 @@ search_simple(Config)->
 
   % S7, :>
   S7Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,':>',<<"value98">>}
   ]}),
   S7Res=ecomet_resultset:execute_local(root,S7Query,FunName,{'OR',ecomet_resultset:new()}),
@@ -1636,7 +1636,7 @@ search_simple(Config)->
 
   % S8, :>
   S8Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,':>=',<<"value98">>}
   ]}),
   S8Res=ecomet_resultset:execute_local(root,S8Query,FunName,{'OR',ecomet_resultset:new()}),
@@ -1657,7 +1657,7 @@ search_simple(Config)->
   % S9. ANDNOT with directs
   S9Query=ecomet_resultset:prepare({'ANDNOT',
     {'AND',[
-      {<<".pattern">>,'=',PatternID1},
+      {<<".pattern">>,':=',PatternID1},
       {<<"string3">>,'=',<<"value1">>},
       {<<"string2">>,':<',<<"value6">>}
     ]},
@@ -1673,7 +1673,7 @@ search_simple(Config)->
 
   % S10 LIKE
   S10Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'LIKE',<<"lue99">>}
   ]}),
   S10Res=ecomet_resultset:execute_local(root,S10Query,FunName,{'OR',ecomet_resultset:new()}),
@@ -1693,7 +1693,7 @@ search_simple(Config)->
 
   % S10_A. Direct LIKE
   S10_AQuery=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,':LIKE',<<"lue99">>}
   ]}),
   S10_ARes=ecomet_resultset:execute_local(root,S10_AQuery,FunName,{'OR',ecomet_resultset:new()}),
@@ -1713,7 +1713,7 @@ search_simple(Config)->
 
   % S11. OR on directs
   S11Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {'OR',[
       {'AND',[
         {<<"integer">>,':<',1},
@@ -1743,7 +1743,7 @@ execute_remote(Config)->
   end,
 
   Query=ecomet_resultset:prepare({'AND',[
-    {<<".pattern">>,'=',PatternID1},
+    {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'=',<<"value1">>}
   ]}),
   PID=ecomet_resultset:execute_remote([root],Query,FunPatName,{'OR',ecomet_resultset:new()}),
