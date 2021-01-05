@@ -61,17 +61,25 @@ end_per_suite(_Config)->
 
 on_create_test(_Config) ->
 
-  meck:new(ecomet),
-  meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
-  meck:new(ecomet_pattern),
+  meck:new([ecomet, ecomet_pattern]),
+  meck:expect(ecomet, field_changes, fun(Object, Field) -> maps:get(Field, Object, none) end),
+  meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, element(1, maps:get(Field, Object))} end),
   meck:expect(ecomet_pattern, append_field, fun(_patternID, _Name, _COnfig) -> ok end),
   meck:expect(ecomet_pattern, remove_field, fun(_PatternID, _OldName) -> ok end),
   meck:expect(ecomet_pattern, get_storage, fun(PatternID) -> PatternID end),
   meck:expect(ecomet, edit_object, fun(_Object, _Map) -> ok end),
 
-  %ecomet_field:on_create(#{}),
+  Object1 = #{<<".name">> => {<<".faceplate">>, none},
+    <<".folder">> => {?DISC, none},
+    <<"storage">> => {?RAMDISC, ?DISC},
+      <<"type">> => term,
+      <<"subtype">> => {},
+    <<"index">> => {simple, datetime},
+    <<"default">> => {<<"newdef">>, <<"newdef">>}
 
+  },
 
+  ok = ecomet_field:on_create(Object1),
 
   meck:unload([ecomet, ecomet_pattern])
 .

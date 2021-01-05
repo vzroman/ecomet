@@ -9,7 +9,7 @@
 -module(ecomet_folder_SUITE).
 -author("faceplate").
 
-%% API
+
 %%-include_lib("ecomet_schema.hrl").
 %%-include_lib("ecomet.hrl").
 %%-include_lib("ecomet_test.hrl").
@@ -71,23 +71,23 @@
 %%  ok
 %%.
 %%
-%%% For testing this function we need to complicate our meck object%
+%%% For testing this function we need to complicate our meck object %
 %%check_database_test(_Config) ->
 %%
-%%  meck:new([ecomet, ecomet_db, ecomet_schema, ecomet_query, ecomet_lib]),
+%%  meck:new([ecomet, ecomet_db, ecomet_schema, ecomet_query, ecomet_lib], [no_link, passthrough]),
 %%  meck:expect(ecomet, field_changes, fun(Object, Field) -> maps:get(Field, Object, none) end),
-%%  meck:expect(ecomet_schema, unmount_db, fun(_FolderID) -> ok end) ,
+%%  meck:expect(ecomet_schema, unmount_db, fun(_FolderID) -> ok end),
 %%  meck:expect(ecomet_schema, mount_db, fun(_FolderID, _DB) -> ok end),
 %%  meck:expect(ecomet_db, get_name, fun(_MountedDB) -> ok end),
-%%  meck:expect(ecomet_query, system, fun(DBList, _Fields, _Cond) ->
+%%  meck:expect(ecomet_query, system, fun(_DBList, _Fields, _Cond) ->
 %%                                    Field = element(1, _Cond),
 %%                                    Folder = element(3, _Cond),
-%%                                    map_get(Field, Folder)
+%%                                    maps:get(Field, Folder)
 %%                                    end),
 %%
 %%  % should return none or DB name%
 %%  meck:expect(ecomet_schema, get_mounted_db, fun(FolderID) -> maps:get(<<"db_name">>, FolderID) end),
-%%
+%%  % In our case to_oid(Object) return mapObject %
 %%  meck:expect(ecomet_lib, to_oid, fun(Object) -> maps:get(<<"OID">>, Object) end),
 %%
 %%
@@ -95,28 +95,38 @@
 %%  ok = ecomet_folder:check_database(#{<<"Chester">> => <<"Bennington">>}),
 %%  ok = ecomet_folder:check_database(#{}),
 %%
-%%  % Our complicated meck object %
-%%  #{
+%%  % Example of our complicated meck object %
+%%  EmptyObject = #{
 %%    <<"database">> => {<<"MountedDB">>, <<"UnmountedDB">>},
 %%    <<"OID">> => #{<<"db_name">> => <<"myDB">>, <<".folder">> => 0}
 %%  },
-%%
-%%  ecomet_folder:check_database(#{<<"database">> => {<<"MountedDB">>, <<"UnmountedDB">>}}),
-%%
+%%  NonEmptyObject = #{
+%%    <<"database">> => {<<"MountedDB">>, <<"UnmountedDB">>},
+%%    <<"OID">> => #{<<"db_name">> => <<"myDB">>, <<".folder">> => 1}
+%%  },
+%%  ok = ecomet_folder:check_database(EmptyObject),
+%%  ?assertError(contains_objects, ecomet_folder:check_database(NonEmptyObject)),
 %%
 %%  meck:unload([ecomet, ecomet_db, ecomet_schema, ecomet_query, ecomet_lib])
 %%.
 %%
 %%
 %%inherit_rights_test(_Config) ->
-%%  meck:new([ecomet, ecomet_object]),
-%%  meck:expect(ecomet_object, read_field, fun(Object, Field, Default) -> {ok, maps:get(Field, Object, Default)} end),
-%%  meck:expect(ecomet, edit_object, fun(_Object, _Fields) ->
+%%  meck:new([ecomet]),
+%%  meck:expect(ecomet, read_fields, fun(Object, Fields) ->
+%%    maps:map(fun(Key, Default) -> case maps:get(Key, Object, none) of
+%%                                    none -> Default;
+%%                                    Value -> Value
+%%                                  end
+%%             end, Fields)
+%%    end),
+%%
+%%  meck:expect(ecomet, edit_object, fun(_Object, Fields) ->
 %%
 %%    ok end),
 %%
 %%
-%%  meck:unload([ecomet, ecomet_object])
+%%  meck:unload([ecomet])
 %%.
 %%
 %%

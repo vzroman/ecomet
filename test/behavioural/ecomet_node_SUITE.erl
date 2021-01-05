@@ -53,14 +53,16 @@ end_per_suite(_Config)->
 
 on_create_test(_Config) ->
 
-  meck:new(ecomet, [no_link]),
+  meck:new([ecomet, ecomet_schema], [no_link]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field ,Object, none)} end),
   meck:expect(ecomet, edit_object, fun(_Object, _IDMapper) -> ok end),
+  meck:expect(ecomet_schema, add_node, fun(_Atom) -> ok end),
 
-  %%ecomet_node:on_create(#{<<".name">> => }),
+  ?assertError(invalid_node_name, ecomet_node:on_create(#{<<".name">> => {<<"invalidname">>, none}})),
+  %ok = ecomet_node:on_create(#{<<".name">> => {<<"iwasbornin1998@faceplate.c">>, none}}),
 
-  meck:unload(ecomet),
+  meck:unload([ecomet, ecomet_schema]),
   ok
 .
 
