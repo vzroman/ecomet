@@ -31,11 +31,12 @@
   get/3,get/4,
   subscribe/4,subscribe/5,
   unsubscribe/1,
+  set/3,set/4,
+  insert/2,
+  delete/2,delete/3,
   on_commit/1,
   object_map/2,
   notify/2,
-  set/3,set/4,
-  delete/2,delete/3,
   execute/2,execute/3,
   compile/3,compile/4,
   system/3
@@ -117,11 +118,12 @@ run_statement({get,Fields,DBs,Condition,Params},Acc)->
   [get(DBs,Fields,Condition,Params)|Acc];
 run_statement({subscribe,ID,Fields,DBs,Condition,Params},Acc)->
   [subscribe(ID,DBs,Fields,Condition,Params)|Acc];
+run_statement({unsubscribe,ID},Acc)->
+  [unsubscribe(ID)|Acc];
 run_statement({set,Fields,DBs,Condition,Params},Acc)->
   [set(DBs,Fields,Condition,Params)|Acc];
 run_statement({insert,Fields,Params},Acc)->
-  Object=ecomet_object:create(Fields,Params),
-  [ecomet_object:get_oid(Object)|Acc];
+  [insert(Fields,Params)|Acc];
 run_statement({delete,DBs,Condition,Params},Acc)->
   [delete(DBs,Condition,Params)|Acc];
 run_statement(transaction_start,Acc)->
@@ -472,6 +474,41 @@ set(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(set,Fields,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
   execute(CompiledQuery,DBs,Union).
+
+%%=====================================================================
+%%	INSERT
+%%=====================================================================
+% Fields the same format as for 'set',
+% Params = #{
+%   update => true|false,
+%   lock  => none|read|write,
+%   format => fun/2
+% }
+insert(Fields,Params) when is_list(Params)->
+  insert(Fields,maps:from_list(Params));
+insert(#{<<".folder">>:=Folder,<<".name">>:=Name }=Fields, #{update:=true}=Params)->
+  % If update is allowed then try to find and update the object
+  {Folder1, Name1 }=
+    case Params of
+      #{format:=Formatter}->
+        { Formatter(link,Folder), Formatter(string,Name) };
+      _->
+        { Folder, Name }
+    end,
+  case ecomet_folder:find_object_system(Folder1,Name1) of
+    {ok,OID}->
+      % This is an update
+      Object = ecomet:open(OID,maps:get(lock,Params,none)),
+      ok = ecomet:edit_object(Object,Fields,Params),
+      OID;
+    _->
+      % Create a new object
+      insert(Fields,maps:remove(update,Params))
+  end;
+insert(Fields,Params)->
+  Object = ecomet:create_object(Fields,Params),
+  ecomet:to_oid(Object).
+
 %%=====================================================================
 %%	DELETE
 %%=====================================================================

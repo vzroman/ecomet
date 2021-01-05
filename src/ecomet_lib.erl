@@ -29,6 +29,7 @@
   to_oid/1,
   to_path/1,
   pipe/2,
+  is_exported/3,
   module_exists/1,
   guid/0,
   dummy/1
@@ -127,6 +128,16 @@ pipe([H|T],Acc,Step)->
   end;
 pipe([],Acc,_Step)->
   {ok,Acc}.
+
+is_exported(Module,Method,Arity)->
+  case module_exists(Module) of
+    false->{error,invalid_module};
+    true->
+      case erlang:function_exported(Module,Method,Arity) of
+        false->{error,invalid_function};
+        true->{ok,fun Module:Method/Arity}
+      end
+  end.
 
 %% Utility for checking if the module is available
 module_exists(Module)->

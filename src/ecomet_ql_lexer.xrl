@@ -28,7 +28,9 @@ GROUP       = (G|g)(R|r)(O|o)(U|u)(P|p)
 GET         = (G|g)(E|e)(T|t)
 FROM        = (F|f)(R|r)(O|o)(M|m)
 SUBSCRIBE   = (S|s)(U|u)(B|b)(S|s)(C|c)(R|r)(I|i)(B|b)(E|e)
+UNSUBSCRIBE = (U|u)(N|n)(S|s)(U|u)(B|b)(S|s)(C|c)(R|r)(I|i)(B|b)(E|e)
 INSERT      = (I|i)(N|n)(S|s)(E|e)(R|r)(T|t)
+UPDATE      = (U|u)(P|p)(D|d)(A|a)(T|t)(E|e)
 LOCK        = (L|l)(O|o)(C|c)(K|k)
 OR          = (O|o)(R|r)
 ORDER       = (O|o)(R|r)(D|d)(E|e)(R|r)
@@ -82,9 +84,11 @@ Rules.
 {DELETE}      : {token, {delete, TokenLine}}.
 {DESC}        : {token, {'DESC', TokenLine}}.
 {INSERT}      : {token, {insert, TokenLine}}.
+{UPDATE}      : {token, {update, TokenLine}}.
 {GET}         : {token, {get, TokenLine}}.
 {FROM}        : {token, {from, TokenLine}}.
 {SUBSCRIBE}   : {token, {subscribe, TokenLine}}.
+{UNSUBSCRIBE} : {token, {unsubscribe, TokenLine}}.
 {GROUP}       : {token, {group, TokenLine}}.
 {OR}          : {token, {'OR', TokenLine}}.
 {ORDER}       : {token, {order, TokenLine}}.

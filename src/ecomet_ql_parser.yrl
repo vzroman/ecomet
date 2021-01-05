@@ -22,6 +22,7 @@ StatementList
 Statement
 Get
 Subscribe
+Unsubscribe
 Set
 Insert
 Delete
@@ -49,6 +50,8 @@ SubParamList
 SubParam
 SetParamList
 SetParam
+InsertParamList
+InsertParam
 OrderByList
 OrderBy
 OrderDirection
@@ -67,8 +70,10 @@ by
 delete
 'DESC'
 insert
+update
 get
 subscribe
+unsubscribe
 group
 'OR'
 order
@@ -119,6 +124,7 @@ StatementList-> Statement ';' StatementList : ['$1'|'$3'].
 
 Statement -> Get : '$1'.
 Statement -> Subscribe : '$1'.
+Statement -> Unsubscribe : '$1'.
 Statement -> Set : '$1'.
 Statement -> Insert : '$1'.
 Statement -> Delete : '$1'.
@@ -132,10 +138,12 @@ Get -> get GetFieldList from Databases where Condition: {get,'$2','$4','$6',#{}}
 Subscribe -> subscribe text get GetFieldList from Databases where Condition SubParamList: {subscribe,get_token('$2'),'$4','$6','$8',maps:from_list('$9')}.
 Subscribe -> subscribe text get GetFieldList from Databases where Condition: {subscribe,get_token('$2'),'$4','$6','$8',#{}}.
 
+Unsubscribe -> unsubscribe text : { unsubscribe, get_token('$2') }.
+
 Set-> set SetFieldList in Databases where Condition SetParamList : {set,maps:from_list('$2'),'$4','$6',maps:from_list('$7')}.
 Set-> set SetFieldList in Databases where Condition: {set,maps:from_list('$2'),'$4','$6',#{}}.
 
-Insert -> insert SetFieldList SetParamList : { insert, maps:from_list('$2') ,maps:from_list('$3') }.
+Insert -> insert SetFieldList InsertParamList : { insert, maps:from_list('$2') ,maps:from_list('$3') }.
 Insert -> insert SetFieldList : { insert, maps:from_list('$2') ,#{} }.
 
 Delete -> delete from Databases where Condition Lock : { delete, '$3', '$5', maps:from_list(['$6'])}.
@@ -236,6 +244,13 @@ SetParamList-> SetParam: ['$1'].
 
 SetParam-> Lock : '$1'.
 SetParam-> Format : '$1'.
+
+InsertParamList-> InsertParam InsertParamList: ['$1'|'$2'].
+InsertParamList-> InsertParam: ['$1'].
+
+InsertParam-> update : { update, true }.
+InsertParam-> Lock : '$1'.
+InsertParam-> Format : '$1'.
 
 Lock -> lock read : { lock , read }.
 Lock -> lock write : { lock , write }.
