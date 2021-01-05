@@ -6,7 +6,8 @@
   {applications,
    [kernel,
     stdlib,
-    dlss
+    dlss,
+    cowboy
    ]},
   {env,[]},
   {modules, []},

@@ -339,7 +339,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
                   TagsResult =:= add;RightsResult=:=add ->
                     Self!?SUBSCRIPTION(ID,create,OID,Read(Deps,Object));
                   TagsResult =:= del;RightsResult=:=del ->
-                    Self!?SUBSCRIPTION(ID,delete,OID);
+                    Self!?SUBSCRIPTION(ID,delete,OID,#{});
                   true ->
                     Self!?SUBSCRIPTION(ID,update,OID,Read(ordsets:from_list(maps:keys(Changes)),Object))
                 end

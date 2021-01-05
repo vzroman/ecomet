@@ -46,13 +46,34 @@ init([]) ->
     modules=>[ecomet_schema]
   },
 
+  Listeners = build_listeners([
+    http,
+    https
+  ],[]),
+
   Supervisor=#{
     strategy=>one_for_one,
     intensity=>?ENV(segemnt_max_restarts, ?DEFAULT_MAX_RESTARTS),
     period=>?ENV(segemnt_max_period, ?DEFAULT_MAX_PERIOD)
   },
 
-  {ok, {Supervisor, [
-    SchemaSrv
-  ]}}.
+  {ok, {Supervisor,
+    [SchemaSrv|Listeners]
+  }}.
 
+build_listeners([http|Rest],Acc)->
+  case ?ENV(http,[{port,8000}]) of
+    undefined->build_listeners(Rest,Acc);
+    Params->
+      ?LOGINFO("http listener with params ~p",[Params]),
+      build_listeners(Rest,[ecomet_http:listener(http,Params)|Acc])
+  end;
+build_listeners([https|Rest],Acc)->
+  case ?ENV(https,undefined) of
+    undefined->build_listeners(Rest,Acc);
+    Params->
+      ?LOGINFO("https listener with params ~p",[Params]),
+      build_listeners(Rest,[ecomet_http:listener(https,Params)|Acc])
+  end;
+build_listeners([],Acc)->
+  lists:reverse(Acc).

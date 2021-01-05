@@ -24,7 +24,7 @@
 %%=================================================================
 -export([
   on_request/1,
-  on_subscription/2
+  on_subscription/4
 ]).
 
 %%=================================================================
@@ -58,8 +58,12 @@ on_request(Msg)->
     _->reply_error(<<"none">>,<<"invalid request">>)
   end.
 
-on_subscription(ClientID,Object)->
-  reply(ClientID,<<"ok">>,Object).
+on_subscription(ID,Action,OID,Fields)->
+  reply_ok(ID,#{
+    <<"oid">>=> ecomet_types:term_to_string(OID),
+    <<"fields">>=>export_query_cell(Fields),
+    <<"action">>=>Action
+  }).
 
 
 reply_ok(ID,Result)->
@@ -71,12 +75,11 @@ reply_error(ID,Error)->
   reply(ID,<<"error">>,?T2B(Error)).
 
 reply(ID,Type,Result)->
-  JSON = to_json(#{
+  to_json(#{
     <<"id">>=>ID,
     <<"type">>=>Type,
     <<"result">>=>Result
-  }),
-  {ok,JSON}.
+  }).
 
 handle(<<"login">>,_ID,#{<<"login">>:=Login,<<"pass">>:=Pass})->
   case ecomet_user:login(Login,Pass) of
