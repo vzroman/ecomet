@@ -133,12 +133,12 @@ check_storage_test(_Config) ->
   meck:expect(ecomet_pattern, get_storage, fun(PatternID) -> PatternID end),
 
   % We are not changing storage, should return ok %
-  ok = ecomet_field:check_storage(#{<<"singer">> => {<<"avril">>, <<"lavigne">>}}, _IsEmpty=false),
-  ok = ecomet_field:check_storage(#{1 => 2}, _IsEmpty=true),
+  ok = ecomet_field:check_storage(#{<<"singer">> => {<<"avril">>, <<"lavigne">>}}, _IsEmpty0=false),
+  ok = ecomet_field:check_storage(#{1 => 2}, _IsEmpty1=true),
 
   % Object or smth not empty, error should occur %
-  ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {<<"new">>, <<"old">>}}, _IsEmpty=false)),
-  ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {<<"job">>, <<"difficult">>}}, _IsEmpty=false)),
+  ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {<<"new">>, <<"old">>}}, _IsEmpty0=false)),
+  ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {<<"job">>, <<"difficult">>}}, _IsEmpty0=false)),
 
   % is_empty == true %
   % Storage == [?RAMLOCAL,?RAM,?RAMDISC,?DISC] or whatever  %
@@ -215,26 +215,26 @@ check_type_test(_Config) ->
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
 
   % We are not changing type and subtype, should return ok %
-  ok = ecomet_field:check_type(#{ <<"Johnny">> => <<"Depp">>}, _IsEmpty=true),
-  ok = ecomet_field:check_type(#{<<"Cyber">> => <<"Punc">>}, _IsEmpty=false),
+  ok = ecomet_field:check_type(#{ <<"Johnny">> => <<"Depp">>}, _IsEmpty1=true),
+  ok = ecomet_field:check_type(#{<<"Cyber">> => <<"Punc">>}, _IsEmpty0=false),
   ok = ecomet_field:check_type(#{}, _IsEmpty=true),
 
   % We are trying to change type or subtype, but there already created object with the schema %
-  ?assertError(has_objects, ecomet_field:check_type(#{<<"type">> => {<<"New">>, <<"Old">>}, <<"subtype">> => {new, old}}, _IsEmpty=false)),
-  ?assertError(has_objects, ecomet_field:check_type(#{<<"type">> => {<<"New">>, <<"Old">>}}, _IsEmpty=false)),
-  ?assertError(has_objects, ecomet_field:check_type(#{<<"subtype">> => {<<"New">>, <<"Old">>}}, _IsEmpty=false)),
+  ?assertError(has_objects, ecomet_field:check_type(#{<<"type">> => {<<"New">>, <<"Old">>}, <<"subtype">> => {new, old}}, _IsEmpty0=false)),
+  ?assertError(has_objects, ecomet_field:check_type(#{<<"type">> => {<<"New">>, <<"Old">>}}, _IsEmpty0=false)),
+  ?assertError(has_objects, ecomet_field:check_type(#{<<"subtype">> => {<<"New">>, <<"Old">>}}, _IsEmpty0=false)),
 
   % is_empty == true %
   % We are trying to change type or subtype or we have valid types %
   % If the type is not a list then it doesn't matter what is a subtype
-  ok = ecomet_field:check_type(#{<<"type">> => term, <<"subtype">> => {new, old}}, _IsEmpty=true),
-  ok = ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => binary} ,_IsEmpty=true),
+  ok = ecomet_field:check_type(#{<<"type">> => term, <<"subtype">> => {new, old}}, _IsEmpty1=true),
+  ok = ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => binary} ,_IsEmpty1=true),
   ok = ecomet_field:check_type(#{<<"type">> => atom}, _IsEmpty=true),
-  ok = ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => link} ,_IsEmpty=true),
+  ok = ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => link} ,_IsEmpty1=true),
 
   % We have unsupported types, error should occur %
-  ?assertError(invalid_type, ecomet_field:check_type(#{<<"type">> => qweasd, <<"subtype">> => link} ,_IsEmpty=true)),
-  ?assertError(invalid_type, ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => gsg} ,_IsEmpty=true)),
+  ?assertError(invalid_type, ecomet_field:check_type(#{<<"type">> => qweasd, <<"subtype">> => link} ,_IsEmpty1=true)),
+  ?assertError(invalid_type, ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => gsg} ,_IsEmpty1=true)),
 
   meck:unload(ecomet),
 
@@ -248,12 +248,12 @@ check_index_test(_Config) ->
   meck:expect(ecomet, edit_object, fun(_Object, _Map) -> ok end),
 
   % We are not changing index, should return ok %
-  ok = ecomet_field:check_index(#{ <<"Album">> => <<"Meteora">>}, _IsEmpty=true),
-  ok = ecomet_field:check_index(#{<<"Album">> => <<"Meteora">>, <<"Crypto">> => <<"RSA">>}, _IsEmpty=false),
+  ok = ecomet_field:check_index(#{ <<"Album">> => <<"Meteora">>}, _IsEmpty1=true),
+  ok = ecomet_field:check_index(#{<<"Album">> => <<"Meteora">>, <<"Crypto">> => <<"RSA">>}, _IsEmpty0=false),
 
   % %
-  ok = ecomet_field:check_index(#{<<"index">> => {none, [simple]}, <<"Album">> => <<"Meteora">>}, _IsEmpty=true),
-  ok = ecomet_field:check_index(#{<<"index">> => {none, ['3gram']}, <<"Album">> => <<"Meteora">>}, _IsEmpty=false),
+  ok = ecomet_field:check_index(#{<<"index">> => {none, [simple]}, <<"Album">> => <<"Meteora">>}, _IsEmpty1=true),
+  ok = ecomet_field:check_index(#{<<"index">> => {none, ['3gram']}, <<"Album">> => <<"Meteora">>}, _IsEmpty0=false),
 
   %supported types %
 %%  [
