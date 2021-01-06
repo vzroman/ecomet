@@ -74,9 +74,8 @@ on_create_test(_Config) ->
     <<"storage">> => {?RAMDISC, ?DISC},
       <<"type">> => term,
       <<"subtype">> => {},
-    <<"index">> => {simple, datetime},
+    <<"index">> => {[simple], none},
     <<"default">> => {<<"newdef">>, <<"newdef">>}
-
   },
 
   ok = ecomet_field:on_create(Object1),
@@ -86,7 +85,37 @@ on_create_test(_Config) ->
 
 
 on_edit_test(_Config) ->
-    ok.
+  meck:new([ecomet, ecomet_pattern]),
+  meck:expect(ecomet, field_changes, fun(Object, Field) -> maps:get(Field, Object, none) end),
+  meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, element(1, maps:get(Field, Object, {none}))} end),
+  meck:expect(ecomet_pattern, append_field, fun(_patternID, _Name, _COnfig) -> ok end),
+  meck:expect(ecomet_pattern, remove_field, fun(_PatternID, _OldName) -> ok end),
+  meck:expect(ecomet_pattern, get_storage, fun(PatternID) -> PatternID end),
+  meck:expect(ecomet, edit_object, fun(_Object, _Map) -> ok end),
+  meck:expect(ecomet_pattern, is_empty, fun(_PatternID) -> get(is_empty) end),
+
+  put(is_empty, true),
+
+  Object1 = #{<<".name">> => {<<".faceplate">>, none},
+    <<"storage">> => {?RAMDISC, ?DISC},
+    <<"type">> => term,
+    <<"subtype">> => {},
+    <<"index">> => {[simple], datetime},
+    <<"default">> => {<<"newdef">>, <<"newdef">>}
+
+  },
+
+  ok = ecomet_field:on_edit(Object1),
+
+  put(is_empty, false),
+
+  Object2 = #{
+  },
+
+  ok = ecomet_field:on_edit(Object2),
+
+  meck:unload([ecomet, ecomet_pattern])
+.
 
 
 on_delete_test(_Config) ->

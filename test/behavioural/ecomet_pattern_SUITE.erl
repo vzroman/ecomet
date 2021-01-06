@@ -125,10 +125,9 @@ set_parents_test(_Config) ->
   meck:expect(ecomet_lib, to_object_system, fun(Pattern) -> Pattern end),
 
   Object1 = #{<<"parent_pattern">> => #{<<"parents">> => [a, b, c]} },
-  ct:pal(12312312),
   Exp = #{<<"parents">> => [#{<<"parents">> => [a, b, c]}, a, b, c]},
   ecomet_pattern:set_parents(Object1),
-  [{side_effect, Exp }] = get(),
+  Exp = get(side_effect),
 
   meck:unload([ecomet, ecomet_lib]),
 

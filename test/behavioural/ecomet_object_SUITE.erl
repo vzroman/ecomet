@@ -57,10 +57,28 @@ end_per_suite(_Config)->
   ok.
 
 on_create_test(_Config) ->
-  ok.
+
+  ecomet_user:on_init_state(),
+
+  Object = ecomet:create_object(#{
+   <<".name">> => <<"Simple">>,
+   <<".folder">> => ?OID(<<"/root/.databases">>),
+   <<".pattern">> => ?OID(<<"/root/.patterns/.database">>),
+    <<".readgroups">> => [],
+    <<".writegroups">> => []
+  }),
+
+  {ok, _WriteG} = ecomet_object:read_field(Object, <<".writegroups">>),
+  {ok, _ReadG} = ecomet_object:read_field(Object, <<".readgroups">>),
+
+  %%[] = WriteG -- ReadG,
+
+  ok = ecomet:delete_object(Object),
+  ok
+.
 
 on_edit_test(_Config) ->
-  meck:new([ecomet_field, ecomet_transaction], [no_link]),
+  meck:new([ecomet_field, ecomet_transaction, ecomet_folder]),
   meck:expect(ecomet_field, get_value, fun(Map, _OID, Field) -> {ok, element(1, maps:get(Field, Map))} end),
   meck:expect(ecomet_transaction, dict_get, fun(_OID_fields, Default) -> Default end),
   meck:expect(ecomet_field, field_changes, fun(Map,_Fields,_OID,Field) -> maps:get(Field, Map, none) end),
@@ -140,7 +158,7 @@ on_edit_test(_Config) ->
   },
   ok = ecomet_object:on_edit(Object6),
 
-  meck:unload([ecomet_field, ecomet_transaction])
+  meck:unload([ecomet_field, ecomet_transaction, ecomet_folder])
 .
 
 on_delete_test(_Config) ->
@@ -155,7 +173,7 @@ on_delete_test(_Config) ->
 
 check_storage_type_test(_Config) ->
 
-  meck:new([ecomet, ecomet_pattern], [no_link]),
+  meck:new([ecomet, ecomet_pattern]),
   meck:expect(ecomet, read_field, fun(Object, Field) ->
                                       {ok, maps:get(Field, element(2, Object))}
                                   end),
@@ -235,12 +253,19 @@ edit_rights_test(_Config) ->
 .
 
 edit_test(_Config) ->
+
+%%  % Our meck object %
+%%  #object{
+%%    oid = {1, 2},
+%%    map = #{}
+%%  },
+
   ok.
 
 
 check_db_test(_Config) ->
 
-  meck:new([ecomet_field, ecomet_transaction], [no_link]),
+  meck:new([ecomet_field, ecomet_transaction]),
   meck:expect(ecomet_transaction, dict_get, fun(OID, _Default) -> element(1, OID) end),
   meck:expect(ecomet_field, field_changes, fun(Map,_Fields,_OID,Field) -> maps:get(Field, Map, none) end),
   % Our meck object %
