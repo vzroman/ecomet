@@ -1,13 +1,21 @@
-%%%-------------------------------------------------------------------
-%%% @author faceplate
-%%% @copyright (C) 2020, <COMPANY>
-%%% @doc
-%%%
-%%% @end
-%%% Created : 21. Dec 2020 15:13
-%%%-------------------------------------------------------------------
+%%----------------------------------------------------------------
+%% Copyright (c) 2020 Faceplate
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%----------------------------------------------------------------
 -module(ecomet_node_SUITE).
--author("faceplate").
 
 -include_lib("ecomet_schema.hrl").
 -include_lib("ecomet.hrl").
@@ -18,13 +26,13 @@
 -export([all/0, group/0, init_per_suite/1, end_per_suite/1]).
 
 -export([
-  on_create_test/1,
-  on_edit_test/1,
-  on_delete_test/1,
   check_name_test/1,
   check_id_test/1,
   register_node_test/1,
-  unregister_node_test/1
+  unregister_node_test/1,
+  on_create_test/1,
+  on_edit_test/1,
+  on_delete_test/1
 ]).
 
 all() ->
@@ -51,56 +59,6 @@ end_per_suite(_Config)->
   ok.
 
 
-on_create_test(_Config) ->
-
-  meck:new([ecomet, ecomet_schema], [no_link]),
-  meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
-  meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field ,Object, none)} end),
-  meck:expect(ecomet, edit_object, fun(_Object, _IDMapper) -> ok end),
-  meck:expect(ecomet_schema, add_node, fun(_Atom) -> ok end),
-
-  ?assertError(invalid_node_name, ecomet_node:on_create(#{<<".name">> => {<<"invalidname">>, none}})),
-  %ok = ecomet_node:on_create(#{<<".name">> => {<<"iwasbornin1998@faceplate.c">>, none}}),
-
-  meck:unload([ecomet, ecomet_schema]),
-  ok
-.
-
-
-on_edit_test(_Config) ->
-
-  meck:new(ecomet, [no_link]),
-  meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
-
-  % We are not changing name or id, should return ok %
-  ok = ecomet_node:on_edit(#{<<".notname">> => {<<"dont">>, <<"edit">>}, <<"notid">> => {bla, bla}}),
-  ok = ecomet_node:on_edit(#{<<"hello">> => <<"its_me">>}),
-
-  %We are trying to change name or id, error should occur %
-  ?assertError(renaming_is_not_allowed, ecomet_node:on_edit(#{<<".name">> => {<<"NewOne">>, <<"OldOne">>}})),
-  ?assertError(change_id_is_not_allowed, ecomet_node:on_edit(#{<<"id">> => {{1, 2}, {3, 4}}})),
-  ?assertError(renaming_is_not_allowed, ecomet_node:on_edit(#{<<".name">> => {<<"NewOne">>, <<"OldOne">>}, <<"id">> => {{1, 2}, {3, 4}} })),
-
-  meck:unload(ecomet)
-.
-
-on_delete_test(_Config) ->
-
-  meck:new(ecomet),
-  meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field ,Object, none)} end),
-
-  % We are trying to delete ready node, error should occur %
-  ?assertError(is_active, ecomet_node:on_delete(#{<<"is_ready">> => true, <<".name">> => <<"MyName">>})),
-
-  %We are trying to delete non ready node, should return ok %
-
-  ok = ecomet_node:on_delete(#{<<"is_ready">> => false, <<".name">> => <<"myName">>}),
-  ok = ecomet_node:on_delete(#{ <<".name">> => <<"frodo">> }),
-
-  meck:unload(ecomet)
-.
-
-
 check_name_test(_Config) ->
 
   meck:new(ecomet, [no_link]),
@@ -111,8 +69,9 @@ check_name_test(_Config) ->
   ok = ecomet_node:check_name(#{<<".nickname">> => <<"Sparrow">>, <<"WakeUp">> => <<"Neo">>}),
 
   % We create new object with valid name, should return ok %
+  % TODO. Add valid names
   %_ValidName = <<"iwasbornin1998@I">>,
-  %_AnotherVN = <<"iwasbornin1998@aA0a.aA0a.aboa.A">>,
+  %_AnotherVN = <<"iwasbornin1998@">>,
   %ok = ecomet_node:check_name(#{<<".name">> => {<<"Name">>, none}}),
   %ok = ecomet_node:check_name(#{<<".name">> => {<<"www">>, none}}),
 
@@ -158,6 +117,7 @@ register_node_test(_Config) ->
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field ,Object)} end),
   meck:expect(ecomet, edit_object, fun(_Object, _IDMapper) -> ok end),
 
+  % TODO. Check side effects: set the ID and registering the node in the schema
   ok = ecomet_node:register_node(#{<<".name">> => <<"jSparrow">>, <<"value">> => 123}),
   ok = ecomet_node:register_node(#{<<".name">> => <<"neo">>, age => 18}),
   meck:unload(ecomet)
@@ -169,10 +129,64 @@ unregister_node_test(_Config) ->
   meck:new(ecomet),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field ,Object)} end),
 
+  % TODO. Check side effects: unregistering the node in the schema
+
   ok = ecomet_node:unregister_node(#{<<".name">> => <<"jSparrow">>, sex => male}),
   ok = ecomet_node:unregister_node(#{<<".name">> => <<"neo">>, sex => male}),
 
   meck:unload(ecomet)
 
+.
+
+
+on_create_test(_Config) ->
+
+  meck:new([ecomet, ecomet_schema], [no_link]),
+  meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
+  meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field ,Object, none)} end),
+  meck:expect(ecomet, edit_object, fun(_Object, _IDMapper) -> ok end),
+  meck:expect(ecomet_schema, add_node, fun(_Atom) -> ok end),
+
+  ?assertError(invalid_node_name, ecomet_node:on_create(#{<<".name">> => {<<"invalidname">>, none}})),
+  %ok = ecomet_node:on_create(#{<<".name">> => {<<"iwasbornin1998@faceplate.c">>, none}}),
+
+  % TODO. Check side effects (see register_node_test)
+  meck:unload([ecomet, ecomet_schema]),
+  ok
+.
+
+
+on_edit_test(_Config) ->
+
+  meck:new(ecomet, [no_link]),
+  meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
+
+  % We are not changing name or id, should return ok %
+  ok = ecomet_node:on_edit(#{<<".notname">> => {<<"dont">>, <<"edit">>}, <<"notid">> => {bla, bla}}),
+  ok = ecomet_node:on_edit(#{<<"hello">> => <<"its_me">>}),
+
+  %We are trying to change name or id, error should occur %
+  ?assertError(renaming_is_not_allowed, ecomet_node:on_edit(#{<<".name">> => {<<"NewOne">>, <<"OldOne">>}})),
+  ?assertError(change_id_is_not_allowed, ecomet_node:on_edit(#{<<"id">> => {{1, 2}, {3, 4}}})),
+  ?assertError(renaming_is_not_allowed, ecomet_node:on_edit(#{<<".name">> => {<<"NewOne">>, <<"OldOne">>}, <<"id">> => {{1, 2}, {3, 4}} })),
+
+  meck:unload(ecomet)
+.
+
+on_delete_test(_Config) ->
+
+  meck:new(ecomet),
+  meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field ,Object, none)} end),
+
+  % We are trying to delete ready node, error should occur %
+  ?assertError(is_active, ecomet_node:on_delete(#{<<"is_ready">> => true, <<".name">> => <<"MyName">>})),
+
+  %We are trying to delete non ready node, should return ok %
+
+  % TODO. Check side effects (see unregister_node_test)
+  ok = ecomet_node:on_delete(#{<<"is_ready">> => false, <<".name">> => <<"myName">>}),
+  ok = ecomet_node:on_delete(#{ <<".name">> => <<"frodo">> }),
+
+  meck:unload(ecomet)
 .
 

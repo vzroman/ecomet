@@ -1,14 +1,21 @@
-%%%-------------------------------------------------------------------
-%%% @author zeinetsse
-%%% @copyright (C) 2020, <COMPANY>
-%%% @doc
-%%%
-%%% @end
-%%% Created : 15. Dec 2020 17:29
-%%%-------------------------------------------------------------------
+%%----------------------------------------------------------------
+%% Copyright (c) 2020 Faceplate
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%----------------------------------------------------------------
 -module(ecomet_db_SUITE).
--author("zeinetsse").
-
 
 -include_lib("ecomet_schema.hrl").
 -include_lib("ecomet.hrl").
@@ -71,10 +78,12 @@ check_name_test(_Config) ->
 
 
 % We create new Object with invalid name, prog have to crash %
-  try ecomet_db:check_name(#{<<".name">> => {<<"Invalid-name(?)">>, none}, value => 123, <<"id">> => 100000})
+  try
+    ecomet_db:check_name(#{<<".name">> => {<<"Invalid-name(?)">>, none}, value => 123, <<"id">> => 100000})
   catch
     error:invalid_name -> invalid_name
   end,
+
   try ecomet_db:check_name(#{<<".name">> => {<<"1nvaliI) Nam3">>, none}, value => 123, <<"id">> => 100000})
   catch
     error:invalid_name -> invalid_name
@@ -110,8 +119,8 @@ check_name_test(_Config) ->
     error:renaming_is_not_allowed -> renaming_is_not_allowed
   end,
 
-  meck:unload(ecomet)
-.
+  meck:unload(ecomet),
+  ok.
 
 % Object == {<<"id">> => {NewId, OldID}}  %
 % Other fieds are not important in this case%
@@ -181,15 +190,6 @@ create_database_test(_Config) ->
 % Object == {id1, id2} %
 delete_test(_Config) ->
 
-%%  meck:new(ecomet_lib, [no_link,passthrough]),
-%%  meck:expect(ecomet_lib, to_oid, fun(Object) -> Object end),
-
-%%  % Object is not mounted, should return ok %
-%%  ok = ecomet_db:on_delete({1, 2}),
-%%%%  ok = ecomet_db:on_delete({12, 23}),
-%%%%  ok = ecomet_db:on_delete({324, 34}),
-%%
-%%  meck:unload(ecomet_lib),
   ecomet_user:on_init_state(),
   % We create object. but not mount should return ok %
   TestDB_1 = ecomet:create_object(#{
@@ -285,8 +285,6 @@ edit_test(_Config) ->
 % Object == #{<<".name">> => {NewName, OldName}} %
 % This is Object creation, name field should be %
 create_test(_Config) ->
-
-
   ecomet_user:on_init_state(),
   AA =  ?OID(<<"/root">>),
   ct:pal("OID  /root/.databases ~p", [AA]),
@@ -306,6 +304,6 @@ create_test(_Config) ->
   my_db = ecomet_schema:get_mounted_db(?OID(Folder)),
   ok = ecomet:delete_object(Folder),
   ok = ecomet:delete_object(TestDB),
-  ok
-.
+
+  ok.
 
