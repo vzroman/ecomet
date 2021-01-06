@@ -68,10 +68,12 @@ on_create_test(_Config) ->
     <<".writegroups">> => []
   }),
 
-  {ok, _WriteG} = ecomet_object:read_field(Object, <<".writegroups">>),
-  {ok, _ReadG} = ecomet_object:read_field(Object, <<".readgroups">>),
-
-  %%[] = WriteG -- ReadG,
+  ok = ecomet:edit_object(Object, #{<<".writegroups">> => [{1, 2}, {4, 3}], <<".readgroups">> => [{2 ,3}]}),
+  {ok, WriteG} = ecomet_object:read_field(Object, <<".writegroups">>),
+  {ok, ReadG} = ecomet_object:read_field(Object, <<".readgroups">>),
+  [] = WriteG -- ReadG,
+  {ok, Time} = ecomet_object:read_field(Object, <<".ts">>),
+  ct:pal("time ~p", [Time]),
 
   ok = ecomet:delete_object(Object),
   ok
