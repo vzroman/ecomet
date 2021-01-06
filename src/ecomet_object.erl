@@ -65,9 +65,7 @@
   check_path/1,
   check_db/1
 ]).
-
 -endif.
-
 %%===========================================================================
 %% Behaviour API
 %%===========================================================================
@@ -628,7 +626,6 @@ check_path(Object)->
       {ok,FolderID}=read_field(Object,<<".folder">>),
       {ok,Name}=read_field(Object,<<".name">>),
       OID = get_oid(Object),
-
       % Check that name does not include the path delimiter
       case binary:split(Name,<<"/">>) of
         [Name]->
