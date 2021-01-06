@@ -59,7 +59,7 @@ create_db(Name)->
   [ dlss:add_storage(?NAME(Name,?INDEX,Type), DLSSType, O) || { Type, #{ type:=DLSSType } = O } <- ?DB],
   ok.
 
-remove_db(Name)->
+ remove_db(Name)->
   [ dlss:remove_storage( ?NAME(Name,?DATA,Type) ) || { Type, _ } <- ?DB ],
   [ dlss:remove_storage( ?NAME(Name,?INDEX,Type) ) || { Type, _ } <- ?DB ],
   ok.

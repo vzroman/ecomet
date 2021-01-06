@@ -133,7 +133,7 @@ find_mount_points(DB) when is_atom(DB);is_binary(DB)->
 find_mount_points(ID)->
   DBs = ecomet_db:get_databases(),
   % Folder descendants
-  ecomet_query:system([DBs],[<<".oid">>],{'AND',[
+  ecomet_query:system(DBs,[<<".oid">>],{'AND',[
     {<<".pattern">>,'=',{?PATTERN_PATTERN,?FOLDER_PATTERN}},
     {<<"database">>,'=',?OID(ID)}
   ]}).

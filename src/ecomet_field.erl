@@ -67,7 +67,13 @@
 -ifdef(TEST).
 -export([
   get_changes/3,
-  merge_storages/4
+  merge_storages/4,
+  check_name/2,
+  check_folder/2,
+  check_storage/2,
+  check_type/2,
+  check_index/2,
+  check_default/2
 ]).
 -endif.
 

@@ -46,7 +46,7 @@
   construct/1,
   edit/2,edit/3,
   copy/2,
-  read_field/2,read_field/3,read_fields/2,read_all/1,read_all/2,
+  read_field/2,read_field/3,read_fields/2,read_fields/3,read_all/1,read_all/2,
   field_changes/2,
   field_type/2,
   is_object/1,
@@ -60,10 +60,14 @@
 -ifdef(TEST).
 
 -export([
-  new_id/2
+  new_id/2,
+  check_storage_type/1,
+  check_path/1,
+  check_db/1
 ]).
 
 -endif.
+
 %%===========================================================================
 %% Behaviour API
 %%===========================================================================
@@ -567,15 +571,15 @@ on_edit(Object)->
   check_db(Object),
   % Check for unique name in folder
   check_path(Object),
-  case ecomet_object:field_changes(Object,<<".pattern">>) of
+  case field_changes(Object,<<".pattern">>) of
     none->ok;
     _->?ERROR(can_not_change_pattern)
   end,
-  case ecomet_object:field_changes(Object,<<".ts">>) of
+  case field_changes(Object,<<".ts">>) of
     none->ok;
     _->?ERROR(can_not_change_ts)
   end,
-  case ecomet:field_changes(Object,<<".name">>) of
+  case field_changes(Object,<<".name">>) of
     none->ok;
     {_New, Old}->
       case is_system(Old) of
@@ -587,7 +591,7 @@ on_edit(Object)->
 
 on_delete(Object)->
   case is_system(Object) of
-    true->?ERROR(system_oject);
+    true->?ERROR(system_object);
     _->ok
   end,
   ok.
@@ -624,6 +628,7 @@ check_path(Object)->
       {ok,FolderID}=read_field(Object,<<".folder">>),
       {ok,Name}=read_field(Object,<<".name">>),
       OID = get_oid(Object),
+
       % Check that name does not include the path delimiter
       case binary:split(Name,<<"/">>) of
         [Name]->

@@ -29,6 +29,7 @@
   get_by_name/1
 ]).
 
+
 %%===========================================================================
 %% Ecomet object behaviour
 %%===========================================================================
@@ -37,6 +38,22 @@
   on_edit/1,
   on_delete/1
 ]).
+
+%%===========================================================================
+%% This functions we need to export ONLY for testing them
+%%===========================================================================
+-ifdef(TEST).
+-export([
+  check_id/1,
+  check_name/1,
+  create_database/1,
+  remove_database/1
+]).
+
+-endif.
+
+
+
 
 %%=================================================================
 %%	SERVICE API
@@ -76,7 +93,7 @@ on_create(Object)->
   ?LOGINFO("creating a new database ~p",[NameAtom]),
   % We need to create the backend out of a transaction, otherwise it throws 'nested_transaction'
   ecomet:on_commit(fun()->
-    case create_database(Name) of
+    case create_database(NameAtom) of
       {ok,ID}->
         ?LOGINFO("database ~p created successfully, id = ~p",[NameAtom,ID]),
         ok = ecomet:edit_object(Object,#{<<"id">>=>ID});
@@ -93,7 +110,13 @@ on_edit(Object)->
 
 on_delete(Object)->
   case ecomet_folder:find_mount_points(?OID(Object)) of
-    []->ok;
+    []->
+      {ok,Name}=ecomet:read_field(Object,<<".name">>),
+      NameAtom = binary_to_atom(Name,utf8),
+      ecomet:on_commit(fun()->
+        remove_database(NameAtom)
+      end),
+      ok;
     _->?ERROR(is_mounted)
   end.
 
@@ -101,7 +124,7 @@ check_name(Object)->
   case ecomet:field_changes(Object,<<".name">>) of
     none->ok;
     { Name, none }->
-      case re:run(Name,"^(\\.(\\w)+|(\\w+))$") of
+      case re:run(Name,"^(\\w+)$") of
         {match,_}->ok;
         _->
           ?ERROR(invalid_name)
@@ -129,7 +152,12 @@ create_database(Name)->
     ?LOGINFO("registering the ~p database in the schema",[Name]),
     case ecomet_schema:add_db(Name) of
       {ok,ID}->{ok,ID};
-      {error,Error}->throw(Error)
+      {error,Error}->
+        try ecomet_backend:remove_db(Name) catch
+          _:CleanError->
+            ?LOGERROR("error on removing ~p database, error ~p",[Name,CleanError])
+        end,
+        throw(Error)
     end
   catch
     _:CreateError:Stack->
@@ -138,9 +166,18 @@ create_database(Name)->
         CreateError,
         Stack
       ]),
-      try ecomet_backend:remove_db(Name) catch
-        _:CleanError->
-          ?LOGERROR("error on removing ~p database, error ~p",[Name,CleanError])
-      end,
       error
   end.
+
+remove_database(Name)->
+  ?LOGINFO("unregistering the ~p database",[Name]),
+  case ecomet_schema:remove_db(Name) of
+    ok->ok;
+    {error,Error}->
+      ?LOGERROR("error unregistering a database ~p, error ~p",[Name,Error])
+  end,
+  try ecomet_backend:remove_db(Name) catch
+    _:CleanError->
+      ?LOGERROR("error on removing ~p database, error ~p",[Name,CleanError])
+  end,
+  ok.
