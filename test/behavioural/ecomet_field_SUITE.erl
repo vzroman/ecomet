@@ -145,7 +145,7 @@ check_storage_test(_Config) ->
   % TODO. Add a comment about using the folder with mecking ecomet_pattern:get_storage
   % {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
   % PatternStorage = ecomet_pattern:get_storage(PatternID),
-  % In our case <<.folder>> contain storage type and ecomet_pattern:get_storage just return it,
+  % In our case <<.folder>> contain PatternStorage type and ecomet_pattern:get_storage() just return it,
   % It is done for testing purposes
 
   % is_empty == true %
@@ -374,18 +374,57 @@ on_create_test(_Config) ->
   meck:expect(ecomet_pattern, get_storage, fun(PatternID) -> PatternID end),
   meck:expect(ecomet, edit_object, fun(_Object, _Map) -> ok end),
 
-
+  % <<.name>> => valid name %
+  % <<".folder">> => PatternStorage DISC%
+  % <<"storage">> => %
+  % <<"type">>  => valid type %
+  % <<"subtype">> => does not need, because <<"type">> != list %
+  % <<"index">> => valid index%
+  % <<"default">> => valid default value, accordingly to type %
   Object1 = #{<<".name">> => {<<".faceplate">>, none},
     <<".folder">> => {?DISC, none},
     <<"storage">> => {?RAMDISC, ?DISC},
     <<"type">> => term,
-    <<"subtype">> => {},
+    <<"subtype">> => none,
     <<"index">> => {[simple], none},
-    <<"default">> => {<<"newdef">>, <<"newdef">>}
+    <<"default">> => {<<"newdef">>, none}
   },
-
   ok = ecomet_field:on_create(Object1),
 
+  % <<.name>> => valid name %
+  % <<".folder">> => PatternStorage RAMLOCAL%
+  % <<"storage">> => We cannot change storage type to RAMDISC
+  % while PatternStorage is RAMLOCAL %
+  % <<"type">>  => valid type %
+  % <<"subtype">> => does not need, because <<"type">> != list %
+  % <<"index">> => valid index%
+  % <<"default">> => valid default value, accordingly to type %
+  Object2 = #{<<".name">> => {<<".google">>, none},
+    <<".folder">> => {?RAMLOCAL, none},
+    <<"storage">> => {?RAMDISC, none},
+    <<"type">> => string,
+    <<"subtype">> => none,
+    <<"index">> => {[simple, '3gram'], none},
+    <<"default">> => {123, none}
+  },
+  ?assertError(memory_only_pattern, ecomet_field:on_create(Object2)),
+
+  % <<.name>> => valid name %
+  % <<".folder">> => PatternStorage RAMDISC%
+  % <<"storage">> => %
+  % <<"type">>  => valid type %
+  % <<"subtype">> => does not need, because <<"type">> != list %
+  % <<"index">> => invalid index%
+  % <<"default">> => valid default value, accordingly to type %
+  Object3 = #{<<".name">> => {<<".yahoo">>, none},
+    <<".folder">> => {?RAMDISC, none},
+    <<"storage">> => {?DISC, none},
+    <<"type">> => integer,
+    <<"subtype">> => none,
+    <<"index">> => {[notsimple, datetime], none},
+    <<"default">> => {<<"123">>, none}
+  },
+  ?assertError(invalid_index_type, ecomet_field:on_create(Object3)),
   meck:unload([ecomet, ecomet_pattern]),
 
   ok.
@@ -403,25 +442,29 @@ on_edit_test(_Config) ->
   meck:expect(ecomet, edit_object, fun(_Object, _Map) -> ok end),
   meck:expect(ecomet_pattern, is_empty, fun(_PatternID) -> get(is_empty) end),
 
+  % in this case testing is similar to on_create_test %
   put(is_empty, true),
-
-  Object1 = #{<<".name">> => {<<".faceplate">>, none},
-    <<"storage">> => {?RAMDISC, ?DISC},
+  Object1 = #{<<".name">> => {<<".faceplate">>, <<".zeinet">>},
+    <<".folder">> => {?RAMLOCAL, none},
+    <<"storage">> => {?RAM, ?DISC},
     <<"type">> => term,
-    <<"subtype">> => {},
+    <<"subtype">> => none,
     <<"index">> => {[simple], datetime},
     <<"default">> => {<<"newdef">>, <<"newdef">>}
-
   },
-
   ok = ecomet_field:on_edit(Object1),
 
+  % In this case we have non empty object, so we cannot change it%
   put(is_empty, false),
-
-  Object2 = #{
+  Object2 = #{<<".name">> => {<<".faceplate">>, <<".zeinet">>},
+    <<".folder">> => {?DISC, none},
+    <<"storage">> => {?RAMDISC, ?DISC},
+    <<"type">> => string,
+    <<"subtype">> => none,
+    <<"index">> => {[datetime], datetime},
+    <<"default">> => {<<"newdef">>, <<"newdef">>}
   },
-
-  ok = ecomet_field:on_edit(Object2),
+  ?assertError(has_objects, ecomet_field:on_edit(Object2)),
 
   meck:unload([ecomet, ecomet_pattern])
 .
@@ -435,11 +478,10 @@ on_delete_test(_Config) ->
   meck:expect(ecomet_pattern, remove_field, fun(_PatternID, _Name) -> ok end),
   meck:expect(ecomet_pattern, is_empty, fun(PatternID) -> PatternID end),
   % Deleting object %
-  ecomet_field:on_delete(#{<<".folder">> => true, <<".name">> => <<"NazGul">>}),
+  ok = ecomet_field:on_delete(#{<<".folder">> => true, <<".name">> => <<"NazGul">>}),
   % Incorrectly deleting object %
   ?assertError(has_objects, ecomet_field:on_delete(#{<<".folder">> => false, <<".name">> => <<"NazGul">>})),
   ?assertError(has_objects,ecomet_field:on_delete(#{<<".folder">> => sfsf, <<".name">> => <<"NazGul">>})),
-
 
 
   meck:unload([ecomet_pattern, ecomet]),
