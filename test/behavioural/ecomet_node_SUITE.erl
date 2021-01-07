@@ -70,10 +70,8 @@ check_name_test(_Config) ->
 
   % We create new object with valid name, should return ok %
   % TODO. Add valid names
-  %_ValidName = <<"iwasbornin1998@I">>,
-  %_AnotherVN = <<"iwasbornin1998@">>,
-  %ok = ecomet_node:check_name(#{<<".name">> => {<<"Name">>, none}}),
-  %ok = ecomet_node:check_name(#{<<".name">> => {<<"www">>, none}}),
+  ok = ecomet_node:check_name(#{<<".name">> => {<<"iwasbornin1998@google.com">>, none}}),
+  ok = ecomet_node:check_name(#{<<".name">> => {<<"iwasbornin1998@yandex.ru">>, none}}),
 
   % We create new object with invalid name, error should occur %
   ?assertError(invalid_node_name, ecomet_node:check_name(#{<<".name">> => {<<"dfdfdfwdfdf">>,none} })),
@@ -115,12 +113,19 @@ check_id_test(_Config) ->
 register_node_test(_Config) ->
   meck:new(ecomet),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field ,Object)} end),
-  meck:expect(ecomet, edit_object, fun(_Object, _IDMapper) -> ok end),
+  meck:expect(ecomet, edit_object, fun(_Object, IDMapper) -> put(id, maps:get(<<"id">>, IDMapper)), ok end),
 
   % TODO. Check side effects: set the ID and registering the node in the schema
   ok = ecomet_node:register_node(#{<<".name">> => <<"jSparrow">>, <<"value">> => 123}),
+  ID1 = get(id),
   ok = ecomet_node:register_node(#{<<".name">> => <<"neo">>, age => 18}),
-  meck:unload(ecomet)
+  ID2 = get(id),
+
+  ID1 = ecomet_schema:get_node_id(jSparrow),
+  ID2 = ecomet_schema:get_node_id(neo),
+
+  meck:unload(ecomet),
+  ok
 .
 
 
@@ -132,26 +137,31 @@ unregister_node_test(_Config) ->
   % TODO. Check side effects: unregistering the node in the schema
 
   ok = ecomet_node:unregister_node(#{<<".name">> => <<"jSparrow">>, sex => male}),
+  ?assertError({badmatch, _}, ecomet_schema:get_node_id(jSparrow)),
+
   ok = ecomet_node:unregister_node(#{<<".name">> => <<"neo">>, sex => male}),
+  ?assertError({badmatch, _}, ecomet_schema:get_node_id(neo)),
 
-  meck:unload(ecomet)
-
+  meck:unload(ecomet),
+  ok
 .
 
 
 on_create_test(_Config) ->
 
-  meck:new([ecomet, ecomet_schema], [no_link]),
+  meck:new([ecomet], [no_link]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
-  meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field ,Object, none)} end),
-  meck:expect(ecomet, edit_object, fun(_Object, _IDMapper) -> ok end),
-  meck:expect(ecomet_schema, add_node, fun(_Atom) -> ok end),
+  meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, element(1, maps:get(Field ,Object, none))} end),
+  meck:expect(ecomet, edit_object, fun(_Object, IDMapper) -> put(id, maps:get(<<"id">>, IDMapper)), ok end),
 
   ?assertError(invalid_node_name, ecomet_node:on_create(#{<<".name">> => {<<"invalidname">>, none}})),
-  %ok = ecomet_node:on_create(#{<<".name">> => {<<"iwasbornin1998@faceplate.c">>, none}}),
+  ok = ecomet_node:on_create(#{<<".name">> => {<<"iwasbornin1998@faceplate.com">>, none}}),
 
   % TODO. Check side effects (see register_node_test)
-  meck:unload([ecomet, ecomet_schema]),
+  ID = get(id),
+  ct:pal("ID ~p", [ID]),
+  ID = ecomet_schema:get_node_id('iwasbornin1998@faceplate.com'),
+  meck:unload([ecomet]),
   ok
 .
 
@@ -184,9 +194,9 @@ on_delete_test(_Config) ->
   %We are trying to delete non ready node, should return ok %
 
   % TODO. Check side effects (see unregister_node_test)
-  ok = ecomet_node:on_delete(#{<<"is_ready">> => false, <<".name">> => <<"myName">>}),
-  ok = ecomet_node:on_delete(#{ <<".name">> => <<"frodo">> }),
+  ok = ecomet_node:on_delete(#{<<"is_ready">> => false, <<".name">> => <<"iwasbornin1998@faceplate.com">>}),
 
+  ?assertError({badmatch, _}, ecomet_schema:get_node_id('iwasbornin1998@faceplate.com')),
   meck:unload(ecomet)
 .
 
