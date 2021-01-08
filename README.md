@@ -23,3 +23,7 @@ Build
 Query configured nodes
 -----------------------
 ecomet:query("get .name, is_ready from * where .pattern=$oid('/root/.patterns/.node')").
+
+Create a new database
+ -----------------
+ ecomet:query("insert .name='new_database', .folder=$oid('/root/.databases'), .pattern=$oid('/root/.patterns/.database')").
