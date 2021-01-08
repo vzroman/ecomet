@@ -75,7 +75,7 @@
 -endif.
 %%====================================================================
 
--define(DEFAULT_SCHEMA_CYCLE, 1000).
+-define(DEFAULT_SCHEMA_CYCLE, 5000).
 -define(WAIT_SCHEMA_TIMEOUT,5000).
 
 -define(INCREMENT,list_to_atom("ecomet_"++atom_to_list(node()))).
@@ -780,6 +780,14 @@ init_default_users()->
     }}
   ]),
   % system user
+  Password =
+    case ?ENV(password,<<"111111">>) of
+      P when is_binary(P)->P;
+      P when is_list(P)-> unicode:characters_to_binary(P);
+      P when is_atom(P)-> atom_to_binary(P,utf8);
+      P when is_integer(P)-> integer_to_binary(P);
+      P->?ERROR({invalid_password,P})
+    end,
   init_tree({?FOLDER_PATTERN,?ROOT_FOLDER},[
     { <<".users">>, #{
       fields=>#{ <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN} },
@@ -788,7 +796,7 @@ init_default_users()->
           fields=>#{
             <<".pattern">>=>?OID(<<"/root/.patterns/.user">>),
             <<"usergroups">>=>[?OID(<<"/root/.usergroups/.administrators">>)],
-            <<"password">>=>?ENV(password,<<"111111">>)
+            <<"password">>=>Password
           }
         }}
       ]

@@ -53,8 +53,8 @@ init([]) ->
 
   Supervisor=#{
     strategy=>one_for_one,
-    intensity=>?ENV(segemnt_max_restarts, ?DEFAULT_MAX_RESTARTS),
-    period=>?ENV(segemnt_max_period, ?DEFAULT_MAX_PERIOD)
+    intensity=>?ENV(supervisor_max_restarts, ?DEFAULT_MAX_RESTARTS),
+    period=>?ENV(supervisor_max_period, ?DEFAULT_MAX_PERIOD)
   },
 
   {ok, {Supervisor,
