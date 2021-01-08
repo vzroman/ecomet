@@ -164,18 +164,23 @@ sync_storage(DB,Storage,Type)->
 sync_segment(Segment)->
   {ok,OID} = get_segment_oid(Segment),
   Object = ecomet:open(OID,none),
-  #{nodes := Actual } = ecomet_backend:get_segment_info(Segment),
-  case ecomet:read_field(Object,<<"nodes">>,#{default=>[]}) of
-    {ok,[]}->
-      ok = ecomet:edit_object(Object,#{<<"nodes">>=>Actual});
-    {ok,Configured}->
+  #{nodes := Actual, local:= IsLocal } = ecomet_backend:get_segment_info(Segment),
+  if
+    not IsLocal ->
+      case ecomet:read_field(Object,<<"nodes">>,#{default=>[]}) of
+        {ok,[]}->
+          ok = ecomet:edit_object(Object,#{<<"nodes">>=>Actual});
+        {ok,Configured}->
 
-      % Add copies of the segment to nodes
-      [ ecomet_backend:add_segment_copy(Segment,N) || N <- Configured -- Actual ],
+          % Add copies of the segment to nodes
+          [ ecomet_backend:add_segment_copy(Segment,N) || N <- Configured -- Actual ],
 
-      % Remove copies
-      [ ecomet_backend:remove_segment_copy(Segment,N) || N <- Actual -- Configured ]
+          % Remove copies
+          [ ecomet_backend:remove_segment_copy(Segment,N) || N <- Actual -- Configured ]
 
+      end;
+    true ->
+      ok
   end,
 
   update_segment(OID),
@@ -203,18 +208,23 @@ is_master(DB,Storage,Type)->
   is_master(Root).
 
 update_db(OID)->
-  {_, StorageTypes } = ecomet:get(get_databases(),[<<"nodes">>,<<"size">>,<<"segments_count">>],{'AND',[
+  {_, StorageTypes } = ecomet:get(get_databases(),[<<"nodes">>,<<"size">>,<<"segments_count">>,<<"root_segment">>],{'AND',[
     {<<".folder">>,'=',OID},
     {<<".pattern">>,'=',?OID(<<"/root/.patterns/.storage">>)}
   ]}),
 
   Update =
-    lists:foldl(fun([Nodes,Size,Count],#{<<"nodes">>:=AccNodes,<<"size">>:=AccSize,<<"segments_count">>:=AccCount})->
-      #{
-        <<"nodes">>=>ordsets:union(AccNodes,ordsets:from_list(Nodes)),
-        <<"size">>=>if is_number(Size)->AccSize + Size; true->AccSize end,
-        <<"segments_count">>=>if is_number(Count)->AccCount + Count; true->AccCount end
-      }
+    lists:foldl(fun([Nodes,Size,Count,Root],#{<<"nodes">>:=AccNodes,<<"size">>:=AccSize,<<"segments_count">>:=AccCount}=Acc)->
+      case ecomet_backend:get_segment_info(Root) of
+        #{local:=true}->
+          % Local storage are not counted
+          Acc;
+        _->Acc#{
+          <<"nodes">>=>ordsets:union(AccNodes,ordsets:from_list(Nodes)),
+          <<"size">>=>if is_number(Size)->AccSize + Size; true->AccSize end,
+          <<"segments_count">>=>if is_number(Count)->AccCount + Count; true->AccCount end
+        }
+      end
     end,#{<<"nodes">>=>[],<<"size">>=>0,<<"segments_count">>=>0},StorageTypes),
 
   ok = ecomet:edit_object(ecomet:open(OID,none),Update).
