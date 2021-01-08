@@ -27,3 +27,7 @@ ecomet:query("get .name, is_ready from * where .pattern=$oid('/root/.patterns/.n
 Create a new database
  -----------------
  ecomet:query("insert .name='new_database', .folder=$oid('/root/.databases'), .pattern=$oid('/root/.patterns/.database')").
+ 
+ Aggregated query for calculating the total size of the database
+ ---------------------------------------------------------------
+ {_,[S]}=ecomet:query("get $sum($size) from * where .folder=$oid('/root/.databases/db1')")
