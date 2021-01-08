@@ -27,6 +27,7 @@
   remove_db/1,
   get_storages/0,
   get_segments/1,get_segments/3,
+  get_root_segment/1,get_root_segment/3,
   get_segment_info/1,
   get_segment_size/1,
   get_storage_type/1,
@@ -74,6 +75,11 @@ get_segments(Storage)->
   dlss:get_segments( Storage ).
 get_segments(Name,Storage,Type)->
   get_segments(?NAME(Name,Storage,Type)).
+
+get_root_segment(Storage)->
+  dlss:get_storage_root( Storage ).
+get_root_segment(Name,Storage,Type)->
+  get_root_segment(?NAME(Name,Storage,Type)).
 
 get_segment_info(Segment)->
   dlss:get_segment_info(Segment).

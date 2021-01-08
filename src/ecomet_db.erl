@@ -27,7 +27,10 @@
   get_databases/0,
   get_name/1,
   get_by_name/1,
+  get_storage_oid/3,
+  get_segment_oid/1,
   get_storage_segments/1,
+  storage_name/2,
   sync/0
 ]).
 
@@ -70,6 +73,8 @@ get_search_node(_Name,_Exclude)->
 get_databases()->
   ecomet_schema:get_registered_databases().
 
+get_by_name(Name) when is_atom(Name)->
+  get_by_name(atom_to_binary(Name,utf8));
 get_by_name(Name) when is_binary(Name)->
   case ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
     {<<".pattern">>,':=',?OID(<<"/root/.patterns/.database">>)},
@@ -79,18 +84,179 @@ get_by_name(Name) when is_binary(Name)->
     _->{error,not_found}
   end.
 
-get_storage_segments(Storage)->
+get_storage_oid(DB,Storage,Type)->
+  ecomet_folder:path2oid(<<
+    "/root/.databases/",
+    (atom_to_binary(DB,utf8))/binary,
+    "/",
+    (storage_name(Storage,Type))/binary
+  >>).
+
+get_segment_oid(Name) when is_atom(Name)->
+  get_segment_oid(atom_to_binary(Name,utf8));
+get_segment_oid(Name) when is_binary(Name)->
+  case ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.segment">>)},
+    {<<".name">>,'=',Name}
+  ]}) of
+    [OID]->{ok,OID};
+    _->{error,not_found}
+  end.
+
+get_storage_segments(StorageID)->
   {_,Segments} = ecomet_query:system([?ROOT],[<<".name">>],{'AND',[
     {<<".pattern">>,':=',?OID(<<"/root/.patterns/.segment">>)},
-    {<<".folder">>,'=',?OID(Storage) }
+    {<<".folder">>,'=',StorageID }
   ]}),
   [ binary_to_atom(S,utf8) || [S]<-Segments].
 
+storage_name(Storage,Type)->
+  <<(atom_to_binary(Storage,utf8))/binary,"@",(atom_to_binary(Type,utf8))/binary>>.
+
 sync()->
+  % Run through all databases
   [ sync_database(DB) || DB <- get_databases() ].
 
-sync_database(_DB)->
+sync_database(DB)->
+  % Run through all storage types in the database where the node is the master
+  [ sync_storage(DB,S,T) || S<-[?DATA,?INDEX], T<-?STORAGE_TYPES, is_master(DB,S,T) ],
+
+  % The database master is the master of the data disc storage
+  case is_master(DB,?DATA,?DISC) of
+    true->
+      {ok,OID}=get_by_name(DB),
+      update_db(OID),
+      ok;
+    _->
+      ok
+  end.
+
+sync_storage(DB,Storage,Type)->
+  {ok,StorageID} = get_storage_oid(DB,Storage,Type),
+  Configured = get_storage_segments(StorageID),
+  Actual = ecomet_backend:get_segments(DB,Storage,Type),
+
+  % remove segments that does not exist any more
+  case Configured--Actual of
+    []->ok;
+    ToRemove->
+      ecomet:delete(get_databases(),{'AND',[
+        {<<".folder">>,'=',StorageID},
+        {'OR',[ {<<".name">>,'=',N} || N <-ToRemove ]}
+      ]})
+  end,
+
+  % add new segments
+  [ ecomet:create_object(#{
+    <<".name">>=>atom_to_binary(N,utf8),
+    <<".folder">>=>StorageID,
+    <<".pattern">>=>?OID(<<"/root/.patterns/.segment">>)
+  }) || N<- Actual -- Configured],
+
+  % Update segments metrics
+  [ sync_segment(S) || S<-get_storage_segments(StorageID), is_master(S) ],
+
+  % Update storage merics
+  update_storage(StorageID),
+
   ok.
+
+sync_segment(Segment)->
+  {ok,OID} = get_segment_oid(Segment),
+  Object = ecomet:open(OID,none),
+  #{nodes := Actual } = ecomet_backend:get_segment_info(Segment),
+  case ecomet:read_field(Object,<<"nodes">>,#{default=>[]}) of
+    {ok,[]}->
+      ok = ecomet:edit_object(Object,#{<<"nodes">>=>Actual});
+    {ok,Configured}->
+
+      % Add copies of the segment to nodes
+      [ ecomet_backend:add_segment_copy(Segment,N) || N <- Configured -- Actual ],
+
+      % Remove copies
+      [ ecomet_backend:remove_segment_copy(Segment,N) || N <- Actual -- Configured ]
+
+  end,
+
+  update_segment(OID),
+
+  ok.
+
+
+is_master(Segment)->
+  % The master of the segment is the first ready node in the list of
+  % the nodes hosting the segment
+  #{nodes := RootNodes } = ecomet_backend:get_segment_info(Segment),
+  ReadyNodes = ecomet_node:get_ready_nodes(),
+  Node = node(),
+
+  case [N || N <- RootNodes, lists:member(N,ReadyNodes)] of
+    [Node|_]->
+      true;
+    _->
+      false
+  end.
+
+is_master(DB,Storage,Type)->
+  % The master of a storage is the master of its root segment
+  Root = ecomet_backend:get_root_segment(DB,Storage,Type),
+  is_master(Root).
+
+update_db(OID)->
+  {_, StorageTypes } = ecomet:get(get_databases(),[<<"nodes">>,<<"size">>,<<"segments_count">>],{'AND',[
+    {<<".folder">>,'=',OID},
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.storage">>)}
+  ]}),
+
+  Update =
+    lists:foldl(fun([Nodes,Size,Count],#{<<"nodes">>:=AccNodes,<<"size">>:=AccSize,<<"segments_count">>:=AccCount})->
+      #{
+        <<"nodes">>=>ordsets:union(AccNodes,ordsets:from_list(Nodes)),
+        <<"size">>=>if is_number(Size)->AccSize + Size; true->AccSize end,
+        <<"segments_count">>=>if is_number(Count)->AccCount + Count; true->AccCount end
+      }
+    end,#{<<"nodes">>=>[],<<"size">>=>0,<<"segments_count">>=>0},StorageTypes),
+
+  ok = ecomet:edit_object(ecomet:open(OID,none),Update).
+
+
+update_storage(OID)->
+  {_, Segments } = ecomet:get(get_databases(),[<<"nodes">>,<<"size">>],{'AND',[
+    {<<".folder">>,'=',OID},
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.segment">>)}
+  ]}),
+
+  Update =
+    lists:foldl(fun([Nodes,Size],#{<<"nodes">>:=AccNodes,<<"size">>:=AccSize})->
+      #{
+        <<"nodes">>=>ordsets:union(AccNodes,ordsets:from_list(Nodes)),
+        <<"size">>=>if is_number(Size)->AccSize + Size; true->AccSize end
+      }
+    end,#{<<"nodes">>=>[],<<"size">>=>0},Segments),
+
+  Object = ecomet:open(OID,none),
+  {ok,Name} = ecomet:read_field(Object,<<".name">>),
+  [S,T] = binary:split(Name,<<"@">>),
+  {ok,DB_OID} = ecomet:read_field(Object,<<".folder">>),
+  {ok,DB_Name} = ecomet:read_field( ecomet:open(DB_OID,none), <<".name">> ),
+
+  DB = binary_to_atom(DB_Name,utf8),
+  Storage = binary_to_atom(S,utf8),
+  Type = binary_to_atom(T,utf8),
+
+  Root = ecomet_backend:get_root_segment(DB,Storage,Type),
+
+  ok = ecomet:edit_object(Object,Update#{
+    <<"root_segment">> => Root,
+    <<"segments_count">> => length(Segments)
+  }).
+
+
+update_segment(OID)->
+  Object = ecomet:open(OID,none),
+  {ok,Name}=ecomet:read_field(Object,<<".name">>),
+  Size = ecomet_backend:get_segment_size(binary_to_atom(Name,utf8)),
+  ok = ecomet:edit_object(Object,#{<<"size">>=>Size}).
 
 %%=================================================================
 %%	Ecomet object behaviour
@@ -104,10 +270,10 @@ on_create(Object)->
 
   % Create storage types
   [ ecomet:create_object(#{
-    <<".name">>=>atom_to_binary(T,utf8),
+    <<".name">>=>storage_name(S,T),
     <<".folder">>=>?OID(Object),
     <<".pattern">>=>?OID(<<"/root/.patterns/.storage">>)
-  }) || T <-?STORAGE_TYPES ],
+  }) || S<-[?DATA,?INDEX], T<-?STORAGE_TYPES ],
 
   % We need to create the backend out of a transaction, otherwise it throws 'nested_transaction'
   ecomet:on_commit(fun()->

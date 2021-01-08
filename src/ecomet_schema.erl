@@ -119,10 +119,10 @@
   <<"id">>=>#{ type => integer, index=> [simple] },
   <<"segments_count">>=>#{ type => integer },
   <<"size">>=>#{ type => integer },
-  <<"nodes">>=>#{ type => list, subtype => link, index=> [simple] }
+  <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] }
 }).
 -define(DATABASE_STORAGE_SCHEMA,#{
-  <<"nodes">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] },
   <<"segments_count">>=>#{ type => integer },
   <<"size">>=>#{ type => integer },
   <<"root_segment">>=>#{ type => atom, index=>[simple] }
@@ -130,7 +130,7 @@
 -define(SEGMENT_SCHEMA,#{
   <<"size">>=>#{ type => integer },
   <<"key">>=>#{ type => term },
-  <<"nodes">>=>#{ type => list, subtype => link, index=> [simple] }
+  <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] }
 }).
 -define(NODE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] },
@@ -405,6 +405,9 @@ handle_info(on_cycle,#state{cycle = Cycle}=State)->
 
   % synchronize nodes configuration
   ecomet_node:sync(),
+
+  % synchronize database configuration
+  ecomet_db:sync(),
 
   {noreply,State};
 
@@ -700,7 +703,7 @@ init_storage_objects()->
             <<"id">>=>0
           },
           children=>[
-            { atom_to_binary(T,utf8) , #{ fields=>#{ <<".pattern">>=>?OID(<<"/root/.patterns/.storage">>) } } } || T <-?STORAGE_TYPES
+            { ecomet_db:storage_name(S,T) , #{ fields=>#{ <<".pattern">>=>?OID(<<"/root/.patterns/.storage">>) } } } || S <-[?DATA,?INDEX],T <-?STORAGE_TYPES
           ]
         }}
       ]
