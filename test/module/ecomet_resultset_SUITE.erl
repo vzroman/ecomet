@@ -1236,7 +1236,7 @@ search_patterns(Config)->
   % S2. Single tag, pattern is not defined
   S2Query=ecomet_resultset:prepare({<<"string1">>,'=',<<"value1">>}),
   S2Res=ecomet_resultset:search_patterns(S2Query,root,'UNDEFINED'),
-  {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ram,Ext1,[]},{ramdisc,Ext2,[]}]}}=S2Res,
+  {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ramdisc,Ext2,[]},{ram,Ext1,[]}]}}=S2Res,
   {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext2,[{ramdisc,Ext2,[]}]}}=ecomet_resultset:search_patterns(S2Query,root,Ext2),
 
   % S3. AND, pattern is defined
@@ -1266,8 +1266,8 @@ search_patterns(Config)->
     {<<"string2">>,'=',<<"value2">>}
   ]}),
   {'OR',[
-    {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ram,Ext1,[]},{ramdisc,Ext2,[]}]}},
-    {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext12,[{ramdisc,Ext1,[]},{disc,Ext2,[]}]}}
+    {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ramdisc,Ext2,[]},{ram,Ext1,[]}]}},
+    {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext12,[{disc,Ext2,[]},{ramdisc,Ext1,[]}]}}
   ],{Ext12,[]}}=ecomet_resultset:search_patterns(S4Query,root,'UNDEFINED'),
   {'OR',[
     {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}},
@@ -1285,9 +1285,9 @@ search_patterns(Config)->
   {'ANDNOT',{
     {'OR',[
       {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
-      {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ram,Ext1,[]},{ramdisc,Ext2,[]}]}}
+      {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ramdisc,Ext2,[]},{ram,Ext1,[]}]}}
     ],{Ext12,[]}},
-    {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext12,[{ramdisc,Ext1,[]},{disc,Ext2,[]}]}}
+    {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext12,[{disc,Ext2,[]},{ramdisc,Ext1,[]}]}}
   },{Ext12,[]}}=ecomet_resultset:search_patterns(S5Query,root,'UNDEFINED'),
 
   % S6. ANDNOT is actual only for patterns in condition1
@@ -1323,8 +1323,8 @@ search_patterns(Config)->
       {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}}
     ],{Ext1,[]}},
     {'ANDNOT',{
-      {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext12,[{ramdisc,Ext1,[]},{disc,Ext2,[]}]}},
-      {'TAG',{<<"string1">>,<<"value2">>,simple},{Ext12,[{ram,Ext1,[]},{ramdisc,Ext2,[]}]}}
+      {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext12,[{disc,Ext2,[]},{ramdisc,Ext1,[]}]}},
+      {'TAG',{<<"string1">>,<<"value2">>,simple},{Ext12,[{ramdisc,Ext2,[]},{ram,Ext1,[]}]}}
     },{Ext12,[]}}
   ],{Ext12,[]}}=ecomet_resultset:search_patterns(S7Query,root,'UNDEFINED'),
 

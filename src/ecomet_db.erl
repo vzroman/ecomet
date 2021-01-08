@@ -27,7 +27,8 @@
   get_databases/0,
   get_name/1,
   get_by_name/1,
-  get_storage_segments/1
+  get_storage_segments/1,
+  sync/0
 ]).
 
 %%===========================================================================
@@ -85,6 +86,11 @@ get_storage_segments(Storage)->
   ]}),
   [ binary_to_atom(S,utf8) || [S]<-Segments].
 
+sync()->
+  [ sync_database(DB) || DB <- get_databases() ].
+
+sync_database(_DB)->
+  ok.
 
 %%=================================================================
 %%	Ecomet object behaviour
@@ -95,6 +101,14 @@ on_create(Object)->
   { ok, Name } = ecomet:read_field(Object,<<".name">>),
   NameAtom = binary_to_atom(Name,utf8),
   ?LOGINFO("creating a new database ~p",[NameAtom]),
+
+  % Create storage types
+  [ ecomet:create_object(#{
+    <<".name">>=>atom_to_binary(T,utf8),
+    <<".folder">>=>?OID(Object),
+    <<".pattern">>=>?OID(<<"/root/.patterns/.storage">>)
+  }) || T <-?STORAGE_TYPES ],
+
   % We need to create the backend out of a transaction, otherwise it throws 'nested_transaction'
   ecomet:on_commit(fun()->
     case create_database(NameAtom) of

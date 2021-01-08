@@ -101,7 +101,7 @@ is_local_storage(Storage)->
   dlss:is_local_storage(Storage).
 
 get_supported_types()->
-  [?RAMLOCAL,?RAM,?RAMDISC,?DISC].
+  ?STORAGE_TYPES.
 
 %%=================================================================
 %%	Data API

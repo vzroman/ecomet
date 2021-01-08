@@ -698,7 +698,10 @@ init_storage_objects()->
           fields=>#{
             <<".pattern">>=>?OID(<<"/root/.patterns/.database">>),
             <<"id">>=>0
-          }
+          },
+          children=>[
+            { atom_to_binary(T,utf8) , #{ fields=>#{ <<".pattern">>=>?OID(<<"/root/.patterns/.storage">>) } } } || T <-?STORAGE_TYPES
+          ]
         }}
       ]
     }}

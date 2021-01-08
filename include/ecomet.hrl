@@ -30,6 +30,7 @@
 -define(RAM,ram).
 -define(RAMDISC,ramdisc).
 -define(DISC,disc).
+-define(STORAGE_TYPES,[?DISC,?RAMDISC,?RAM,?RAMLOCAL]).
 
 
 -define(BITSTRING_LENGTH,65536).

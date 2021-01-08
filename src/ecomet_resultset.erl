@@ -707,7 +707,7 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 	Storages=
 		if
 			% If no patterns range is defined yet, then search through all stoarges
-			ExtBits=='UNDEFINED'->[?RAMLOCAL,?RAM,?RAMDISC,?DISC];
+			ExtBits=='UNDEFINED'->?STORAGE_TYPES;
 			true->
 				% Define storages where field is defined
 				Field=element(1,Tag),
@@ -720,7 +720,7 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 						end
 					end,[],ExtBits,{none,none})),
 				% Order is [ramlocal,ram,ramdisc,disc]
-				lists:subtract([?RAMLOCAL,?RAM,?RAMDISC,?DISC],lists:subtract([?RAMLOCAL,?RAM,?RAMDISC,?DISC],FoundStorages))
+				lists:subtract(?STORAGE_TYPES,lists:subtract(?STORAGE_TYPES,FoundStorages))
 		end,
 	Config=
 		lists:foldr(fun(Storage,{AccPatterns,AccStorages})->
