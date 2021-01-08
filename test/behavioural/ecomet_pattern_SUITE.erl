@@ -20,7 +20,6 @@
 -export([all/0, group/0, init_per_suite/1, end_per_suite/1]).
 
 
-
 -export([
   check_handler_module_test/1,
   check_handler_test/1,
@@ -28,8 +27,6 @@
   get_parent_test/1,
   get_parents_test/1,
   set_parents_test/1,
-  wrap_transaction_test/1,
-  is_empty_test/1,
   on_delete_test/1,
   on_edit_test/1,
   on_create_test/1
@@ -42,8 +39,6 @@ all() ->
     check_handler_test,
     check_parent_test,
     set_parents_test,
-    wrap_transaction_test,
-    is_empty_test,
     on_delete_test,
     on_edit_test,
     on_create_test
@@ -62,7 +57,6 @@ end_per_suite(_Config)->
   ok.
 
 
-
 check_handler_module_test(_Config) ->
   % Module 'valid_mod' does not exist, error should occur %
   ?assertError(invalid_module, ecomet_pattern:check_handler_module(valid_mod)),
@@ -71,10 +65,9 @@ check_handler_module_test(_Config) ->
   ?assertError(undefined_on_create, ecomet_pattern:check_handler_module(ecomet_query)),
 
   % 'ecomet_db' - module of our project and contain all needed functions %
-  ok = ecomet_pattern:check_handler_module(ecomet_db)
-
+  ok = ecomet_pattern:check_handler_module(ecomet_db),
+  ok
 .
-
 
 % Object == #{behaviour_module => {NewValue, OldValue}} %
 % Other fields are not important in this case %
@@ -83,17 +76,20 @@ check_handler_test(_Config) ->
   meck:new(ecomet, [no_link]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
 
-  % We do not change behaviour_module, should return ok
+  % We do not change <<behaviour_module>>, should return ok
   ok = ecomet_pattern:check_handler(#{ 1 => 2, {old, new} => {new, old} }),
   ok = ecomet_pattern:check_handler(#{ 1.5 => 4.2, <<"old">> => <<"new">> }),
 
-  % Changing behaviour_module to none, should return ok %
-  ok = ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {none, notnone} }),
-  ok = ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {none, <<"Smth">>}, 1 => 2 }),
+  % Changing <<behaviour_module>> to none, should return ok %
+  ok = ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {none, ecomet_db} }),
+  ok = ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {none, ecomet_node}, 1 => 2 }),
 
+  % Changing <<behaviour_module>> to invalid module or
+  % module does not contain on_edit, on_create, on_delete functions %
   ?assertError(invalid_module, ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {invalid_module, none}})),
   ?assertError(undefined_on_create, ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {ecomet_query, none}})),
 
+  % Valid module with on_create, on_edit, on_delete functions %
   ok = ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {ecomet_field, none}}),
   meck:unload(ecomet)
 .
@@ -133,18 +129,11 @@ set_parents_test(_Config) ->
 
   ok.
 
-
-wrap_transaction_test(_Config) ->
-  ok.
-
-
 % Object == #{parent_pattern => Smth} OR #{} %
 % Other fields are not important in this case %
 check_parent_test(_Config) ->
-
   meck:new(ecomet, [no_link]),
   meck:expect(ecomet, field_changes, fun(Object, Field) -> maps:get(Field, Object, none) end),
-
 
   % We aren`t changing parent, should return ok %
   ok = ecomet_pattern:check_parent(#{ 1 => 2, 3 => 4, 5 => 6 }),
@@ -154,14 +143,26 @@ check_parent_test(_Config) ->
   ?assertError(cannot_change_parent, ecomet_pattern:check_parent(#{ <<"parent_pattern">> => {new, old} })),
   ?assertError(cannot_change_parent, ecomet_pattern:check_parent(#{ <<"parent_pattern">> => {<<"why">>, <<"soHard?">>} })),
 
-  meck:unload(ecomet)
+  meck:unload(ecomet),
+  ok
 .
 
-is_empty_test(_Config) ->
-  ok.
-
 on_create_test(_Config) ->
-  ok.
+  Object = ecomet:create_object(#{
+    <<".name">> => <<"STALKER">>,
+    <<".folder">> => {2, 1},
+    <<".pattern">> => {3, 2},
+    <<"behaviour_module">> => ecomet_db
+  }),
+  ?assertError(invalid_module, ecomet:create_object(#{
+    <<".name">> => <<"ClearSky">>,
+    <<".folder">> => {2, 1},
+    <<".pattern">> => {3, 2},
+    <<"behaviour_module">> => ecomet_query
+  })),
+  ecomet:delete_object(Object),
+  ok
+.
 
 on_edit_test(_Config) ->
   ok.
