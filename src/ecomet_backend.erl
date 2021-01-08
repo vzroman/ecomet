@@ -26,8 +26,11 @@
   create_db/1,
   remove_db/1,
   get_storages/0,
-  get_segments/1,
+  get_segments/1,get_segments/3,
+  get_segment_info/1,
+  get_segment_size/1,
   get_storage_type/1,
+  add_segment_copy/2, remove_segment_copy/2,
   is_local_storage/1,
   get_supported_types/0
 ]).
@@ -69,6 +72,14 @@ get_storages()->
 
 get_segments(Storage)->
   dlss:get_segments( Storage ).
+get_segments(Name,Storage,Type)->
+  get_segments(?NAME(Name,Storage,Type)).
+
+get_segment_info(Segment)->
+  dlss:get_segment_info(Segment).
+
+get_segment_size(Segment)->
+  dlss:get_segment_size(Segment).
 
 get_storage_type(Storage)->
   case dlss:get_storage_type(Storage) of
@@ -79,6 +90,12 @@ get_storage_type(Storage)->
       end;
     Other->Other
   end.
+
+add_segment_copy(Segment,Node)->
+  dlss:add_segment_copy(Segment,Node).
+
+remove_segment_copy(Segment,Node)->
+  dlss:remove_segment_copy(Segment,Node).
 
 is_local_storage(Storage)->
   dlss:is_local_storage(Storage).

@@ -26,7 +26,8 @@
   get_search_node/2,
   get_databases/0,
   get_name/1,
-  get_by_name/1
+  get_by_name/1,
+  get_storage_segments/1
 ]).
 
 %%===========================================================================
@@ -76,6 +77,14 @@ get_by_name(Name) when is_binary(Name)->
     [OID]->{ok,OID};
     _->{error,not_found}
   end.
+
+get_storage_segments(Storage)->
+  {_,Segments} = ecomet_query:system([?ROOT],[<<".name">>],{'AND',[
+    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.segment">>)},
+    {<<".folder">>,'=',?OID(Storage) }
+  ]}),
+  [ binary_to_atom(S,utf8) || [S]<-Segments].
+
 
 %%=================================================================
 %%	Ecomet object behaviour

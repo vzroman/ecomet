@@ -116,10 +116,20 @@
 }).
 %-------------STORAGE PATTERNS--------------------------------------------
 -define(DATABASE_SCHEMA,#{
-  <<"id">>=>#{ type => integer, index=> [simple] }
+  <<"id">>=>#{ type => integer, index=> [simple] },
+  <<"segments_count">>=>#{ type => integer },
+  <<"size">>=>#{ type => integer },
+  <<"nodes">>=>#{ type => list, subtype => link, index=> [simple] }
+}).
+-define(DATABASE_STORAGE_SCHEMA,#{
+  <<"nodes">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<"segments_count">>=>#{ type => integer },
+  <<"size">>=>#{ type => integer },
+  <<"root_segment">>=>#{ type => atom, index=>[simple] }
 }).
 -define(SEGMENT_SCHEMA,#{
   <<"size">>=>#{ type => integer },
+  <<"key">>=>#{ type => term },
   <<"nodes">>=>#{ type => list, subtype => link, index=> [simple] }
 }).
 -define(NODE_SCHEMA,#{
@@ -373,6 +383,9 @@ init([])->
 
   Cycle=?ENV(schema_server_cycle,?DEFAULT_SCHEMA_CYCLE),
 
+  % Enter the loop
+  self()!on_cycle,
+
   {ok,#state{cycle = Cycle}}.
 
 handle_call(Request, From, State) ->
@@ -387,6 +400,14 @@ handle_cast(Request,State)->
 %%============================================================================
 %%	The loop
 %%============================================================================
+handle_info(on_cycle,#state{cycle = Cycle}=State)->
+  timer:send_after(Cycle,on_cycle),
+
+  % synchronize nodes configuration
+  ecomet_node:sync(),
+
+  {noreply,State};
+
 handle_info(Message,State)->
   ?LOGWARNING("backend got an unexpected message ~p",[Message]),
   {noreply,State}.
@@ -628,6 +649,13 @@ init_storage_objects()->
             <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
           },
           children=>init_pattern_fields(?DATABASE_SCHEMA)
+        }},
+        { <<".storage">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
+          },
+          children=>init_pattern_fields(?DATABASE_STORAGE_SCHEMA)
         }},
         % SEGMENT
         { <<".segment">>, #{

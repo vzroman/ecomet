@@ -31,7 +31,8 @@
   get_ready_nodes/0,
   attach_node/1,
   detach_node/1,
-  set_ready/2
+  set_ready/2,
+  sync/0
 ]).
 
 %%===========================================================================
@@ -44,7 +45,7 @@
 ]).
 
 %%===========================================================================
-%% This functions we need to export ONLY for testing them
+%% These functions we need to export ONLY for testing them
 %%===========================================================================
 -ifdef(TEST).
 -export([
@@ -95,12 +96,51 @@ detach_node(Node)->
 
 set_ready(Node,Value) when is_atom(Node)->
   set_ready(<<"/root/.nodes/",(atom_to_binary(Node,utf8))/binary>>,Value);
-set_ready(<<"/root/.nodes",_>>=Path,Value)->
+set_ready(<<"/root/.nodes",_/binary>>=Path,Value)->
   set_ready(?OID(Path),Value);
 set_ready(Node,Value) when is_binary(Node)->
   set_ready(<<"/root/.nodes/",Node/binary>>,Value);
 set_ready(Node,Value)->
-  ecomet:edit_object(ecomet:open(?OID(Node),none),#{<<"is_ready">>=>Value}).
+  Object = ecomet:open(?OID(Node),none),
+  case ecomet:read_field(Object,<<"is_ready">>) of
+    {ok,Value}->ok;
+    _->ecomet:edit_object(Object,#{<<"is_ready">>=>Value})
+  end.
+
+is_master()->
+  is_master(node()).
+is_master(Node)->
+  case get_ready_nodes() of
+    [Node|_]->
+      % The master is the first node in the list of ready nodes
+      true;
+    _->
+      false
+  end.
+
+
+sync()->
+  case is_master() of
+    true->
+      % Schema synchronization. Project ecomet schema objects into dlss configuration
+      Configured = get_configured_nodes(),
+      Attached = get_attached_nodes(),
+
+      % Attach new nodes
+      [attach_node(N) || N <- Configured -- Attached],
+
+      % Detach removed nodes
+      [detach_node(N) || N <- Attached -- Configured],
+
+      % Update ready nodes
+      Ready = get_ready_nodes(),
+      [set_ready(N, lists:member(N, Ready) ) || N <- Configured ],
+
+      ok;
+    _->
+      % The node is not the master, it is not to do any schema synchronization
+      ok
+  end.
 
 %%=================================================================
 %%	Ecomet object behaviour
