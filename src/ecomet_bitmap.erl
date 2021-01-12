@@ -320,7 +320,7 @@ bucket_foldl(<<?FULL:2>>,Acc,Fun)->
   lists:foldl(Fun,Acc,lists:seq(0,?WORD_LENGTH*?WORD_LENGTH-1));
 bucket_foldl(Bucket,Acc,Fun)->
   Data = decompress(Bucket),
-  NumData = lists:zip( lists:seq(0,length(Data)), Data),
+  NumData = lists:zip( lists:seq(0,length(Data)-1), Data),
   data_foldl( NumData, Acc, Fun ).
 
 data_foldl([{_N,0}|Tail],Acc,Fun)->
@@ -371,7 +371,7 @@ bucket_foldr(<<?FULL:2>>,Acc,Fun)->
   lists:foldr(Fun,Acc,lists:seq(0,?WORD_LENGTH*?WORD_LENGTH-1));
 bucket_foldr(Bucket,Acc,Fun)->
   Data = decompress(Bucket),
-  NumData = lists:zip( lists:seq(0,length(Data)), Data),
+  NumData = lists:zip( lists:seq(0,length(Data)-1), Data),
   data_foldr( lists:reverse(NumData), Acc, Fun ).
 
 data_foldr([{_N,0}|Tail],Acc,Fun)->
