@@ -194,11 +194,6 @@ on_edit_test(_Config) ->
 .
 
 on_delete_test(_Config) ->
-  meck:new(ecomet),
-  meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
-  ?assertError(system_object, ecomet_object:on_delete(#{<<".name">> => <<".system">>})),
-  ok = ecomet_object:on_delete(#{<<".name">> => <<"notsystem">>}),
-  meck:unload(ecomet),
 
   ecomet_user:on_init_state(),
   Object = ecomet:create_object(#{

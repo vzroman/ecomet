@@ -474,12 +474,23 @@ on_delete_test(_Config) ->
 
   % TODO. Comment the code, add negative tests
   meck:new([ecomet, ecomet_pattern]),
+  meck:expect(ecomet, open,
+    fun(_PatternID, _None) ->
+     case get(open) of
+      false -> ?ERROR(object_deleted);
+      true -> ok
+     end
+    end),
+
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
   meck:expect(ecomet_pattern, remove_field, fun(_PatternID, _Name) -> ok end),
   meck:expect(ecomet_pattern, is_empty, fun(PatternID) -> PatternID end),
+
   % Deleting object %
+  put(open, false),
   ok = ecomet_field:on_delete(#{<<".folder">> => true, <<".name">> => <<"NazGul">>}),
   % Incorrectly deleting object %
+  put(open, true),
   ?assertError(has_objects, ecomet_field:on_delete(#{<<".folder">> => false, <<".name">> => <<"NazGul">>})),
   ?assertError(has_objects,ecomet_field:on_delete(#{<<".folder">> => sfsf, <<".name">> => <<"NazGul">>})),
 
