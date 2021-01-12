@@ -61,9 +61,10 @@ end_per_suite(_Config)->
 
 check_storage_type_test(_Config) ->
   meck:new([ecomet, ecomet_pattern]),
-  meck:expect(ecomet, read_field, fun(Object, Field) ->
-                                      {ok, maps:get(Field, element(2, Object))}
-                                  end),
+  meck:expect(ecomet, read_field,
+    fun(Object, Field) ->
+      {ok, maps:get(Field, element(2, Object))}
+    end),
   meck:expect(ecomet_pattern, get_storage, fun(Object) -> element(2, Object) end),
 
   % Create meck object %
@@ -75,12 +76,14 @@ check_storage_type_test(_Config) ->
   % <<.folder>> contain FolderStorage
 
   % Persistent folders can contain any types of objects %
-  ok = ecomet_object:check_storage_type({ ?RAM, #{<<".folder">> => {?DISC, none}} }),
-  ok = ecomet_object:check_storage_type({ ?RAMDISC, #{<<".folder">> => {?RAMLOCAL, none}} }),
+  % Persistent means FolderStorage != ?RAM %
+  ok = ecomet_object:check_storage_type({ #{<<".folder">> => {?DISC, none}}, ?RAM}),
+  ok = ecomet_object:check_storage_type({ #{<<".folder">> => {?RAMLOCAL, none}}, ?RAMDISC }),
 
   % Ram only folders cannot contain persistent objects %
-  ok = ecomet_object:check_storage_type({ ?RAM, #{<<".folder">> => {?RAM, none}} }),
-  ?assertError(ram_only_folder, ecomet_object:check_storage_type({ ?DISC, #{<<".folder">> => {?RAM, none}} })),
+  % It means in case FolderStorage == ?RAM, object storage could be only ?RAM%
+  ok = ecomet_object:check_storage_type({ #{<<".folder">> => {?RAM, none}}, ?RAM }),
+  ?assertError(ram_only_folder, ecomet_object:check_storage_type({ #{<<".folder">> => {?RAM, none}}, ?DISC })),
 
   meck:unload([ecomet, ecomet_pattern]),
 
@@ -94,8 +97,11 @@ check_path_test(_Config) ->
     <<".pattern">> => {3, 2}
   }),
   ok = ecomet:edit_object(Object, #{<<".folder">> => {2, 2}}),
+
+  % We are trying to create object with invalid name %
   ?assertError({"the '/' symbol is not allowed in names", _},
     ecomet:edit_object(Object, #{<<".name">> => <<"Se/verus">>})),
+  % Every object must have unique name %
   ?assertError({{not_unique,<<"Forest">>}, _}, ecomet:create_object(#{
     <<".name">> => <<"Forest">>,
     <<".folder">> => {2, 2},
@@ -118,7 +124,7 @@ edit_rights_test(_Config) ->
   ecomet:edit_object(Object, #{<<".writegroups">> => [{1, 2}], <<".readgroups">> => [{2, 3}]}),
   {ok, WriteG} = ecomet_object:read_field(Object, <<".writegroups">>),
   {ok, ReadG} = ecomet_object:read_field(Object, <<".readgroups">>),
-
+  % ReadGroups has to contain WriteGroups %
   [] = WriteG -- ReadG,
   ok = ecomet:delete_object(Object),
   ok
@@ -203,7 +209,7 @@ on_delete_test(_Config) ->
     <<".readgroups">> => [{2, 3}],
     <<".writegroups">> => [{4, 5}]
   }),
-
+  % We cannot delete system object %
   ?assertError({system_object, _}, ecomet:delete_object(Object)),
   ok
 .
