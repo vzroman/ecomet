@@ -75,7 +75,7 @@
 -endif.
 %%====================================================================
 
--define(DEFAULT_SCHEMA_CYCLE, 1000).
+-define(DEFAULT_SCHEMA_CYCLE, 5000).
 -define(WAIT_SCHEMA_TIMEOUT,5000).
 
 -define(INCREMENT,list_to_atom("ecomet_"++atom_to_list(node()))).
@@ -116,11 +116,21 @@
 }).
 %-------------STORAGE PATTERNS--------------------------------------------
 -define(DATABASE_SCHEMA,#{
-  <<"id">>=>#{ type => integer, index=> [simple] }
+  <<"id">>=>#{ type => integer, index=> [simple] },
+  <<"segments_count">>=>#{ type => integer },
+  <<"size">>=>#{ type => integer },
+  <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] }
+}).
+-define(DATABASE_STORAGE_SCHEMA,#{
+  <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] },
+  <<"segments_count">>=>#{ type => integer },
+  <<"size">>=>#{ type => integer },
+  <<"root_segment">>=>#{ type => atom, index=>[simple] }
 }).
 -define(SEGMENT_SCHEMA,#{
   <<"size">>=>#{ type => integer },
-  <<"nodes">>=>#{ type => list, subtype => link, index=> [simple] }
+  <<"key">>=>#{ type => term },
+  <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] }
 }).
 -define(NODE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] },
@@ -373,6 +383,9 @@ init([])->
 
   Cycle=?ENV(schema_server_cycle,?DEFAULT_SCHEMA_CYCLE),
 
+  % Enter the loop
+  self()!on_cycle,
+
   {ok,#state{cycle = Cycle}}.
 
 handle_call(Request, From, State) ->
@@ -387,6 +400,17 @@ handle_cast(Request,State)->
 %%============================================================================
 %%	The loop
 %%============================================================================
+handle_info(on_cycle,#state{cycle = Cycle}=State)->
+  timer:send_after(Cycle,on_cycle),
+
+  % synchronize nodes configuration
+  ecomet_node:sync(),
+
+  % synchronize database configuration
+  ecomet_db:sync(),
+
+  {noreply,State};
+
 handle_info(Message,State)->
   ?LOGWARNING("backend got an unexpected message ~p",[Message]),
   {noreply,State}.
@@ -629,6 +653,13 @@ init_storage_objects()->
           },
           children=>init_pattern_fields(?DATABASE_SCHEMA)
         }},
+        { <<".storage">>, #{
+          fields=>#{
+            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
+          },
+          children=>init_pattern_fields(?DATABASE_STORAGE_SCHEMA)
+        }},
         % SEGMENT
         { <<".segment">>, #{
           fields=>#{
@@ -670,7 +701,10 @@ init_storage_objects()->
           fields=>#{
             <<".pattern">>=>?OID(<<"/root/.patterns/.database">>),
             <<"id">>=>0
-          }
+          },
+          children=>[
+            { ecomet_db:storage_name(S,T) , #{ fields=>#{ <<".pattern">>=>?OID(<<"/root/.patterns/.storage">>) } } } || S <-[?DATA,?INDEX],T <-?STORAGE_TYPES
+          ]
         }}
       ]
     }}
@@ -752,6 +786,14 @@ init_default_users()->
     }}
   ]),
   % system user
+  Password =
+    case ?ENV(password,<<"111111">>) of
+      P when is_binary(P)->P;
+      P when is_list(P)-> unicode:characters_to_binary(P);
+      P when is_atom(P)-> atom_to_binary(P,utf8);
+      P when is_integer(P)-> integer_to_binary(P);
+      P->?ERROR({invalid_password,P})
+    end,
   init_tree({?FOLDER_PATTERN,?ROOT_FOLDER},[
     { <<".users">>, #{
       fields=>#{ <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN} },
@@ -760,7 +802,7 @@ init_default_users()->
           fields=>#{
             <<".pattern">>=>?OID(<<"/root/.patterns/.user">>),
             <<"usergroups">>=>[?OID(<<"/root/.usergroups/.administrators">>)],
-            <<"password">>=>?ENV(password,<<"111111">>)
+            <<"password">>=>Password
           }
         }}
       ]
