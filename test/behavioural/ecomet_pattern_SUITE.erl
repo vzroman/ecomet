@@ -45,6 +45,8 @@ all() ->
     check_handler_module_test,
     check_handler_test,
     check_parent_test,
+    get_parent_test,
+    get_parents_test,
     set_parents_test,
     on_delete_test,
     on_edit_test,

@@ -77,13 +77,13 @@ check_storage_type_test(_Config) ->
 
   % Persistent folders can contain any types of objects %
   % Persistent means FolderStorage != ?RAM %
-  ok = ecomet_object:check_storage_type({ #{<<".folder">> => {?DISC, none}}, ?RAM}),
-  ok = ecomet_object:check_storage_type({ #{<<".folder">> => {?RAMLOCAL, none}}, ?RAMDISC }),
+  ok = ecomet_object:check_storage_type({?RAM, #{<<".folder">> => {?DISC, none}}}),
+  ok = ecomet_object:check_storage_type({?RAMDISC, #{<<".folder">> => {?RAMLOCAL, none}} }),
 
   % Ram only folders cannot contain persistent objects %
   % It means in case FolderStorage == ?RAM, object storage could be only ?RAM%
-  ok = ecomet_object:check_storage_type({ #{<<".folder">> => {?RAM, none}}, ?RAM }),
-  ?assertError(ram_only_folder, ecomet_object:check_storage_type({ #{<<".folder">> => {?RAM, none}}, ?DISC })),
+  ok = ecomet_object:check_storage_type({ ?RAM, #{<<".folder">> => {?RAM, none}} }),
+  ?assertError(ram_only_folder, ecomet_object:check_storage_type({ ?DISC, #{<<".folder">> => {?RAM, none}}})),
 
   meck:unload([ecomet, ecomet_pattern]),
 

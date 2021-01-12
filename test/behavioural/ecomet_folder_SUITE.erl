@@ -84,7 +84,7 @@ check_database_test(_Config) ->
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
   % We are trying to change database(unmount old and mount new),
-  % but unmount onlt allowed when folder is empty
+  % but unmount only allowed when folder is empty
   ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<"database">> => none})),
   ecomet:delete_object(Folder2),
   ecomet:edit_object(Folder1, #{<<"database">> => none}),
@@ -264,7 +264,8 @@ on_edit_test(_Config) ->
   ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<"database">> => ?OID(NotSoUseless)})) ,
 
   ecomet:delete_object(Folder2),
-  % Folder2 deleted and here Folder1 is empty  %
+  % Folder2 deleted and here Folder1 is empty
+  % So we can change <<database>> field %
   ecomet:edit_object(Folder1, #{<<"database">> => ?OID(NotSoUseless)}),
   'NotSoUseless' = ecomet_schema:get_mounted_db(?OID(Folder1)),
 
@@ -314,6 +315,8 @@ on_delete_test(_Config) ->
   ?OID(<<"/root/Chester/Arthas/Illidan">>),
   ct:pal("After OID"),
 %  ecomet:delete_object(Folder2),
+  % We delete Folder1
+  % Because Folder1 contain other Folders, other Folders will be deleted with Folder1%
   ecomet:delete_object(Folder1),
   ?assertError({badmatch,{error,invalid_path}}, ?OID(<<"/root/Chester">>)),
   ?assertError({badmatch,{error,invalid_path}}, ?OID(<<"/root/Chester/LightBringer">>)),
