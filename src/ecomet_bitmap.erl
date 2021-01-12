@@ -17,8 +17,6 @@
 %%----------------------------------------------------------------
 -module(ecomet_bitmap).
 
--record(bitmap,{h,l}).
-
 -define(WORD_LENGTH,64).
 
 -define(EMPTY,0).
@@ -28,18 +26,33 @@
 -define(FULL_WORD,2#1111111111111111111111111111111111111111111111111111111111111111).
 -define(BIT(X), 1 bsl X).
 
-%% API
+%%------------------------------------------------------------------------------------
+%%  BITS API
+%%------------------------------------------------------------------------------------
 -export([
   set_bit/2,
   reset_bit/2,
   get_bit/2,
-  is_empty/1,
-  count/1,count/2,
+  is_empty/1
+]).
 
+%%------------------------------------------------------------------------------------
+%%  BITWISE OPERATIONS API
+%%------------------------------------------------------------------------------------
+-export([
   oper/3,
   bit_and/2,
   bit_or/2,
   bit_andnot/2
+]).
+
+%%------------------------------------------------------------------------------------
+%%  Iterators
+%%------------------------------------------------------------------------------------
+-export([
+  count/1,count/2,
+  foldl/4,
+  foldr/4
 ]).
 
 
@@ -270,9 +283,115 @@ data_andnot( T1, [] )->
   T1.
 
 %%------------------------------------------------------------------------------------
+%%  Iterators
+%%------------------------------------------------------------------------------------
+% From the least significant bit to the most significant
+foldl(_F,Acc,none,_Page)->
+  {0,Acc};
+foldl(_F,Acc,<<>>,_Page)->
+  {0,Acc};
+foldl(F,InitAcc,Bitmap,{From,To})->
+  Start=if is_integer(From)->From; true->0 end,
+  Stop=if is_integer(To)->To; true->-1 end,
+
+  Buckets=split_buckets(Bitmap),
+  NumBuckets=lists:zip(lists:seq(0,length(Buckets)-1),Buckets),
+
+  lists:foldl(fun({N,Bucket},TotalAcc)->
+    Offset = N * ?WORD_LENGTH*?WORD_LENGTH,
+    bucket_foldl(Bucket,TotalAcc,fun(Bit, {Count,Acc} )->
+      Count1 = Count+1,
+      Acc1=
+        if
+          Count1 < Start->
+            Acc;
+         Count1 > Stop, Stop=/=-1->
+            Acc;
+          true ->
+            F(Offset + Bit, Acc)
+        end,
+      {Count1, Acc1}
+     end)
+  end,{0,InitAcc}, NumBuckets ).
+
+bucket_foldl(<<?EMPTY:2>>,Acc,_Fun)->
+  Acc;
+bucket_foldl(<<?FULL:2>>,Acc,Fun)->
+  lists:foldl(Fun,Acc,lists:seq(0,?WORD_LENGTH*?WORD_LENGTH-1));
+bucket_foldl(Bucket,Acc,Fun)->
+  Data = decompress(Bucket),
+  NumData = lists:zip( lists:seq(0,length(Data)), Data),
+  data_foldl( NumData, Acc, Fun ).
+
+data_foldl([{_N,0}|Tail],Acc,Fun)->
+  data_foldl(Tail,Acc,Fun);
+data_foldl([{N,?FULL_WORD}|Tail],Acc,Fun)->
+  Offset = N * ?WORD_LENGTH,
+  Acc1 = lists:foldl(Fun,Acc,lists:seq(Offset,Offset+?WORD_LENGTH-1)),
+  data_foldl(Tail,Acc1,Fun);
+data_foldl([{N,Word}|Tail],Acc,Fun)->
+  Bits = word_to_bits(Word, N*?WORD_LENGTH),
+  Acc1 = lists:foldl(Fun,Acc,Bits),
+  data_foldl(Tail,Acc1,Fun);
+data_foldl([],Acc,_Fun)->
+  Acc.
+
+% From the most significant bit to the least significant
+foldr(_F,Acc,none,_Page)->
+  {0,Acc};
+foldr(_F,Acc,<<>>,_Page)->
+  {0,Acc};
+foldr(F,InitAcc,Bitmap,{From,To})->
+  Start=if is_integer(From)->From; true->0 end,
+  Stop=if is_integer(To)->To; true->-1 end,
+
+  Buckets=split_buckets(Bitmap),
+  NumBuckets=lists:zip(lists:seq(0,length(Buckets)-1),Buckets),
+
+  lists:foldr(fun({N,Bucket},TotalAcc)->
+    Offset = N * ?WORD_LENGTH*?WORD_LENGTH,
+    bucket_foldr(Bucket,TotalAcc,fun(Bit, {Count,Acc} )->
+      Count1 = Count+1,
+      Acc1=
+        if
+          Count1 < Start->
+            Acc;
+          Count1 > Stop, Stop=/=-1->
+            Acc;
+          true ->
+            F(Offset + Bit, Acc)
+        end,
+      {Count1, Acc1}
+    end)
+  end,{0,InitAcc}, NumBuckets ).
+
+bucket_foldr(<<?EMPTY:2>>,Acc,_Fun)->
+  Acc;
+bucket_foldr(<<?FULL:2>>,Acc,Fun)->
+  lists:foldr(Fun,Acc,lists:seq(0,?WORD_LENGTH*?WORD_LENGTH-1));
+bucket_foldr(Bucket,Acc,Fun)->
+  Data = decompress(Bucket),
+  NumData = lists:zip( lists:seq(0,length(Data)), Data),
+  data_foldr( lists:reverse(NumData), Acc, Fun ).
+
+data_foldr([{_N,0}|Tail],Acc,Fun)->
+  data_foldr(Tail,Acc,Fun);
+data_foldr([{N,?FULL_WORD}|Tail],Acc,Fun)->
+  Offset = N * ?WORD_LENGTH,
+  Acc1 = lists:foldr(Fun,Acc,lists:seq(Offset,Offset+?WORD_LENGTH-1)),
+  data_foldr(Tail,Acc1,Fun);
+data_foldr([{N,Word}|Tail],Acc,Fun)->
+  Bits = word_to_bits(Word, N*?WORD_LENGTH),
+  Acc1 = lists:foldr(Fun,Acc,Bits),
+  data_foldr(Tail,Acc1,Fun);
+data_foldr([],Acc,_Fun)->
+  Acc.
+
+
+%%------------------------------------------------------------------------------------
 %%  Bucket utilities
 %%------------------------------------------------------------------------------------
-find_bucket(N,<<>>)->
+find_bucket(_N,<<>>)->
   <<?EMPTY:2>>;
 find_bucket(N,Bitmap)->
   { Bucket, Tail } = get_bucket(Bitmap),
@@ -281,6 +400,13 @@ find_bucket(N,Bitmap)->
     true ->
       find_bucket(N-1,Tail)
   end.
+
+split_buckets(<<>>)->
+  [];
+split_buckets(Bitmap)->
+  {Bucket,Tail} = get_bucket(Bitmap),
+  [Bucket|split_buckets(Tail)].
+
 
 get_bucket(<<?EMPTY:2,Tail/bitstring>>)->
   { <<?EMPTY:2>>, Tail };
@@ -347,8 +473,12 @@ bit_count(Value,Acc)->
   bit_count(Value bsr 1,Acc+Bit).
 
 
-
-
+word_to_bits(0,_N)->
+  [];
+word_to_bits(Word,N) when Word rem 2=:=1->
+  [N|word_to_bits(Word bsr 1,N+1)];
+word_to_bits(Word,N)->
+  word_to_bits(Word bsr 1,N+1).
 
 
 
