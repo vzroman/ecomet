@@ -403,15 +403,20 @@ on_edit(Object)->
 
 on_delete(Object)->
   {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
-  case ecomet_pattern:is_empty(PatternID) of
-    true->
-      % Update the schema
-      {ok,Name}=ecomet:read_field(Object,<<".name">>),
-      ecomet_pattern:remove_field(PatternID,Name),
-      ok;
-    _->
-      % The field cannot be deleted if the extent already exists
-      ?ERROR(has_objects)
+  try
+    ecomet:open(PatternID,none),
+    case ecomet_pattern:is_empty(PatternID) of
+      true->
+        % Update the schema
+        {ok,Name}=ecomet:read_field(Object,<<".name">>),
+        ecomet_pattern:remove_field(PatternID,Name),
+        ok;
+      _->
+        % The field cannot be deleted if the extent already exists
+        ?ERROR(has_objects)
+    end
+  catch
+      _:object_deleted->ok
   end.
 
 

@@ -1,14 +1,21 @@
-%%%-------------------------------------------------------------------
-%%% @author faceplate
-%%% @copyright (C) 2020, <COMPANY>
-%%% @doc
-%%%
-%%% @end
-%%% Created : 21. Dec 2020 14:58
-%%%-------------------------------------------------------------------
+%%----------------------------------------------------------------
+%% Copyright (c) 2020 Faceplate
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%----------------------------------------------------------------
 -module(ecomet_pattern_SUITE).
--author("faceplate").
-
 
 -include_lib("ecomet_schema.hrl").
 -include_lib("ecomet.hrl").
@@ -140,33 +147,133 @@ check_parent_test(_Config) ->
   ok = ecomet_pattern:check_parent(#{ <<"Key">> => value, <<"value">> => key }),
 
   % We are changing parent field, error must occur %
-  ?assertError(cannot_change_parent, ecomet_pattern:check_parent(#{ <<"parent_pattern">> => {new, old} })),
-  ?assertError(cannot_change_parent, ecomet_pattern:check_parent(#{ <<"parent_pattern">> => {<<"why">>, <<"soHard?">>} })),
+  ?assertError(cannot_change_parent, ecomet_pattern:check_parent(#{ <<"parent_pattern">> => {{1, 2}, {3, 4}} })),
+  ?assertError(cannot_change_parent, ecomet_pattern:check_parent(#{ <<"parent_pattern">> => {{1, 4}, {123, 100}} })),
 
   meck:unload(ecomet),
   ok
 .
 
 on_create_test(_Config) ->
+  ecomet_user:on_init_state(),
+
+  ct:pal("FolderID /root/CustomPath ~n~p~n~p~n~p~n~p~n" , [
+    ?OID(<<"/root">>),            %{2, 1}
+    ?OID(<<"/root/.patterns">>),  %{2, 2}
+    ?OID(<<"/root/.nodes">>),     %{2, 3}
+    ?OID(<<"/root/.databases">>)  %{2, 4}
+  ]),
+  ct:pal("PatternID /root/.patterns/.object ~n~p~n~p~n~p~n~p~n~p~n~p~n~p~n", [
+    ?OID(<<"/root/.patterns/.object">>),  % {3, 1}
+    ?OID(<<"/root/.patterns/.folder">>),  % {3, 2}
+    ?OID(<<"/root/.patterns/.pattern">>), % {3, 3}
+    ?OID(<<"/root/.patterns/.field">>),   % {3, 4}
+    ?OID(<<"/root/.patterns/.database">>),% {3, 5}
+    ?OID(<<"/root/.patterns/.segment">>), % {3, 6}
+    ?OID(<<"/root/.patterns/.node">>)     % {3, 7}
+  ]),
+
   Object = ecomet:create_object(#{
     <<".name">> => <<"STALKER">>,
-    <<".folder">> => {2, 1},
-    <<".pattern">> => {3, 2},
-    <<"behaviour_module">> => ecomet_db
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
-  ?assertError(invalid_module, ecomet:create_object(#{
+
+  ct:pal("Object ~p, ", [Object]),
+  {ok, ParentPat} = ecomet:read_field(Object, <<"parent_pattern">>),
+  {ok, Parents} = ecomet:read_field(Object, <<"parents">>),
+  % <<parents>> contains <<parent_patterns>> %
+  [] = [ParentPat] -- Parents,
+
+  % <<behaviour_module>> field contain invalid module%
+  ?assertError({invalid_module, _}, ecomet:create_object(#{
     <<".name">> => <<"ClearSky">>,
-    <<".folder">> => {2, 1},
-    <<".pattern">> => {3, 2},
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<"behaviour_module">> => qwe
+  })),
+
+  % <<behaviour_module>> field contain valid module,
+  % but module does not contain on_create function
+  ?assertError({undefined_on_create, _}, ecomet:create_object(#{
+    <<".name">> => <<"ClearSky">>,
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>),
     <<"behaviour_module">> => ecomet_query
   })),
+
+  % <<behaviour_module>> field contain valid module,
+  % and module contain {on_create, on_edit, on_delete} functions
+  Object1 = ecomet:create_object(#{
+    <<".name">> => <<"Jaina">>,
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<"behaviour_module">> => ecomet_db
+  }),
+
   ecomet:delete_object(Object),
+  ecomet:delete_object(Object1),
+
   ok
 .
 
+
 on_edit_test(_Config) ->
+  ecomet_user:on_init_state(),
+  Object = ecomet:create_object(#{
+    <<".name">> => <<"Strelok">>,
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<"behaviour_module">> => ecomet_db
+  }),
+  % We cannot change <<parent_pattern>> field %
+  ?assertError({cannot_change_parent, _}, ecomet:edit_object(Object, #{
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.node">>)
+  })),
+
+  % We changing <<behaviour_module>> to invalid module %
+  ?assertError({invalid_module, _}, ecomet:edit_object(Object, #{
+    <<"behaviour_module">> => non_ecomet_module
+  })),
+
+  % We changing <<behaviour_module>> to valid module,
+  % but module does not contain on_create function
+  ?assertError({undefined_on_create, _}, ecomet:edit_object(Object, #{
+    <<"behaviour_module">> => ecomet_query})),
+
+  % We changing <<behaviour_module>> to valid module,
+  % and module contain {on_create, on_edit, on_delete} functions
+  ok = ecomet:edit_object(Object, #{<<"behaviour_module">> => ecomet_object}),
+  ecomet:delete_object(Object),
   ok.
 
+
 on_delete_test(_Config) ->
+  ecomet_user:on_init_state(),
+
+  Pattern= ecomet:create_object(#{
+    <<".name">> => <<"Rexxar">>,
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.database">>)
+  }),
+
+  UselessDB = ecomet:create_object(#{
+    <<".name">> => <<"IamUseless">>,
+    <<".folder">> => ?OID(<<"/root/.databases">>),
+    <<".pattern">> => ?OID(Pattern)
+  }),
+
+  ct:pal("Databases ~n~p~n", [ecomet_db:get_databases()]),
+  % We are trying to delete Pattern, but we have UselessDB
+  % which <<.pattern>> is Pattern %
+  ?assertError({has_objects, _}, ecomet:delete_object(Pattern)),
+  ecomet_object:delete(UselessDB),
+  ecomet:delete_object(Pattern),
   ok.
 

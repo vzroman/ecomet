@@ -29,9 +29,9 @@
   check_id_test/1,
   create_database_test/1,
   check_name_test/1,
-  delete_test/1,
-  edit_test/1,
-  create_test/1
+  on_create_test/1,
+  on_edit_test/1,
+  on_delete_test/1
 ]).
 
 
@@ -40,9 +40,9 @@ all() ->
     check_id_test,
     create_database_test,
     check_name_test,
-    delete_test,
-    edit_test,
-    create_test
+    on_delete_test,
+    on_edit_test,
+    on_create_test
   ].
 
 group() ->
@@ -167,7 +167,7 @@ create_database_test(_Config) ->
   ok.
 
 % Object == {id1, id2} %
-delete_test(_Config) ->
+on_delete_test(_Config) ->
 
   ecomet_user:on_init_state(),
   % We create object. but not mount should return ok %
@@ -214,7 +214,6 @@ delete_test(_Config) ->
   <<"database">>=>?OID(TestDB_4)
   }),
 
-
   ?assertError({is_mounted,_}, ecomet:delete_object(TestDB_3)),
   ?assertError({is_mounted,_}, ecomet:delete_object(TestDB_4)),
   ok = ecomet:edit_object(TestFolder_3, #{<<"database">> => none}),
@@ -229,7 +228,7 @@ delete_test(_Config) ->
 
 % Object =  {<<".name">> => {NewName, OldName}, <<"id">> => {NewId, OldId}} or #{} %
 % Other fields are not important in this case %
-edit_test(_Config) ->
+on_edit_test(_Config) ->
 
   meck:new(ecomet, [no_link]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
@@ -254,10 +253,9 @@ edit_test(_Config) ->
 
 % Object == #{<<".name">> => {NewName, OldName}} %
 % This is Object creation, name field should be %
-create_test(_Config) ->
+on_create_test(_Config) ->
   ecomet_user:on_init_state(),
-  AA =  ?OID(<<"/root">>),
-  ct:pal("OID  /root/.databases ~p", [AA]),
+
   TestDB = ecomet:create_object(#{
     <<".name">>=><<"my_db">>,
     <<".folder">>=>?OID(<<"/root/.databases">>),
@@ -270,7 +268,6 @@ create_test(_Config) ->
     <<".pattern">>=>?OID(<<"/root/.patterns/.folder">>),
    <<"database">>=>?OID(TestDB)
   }),
-
   my_db = ecomet_schema:get_mounted_db(?OID(Folder)),
   ok = ecomet:delete_object(Folder),
   ok = ecomet:delete_object(TestDB),
