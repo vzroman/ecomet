@@ -291,7 +291,7 @@ define_patterns(_Config)->
   [AND1,AND2,ANDNOT]=ORList,
   {'AND',AND1List,AND1Patterns}=AND1,
   % First AND can be true only for PatternID1
-  {1,[1000]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],AND1Patterns,{none,none}),
+  {1,[1000]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],AND1Patterns,{none,none}),
   [AND1C1,AND1C2]=AND1List,
   {'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'}=AND1C1,
   {'LEAF',{'=',<<".pattern">>,PatternID1},AND1Patterns}=AND1C2,
@@ -302,7 +302,7 @@ define_patterns(_Config)->
   {'LEAF',{'=',<<"field2">>,<<"value2">>},'UNDEFINED'}=AND2C2,
 
   {'ANDNOT',{ANDNOT1,ANDNOT2},ANDNOTPatterns}=ANDNOT,
-  {1,[1001]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],ANDNOTPatterns,{none,none}),
+  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],ANDNOTPatterns,{none,none}),
   {'LEAF',{'=',<<".pattern">>,PatternID2},ANDNOTPatterns}=ANDNOT1,
   {'LEAF',{':>',<<"field1">>,<<"value1">>},'UNDEFINED'}=ANDNOT2.
 
@@ -313,29 +313,29 @@ simple_tag(Config)->
   PatternID2=?config(pattern_id2,Config),
   IDP1=ecomet_object:get_id(PatternID1),
   IDP2=ecomet_object:get_id(PatternID2),
-  Ext1=ecomet_bits:set_bit(IDP1,none),
+  Ext1=ecomet_bitmap:set_bit(none,IDP1),
   % Field5 is not defined in pattern1 - no storages, nothing can be found
   {{'TAG',{<<"field5">>,<<"value5">>,simple},{none,[]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field5">>,<<"value5">>},'UNDEFINED'},Ext1),
   % Invalid tag
   ?assertError({invalid_operation,'DUMMY'},ecomet_resultset:build_conditions({'LEAF',{'DUMMY',<<"field4">>,<<"value4">>},'UNDEFINED'},Ext1)),
-  Ext12=ecomet_bits:set_bit(IDP2,Ext1),
+  Ext12=ecomet_bitmap:set_bit(Ext1,IDP2),
   % Field4 defined only in pattern1 as disc
   {{'TAG',{<<"field4">>,<<"value4">>,simple},{DPatterns,[{disc,DPatterns,[]}]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field4">>,<<"value4">>},'UNDEFINED'},Ext12),
-  {1,[1001]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],DPatterns,{none,none}),
+  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],DPatterns,{none,none}),
   % Field defined in both patterns in the same storage
   {{'TAG',{<<"field1">>,<<"value1">>,simple},{RPatterns,[{ram,RPatterns,[]}]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'},Ext12),
-  {2,[1001,1002]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],RPatterns,{none,none}),
+  {2,[1001,1002]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],RPatterns,{none,none}),
   % Field defined in both patterns in different storages
   {{'TAG',{<<"field2">>,<<"value2">>,simple},{Ext12,StorageList}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field2">>,<<"value2">>},'UNDEFINED'},Ext12),
   {ramdisc,RDPatterns,[]}=lists:keyfind(ramdisc,1,StorageList),
-  {1,[1001]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],RDPatterns,{none,none}),
+  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],RDPatterns,{none,none}),
   {disc,DiscPatterns,[]}=lists:keyfind(disc,1,StorageList),
-  {1,[1002]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],DiscPatterns,{none,none}),
+  {1,[1002]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],DiscPatterns,{none,none}),
   % Patterns defined by tag itself
   {{'TAG',{<<".pattern">>,PatternID1,simple},{RamDiscPatterns,[{disc,RamDiscPatterns,[]}]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},'UNDEFINED'),
-  {1,[1001]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],RamDiscPatterns,{none,none}),
+  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],RamDiscPatterns,{none,none}),
   % Patterns do not intersect, no sense to search tag
-  Ext2=ecomet_bits:set_bit(IDP2,none),
+  Ext2=ecomet_bitmap:set_bit(none,IDP2),
   {{'TAG',{<<".pattern">>,PatternID1,simple},{none,[]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},Ext2),
   % Patterns have intersection
   {{'TAG',{<<".pattern">>,PatternID1,simple},{RamDiscPatterns,[{disc,RamDiscPatterns,[]}]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},Ext12),
@@ -359,9 +359,9 @@ constructions(Config)->
   PatternID2=?config(pattern_id2,Config),
   IDP1=ecomet_object:get_id(PatternID1),
   IDP2=ecomet_object:get_id(PatternID2),
-  Ext1=ecomet_bits:set_bit(IDP1,none),
-  Ext2=ecomet_bits:set_bit(IDP2,none),
-  Ext12=ecomet_bits:set_bit(IDP2,Ext1),
+  Ext1=ecomet_bitmap:set_bit(none,IDP1),
+  Ext2=ecomet_bitmap:set_bit(none,IDP2),
+  Ext12=ecomet_bitmap:set_bit(Ext1,IDP2),
   % Patterns that actual for AND are actual for all it's branches
   {{'AND',AND1Tags,{Ext1,[]}},false}=ecomet_resultset:build_conditions({'AND',[
     {'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},
@@ -371,8 +371,8 @@ constructions(Config)->
     {'TAG',{<<".pattern">>,PatternID1,simple},{AND1T1RD,[{disc,AND1T1RD,[]}]}},
     {'TAG',{<<"field1">>,<<"value1">>,simple},{AND1T2R,[{ram,AND1T2R,[]}]}}
   ]=AND1Tags,
-  {1,[1001]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],AND1T1RD,{none,none}),
-  {1,[1001]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],AND1T2R,{none,none}),
+  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],AND1T1RD,{none,none}),
+  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],AND1T2R,{none,none}),
   % Patterns that defined for AND are intersected with external patterns
   {{'AND',AND1Tags,{Ext1,[]}},false}=ecomet_resultset:build_conditions({'AND',[
     {'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},
@@ -387,7 +387,7 @@ constructions(Config)->
     {'TAG',{<<".pattern">>,PatternID1,simple},{OR1T1RD,[{disc,OR1T1RD,[]}]}},
     {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}
   ]=OR1Tags,
-  {1,[1001]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],OR1T1RD,{none,none}),
+  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],OR1T1RD,{none,none}),
   % External patterns are defined for OR
   {{'OR',OR2Tags,{Ext12,[]}},false}=ecomet_resultset:build_conditions({'OR',[
     {'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},
@@ -397,7 +397,7 @@ constructions(Config)->
     {'TAG',{<<".pattern">>,PatternID1,simple},{OR2T1RD,[{disc,OR2T1RD,[]}]}},
     {'TAG',{<<"field1">>,<<"value1">>,simple},{Ext12,[{ram,Ext12,[]}]}}
   ]=OR2Tags,
-  {1,[1001]}=ecomet_bits:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],OR2T1RD,{none,none}),
+  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],OR2T1RD,{none,none}),
   % ANDNOT can be true only for patterns defined for condition1
   {{'ANDNOT',{C1,C2},{Ext1,[]}},false}=ecomet_resultset:build_conditions({'ANDNOT',{
     {'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},
@@ -1079,9 +1079,9 @@ prepare_summary(Config)->
   PatternID2=?config(pattern_id2,Config),
   IDP1=ecomet_object:get_id(PatternID1),
   IDP2=ecomet_object:get_id(PatternID2),
-  Ext1=ecomet_bits:set_bit(IDP1,none),
-  Ext2=ecomet_bits:set_bit(IDP2,none),
-  Ext12=ecomet_bits:set_bit(IDP2,Ext1),
+  Ext1=ecomet_bitmap:set_bit(none,IDP1),
+  Ext2=ecomet_bitmap:set_bit(none,IDP2),
+  Ext12=ecomet_bitmap:set_bit(Ext1,IDP2),
   % Simple tag
   {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}=ecomet_resultset:prepare({<<"field1">>,'=',<<"value1">>}),
   % Pattern tag
@@ -1127,8 +1127,8 @@ prepare_summary(Config)->
   {'AND',[
     {'TAG',{<<".pattern">>,PatternID2,simple},{Ext2,[{disc,Ext2,[]}]}},
     {'TAG',{<<"field2">>,<<"value2">>,simple},{Ext2,[{disc,Ext2,[]}]}}
-  ],{Ext2NoShrink,[]}}=S5AND2,
-  Ext2=ecomet_bits:shrink(Ext2NoShrink),
+  ],{Ext2,[]}}=S5AND2,
+
   % AND2 contains no base conditions and can not be attached to any
   ?assertError(no_base_conditions,ecomet_resultset:prepare({'OR',[
     {'AND',[
@@ -1222,16 +1222,17 @@ search_patterns(Config)->
   PatternID2=?config(pattern_id5,Config),
   IDP1=ecomet_object:get_id(PatternID1),
   IDP2=ecomet_object:get_id(PatternID2),
-  Ext1=ecomet_bits:set_bit(IDP1,none),
-  Ext2=ecomet_bits:set_bit(IDP2,none),
-  Ext12=ecomet_bits:set_bit(IDP2,Ext1),
+  Ext1=ecomet_bitmap:set_bit(none,IDP1),
+  Ext2=ecomet_bitmap:set_bit(none,IDP2),
+  Ext12=ecomet_bitmap:set_bit(Ext1,IDP2),
 
   % S1. Single tag, pattern is defined
   S1Query=ecomet_resultset:prepare({<<".pattern">>,':=',PatternID1}),
   S1Res=ecomet_resultset:search_patterns(S1Query,root,'UNDEFINED'),
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=S1Res,
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=ecomet_resultset:search_patterns(S1Query,root,Ext12),
-  {'TAG',{<<".pattern">>,PatternID1,simple},{none,[{disc,Ext1,[]}]}}=ecomet_resultset:search_patterns(S1Query,root,Ext2),
+  {'TAG',{<<".pattern">>,PatternID1,simple},{Empty,[{disc,Ext1,[]}]}}=ecomet_resultset:search_patterns(S1Query,root,Ext2),
+  true = ecomet_bitmap:is_empty(Empty),
 
   % S2. Single tag, pattern is not defined
   S2Query=ecomet_resultset:prepare({<<"string1">>,'=',<<"value1">>}),
@@ -1357,14 +1358,14 @@ search_idhs(Config)->
   PatternID2=?config(pattern_id5,Config),
   IDP1=ecomet_object:get_id(PatternID1),
   IDP2=ecomet_object:get_id(PatternID2),
-  Ext1=ecomet_bits:set_bit(IDP1,none),
-  Ext2=ecomet_bits:set_bit(IDP2,none),
-  Ext12=ecomet_bits:set_bit(IDP2,Ext1),
+  Ext1=ecomet_bitmap:set_bit(none,IDP1),
+  Ext2=ecomet_bitmap:set_bit(none,IDP2),
+  Ext12=ecomet_bitmap:set_bit(Ext1,IDP2),
 
   NodeID = ecomet_node:get_unique_id(),
   DB = ecomet_schema:get_db_id( root ),
   IDH1_0 = ((0 bsl 16) + NodeID) bsl 8 + DB,
-  IDH1 = ecomet_bits:set_bit(IDH1_0,none),
+  IDH1 = ecomet_bitmap:set_bit(none,IDH1_0),
 
   % S1. tag on pattern
   S1Query=ecomet_resultset:prepare({<<".pattern">>,':=',PatternID1}),

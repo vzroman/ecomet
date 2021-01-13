@@ -87,7 +87,7 @@ reset_bit(Bitmap, Bit)->
 
   bit_andnot(Bitmap,<<Prefix/bitstring,Bucket/bitstring>>).
 
-get_bit(Bit,Bitmap)->
+get_bit(Bitmap,Bit)->
   case is_empty(Bitmap) of
     true->false;
     _->
@@ -100,24 +100,24 @@ get_bit(Bit,Bitmap)->
         <<?SPARSE_FULL:2,Head:?WORD_LENGTH,Full:?WORD_LENGTH,Data/bitstring>>->
           HighBit = Bit div ?WORD_LENGTH rem ?WORD_LENGTH,
           if
-            ?BIT(HighBit) band Head =:= 0 -> false ;
+            (?BIT(HighBit)) band Head =:= 0 -> false ;
             true ->
               if
-                ?BIT(HighBit) band Full >0 -> true ;
+                (?BIT(HighBit)) band Full >0 -> true ;
                 true ->
+                  Word = find_word( HighBit, Head, Full, Data ),
                   LowBit = Bit rem ?WORD_LENGTH,
-                  Word = find_word( LowBit, Head, Full, Data ),
-                  ?BIT(LowBit) band Word>0
+                  (?BIT(LowBit)) band Word>0
               end
           end;
         <<?SPARSE:2,Head:?WORD_LENGTH,Data/bitstring>>->
           HighBit = Bit div ?WORD_LENGTH rem ?WORD_LENGTH,
           if
-            ?BIT(HighBit) band Head =:= 0 -> false ;
+            (?BIT(HighBit)) band Head =:= 0 -> false ;
             true ->
+              Word = find_word( HighBit, Head, 0, Data ),
               LowBit = Bit rem ?WORD_LENGTH,
-              Word = find_word( LowBit, Head, 0, Data ),
-              ?BIT(LowBit) band Word>0
+              (?BIT(LowBit)) band Word>0
           end
       end
   end.
@@ -303,7 +303,7 @@ foldl(F,InitAcc,Bitmap,{From,To})->
       Count1 = Count+1,
       Acc1=
         if
-          Count1 < Start->
+          Count1 =< Start->
             Acc;
          Count1 > Stop, Stop=/=-1->
             Acc;
@@ -317,24 +317,33 @@ foldl(F,InitAcc,Bitmap,{From,To})->
 bucket_foldl(<<?EMPTY:2>>,Acc,_Fun)->
   Acc;
 bucket_foldl(<<?FULL:2>>,Acc,Fun)->
-  lists:foldl(Fun,Acc,lists:seq(0,?WORD_LENGTH*?WORD_LENGTH-1));
+  full_foldl(0,?WORD_LENGTH*?WORD_LENGTH-1,Acc,Fun);
 bucket_foldl(Bucket,Acc,Fun)->
   Data = decompress(Bucket),
-  NumData = lists:zip( lists:seq(0,length(Data)), Data),
-  data_foldl( NumData, Acc, Fun ).
+  data_foldl( 0, length(Data)-1, Data, Acc, Fun ).
 
-data_foldl([{_N,0}|Tail],Acc,Fun)->
-  data_foldl(Tail,Acc,Fun);
-data_foldl([{N,?FULL_WORD}|Tail],Acc,Fun)->
-  Offset = N * ?WORD_LENGTH,
-  Acc1 = lists:foldl(Fun,Acc,lists:seq(Offset,Offset+?WORD_LENGTH-1)),
-  data_foldl(Tail,Acc1,Fun);
-data_foldl([{N,Word}|Tail],Acc,Fun)->
-  Bits = word_to_bits(Word, N*?WORD_LENGTH),
-  Acc1 = lists:foldl(Fun,Acc,Bits),
-  data_foldl(Tail,Acc1,Fun);
-data_foldl([],Acc,_Fun)->
+data_foldl(I,Stop,_Data,Acc,_Fun) when I>Stop->
+  Acc;
+data_foldl(I,Stop,[0|Tail],Acc,Fun)->
+  data_foldl(I+1,Stop,Tail,Acc,Fun);
+data_foldl(I,Stop,[?FULL_WORD|Tail],Acc,Fun)->
+  Offset = I * ?WORD_LENGTH,
+  data_foldl(I+1,Stop,Tail,full_foldl(Offset, Offset+?WORD_LENGTH-1, Acc, Fun),Fun);
+data_foldl(I,Stop,[Word|Tail],Acc,Fun)->
+  data_foldl(I+1,Stop,Tail,word_foldl(Word,I*?WORD_LENGTH,Acc,Fun),Fun).
+
+
+full_foldl(I,Stop,Acc,Fun) when I=<Stop->
+  full_foldl(I+1,Stop,Fun(I,Acc),Fun);
+full_foldl(_I,_Stop,Acc,_Fun)->
   Acc.
+
+word_foldl(0,_I,Acc,_Fun)->
+  Acc;
+word_foldl(W,I,Acc,Fun) when W rem 2=:=1->
+  word_foldl(W bsr 1,I+1,Fun(I,Acc),Fun);
+word_foldl(W,I,Acc,Fun)->
+  word_foldl(W bsr 1,I+1,Acc,Fun).
 
 % From the most significant bit to the least significant
 foldr(_F,Acc,none,_Page)->
@@ -354,7 +363,7 @@ foldr(F,InitAcc,Bitmap,{From,To})->
       Count1 = Count+1,
       Acc1=
         if
-          Count1 < Start->
+          Count1 =< Start->
             Acc;
           Count1 > Stop, Stop=/=-1->
             Acc;
@@ -368,26 +377,32 @@ foldr(F,InitAcc,Bitmap,{From,To})->
 bucket_foldr(<<?EMPTY:2>>,Acc,_Fun)->
   Acc;
 bucket_foldr(<<?FULL:2>>,Acc,Fun)->
-  lists:foldr(Fun,Acc,lists:seq(0,?WORD_LENGTH*?WORD_LENGTH-1));
+  full_foldr(?WORD_LENGTH*?WORD_LENGTH-1,0,Acc,Fun);
 bucket_foldr(Bucket,Acc,Fun)->
   Data = decompress(Bucket),
-  NumData = lists:zip( lists:seq(0,length(Data)), Data),
-  data_foldr( lists:reverse(NumData), Acc, Fun ).
+  data_foldr( length(Data)-1, 0 ,lists:reverse(Data), Acc, Fun ).
 
-data_foldr([{_N,0}|Tail],Acc,Fun)->
-  data_foldr(Tail,Acc,Fun);
-data_foldr([{N,?FULL_WORD}|Tail],Acc,Fun)->
-  Offset = N * ?WORD_LENGTH,
-  Acc1 = lists:foldr(Fun,Acc,lists:seq(Offset,Offset+?WORD_LENGTH-1)),
-  data_foldr(Tail,Acc1,Fun);
-data_foldr([{N,Word}|Tail],Acc,Fun)->
-  Bits = word_to_bits(Word, N*?WORD_LENGTH),
-  Acc1 = lists:foldr(Fun,Acc,Bits),
-  data_foldr(Tail,Acc1,Fun);
-data_foldr([],Acc,_Fun)->
+data_foldr(I,Stop,_Data,Acc,_Fun) when I<Stop->
+  Acc;
+data_foldr(I,Stop,[0|Tail],Acc,Fun)->
+  data_foldr(I-1,Stop,Tail,Acc,Fun);
+data_foldr(I,Stop,[?FULL_WORD|Tail],Acc,Fun)->
+  Offset = I * ?WORD_LENGTH,
+  data_foldr(I-1,Stop,Tail,full_foldr(Offset+?WORD_LENGTH-1, Offset, Acc, Fun),Fun);
+data_foldr(I,Stop,[Word|Tail],Acc,Fun)->
+  data_foldr(I-1,Stop,Tail,word_foldr(Word,I*?WORD_LENGTH,Acc,Fun),Fun).
+
+word_foldr(0,_I,Acc,_Fun)->
+  Acc;
+word_foldr(W,I,Acc,Fun) when W rem 2=:=1->
+  Fun(I,word_foldr( W bsr 1, I+1, Acc, Fun ));
+word_foldr(W,I,Acc,Fun)->
+  word_foldr(W bsr 1,I+1,Acc,Fun).
+
+full_foldr(I,Stop,Acc,Fun) when I>=Stop->
+  full_foldr(I-1,Stop,Fun(I,Acc),Fun);
+full_foldr(_I,_Stop,Acc,_Fun)->
   Acc.
-
-
 %%------------------------------------------------------------------------------------
 %%  Bucket utilities
 %%------------------------------------------------------------------------------------
@@ -439,9 +454,9 @@ compress(Data)->
 compress([0|Tail],High,Full,Bit,Acc)->
   compress(Tail,High,Full,Bit bsl 1,Acc);
 compress([?FULL_WORD|Tail],High,Full,Bit,Acc)->
-  compress(Tail,High,Full bor Bit, Bit bsl 1 ,Acc);
+  compress(Tail,High bor Bit,Full bor Bit, Bit bsl 1 ,Acc);
 compress([Word|Tail],High,Full,Bit,Acc)->
-  compress(Tail, High bor Bit, Full, Bit bsl 1, <<Acc/binary,Word:?WORD_LENGTH>> );
+  compress(Tail, High bor Bit, Full, Bit bsl 1, <<Acc/bitstring,Word:?WORD_LENGTH>> );
 compress([],High,Full,_Bit,Data)->
   if
     High =:=0 ->
@@ -471,14 +486,6 @@ bit_count(0,Acc)->
 bit_count(Value,Acc)->
   Bit = Value rem 2,
   bit_count(Value bsr 1,Acc+Bit).
-
-
-word_to_bits(0,_N)->
-  [];
-word_to_bits(Word,N) when Word rem 2=:=1->
-  [N|word_to_bits(Word bsr 1,N+1)];
-word_to_bits(Word,N)->
-  word_to_bits(Word bsr 1,N+1).
 
 
 

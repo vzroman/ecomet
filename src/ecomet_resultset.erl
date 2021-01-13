@@ -104,7 +104,7 @@ on_init()->
 	% Store the subscription pattern as a persistent term for optimized access
 	PatternID = ?OID(<<"/root/.patterns/.subscription">>),
 	ID=ecomet_object:get_id(PatternID),
-	Bit=ecomet_bits:set_bit(ID,none),
+	Bit=ecomet_bitmap:set_bit(none,ID),
 	persistent_term:put({?MODULE,subscription_pattern},Bit),
 	ok.
 
@@ -240,7 +240,7 @@ direct_or([],_Fields)->
 %%
 define_patterns({<<".pattern">>,':=',PatternID})->
 	ID=ecomet_object:get_id(PatternID),
-	Bit=ecomet_bits:set_bit(ID,none),
+	Bit=ecomet_bitmap:set_bit(none,ID),
 	{'LEAF',{'=',<<".pattern">>,PatternID},Bit};
 define_patterns({<<".pattern">>,'=',PatternID})->
 	Patterns = [PatternID|ecomet_pattern:get_children(PatternID)],
@@ -309,7 +309,7 @@ build_conditions({'ANDNOT',{Condition1,Condition2},IntBits},ExtBits)->
 %%
 build_tag_config(Patterns,Field)->
 	% If patterns are defined, then we can define available storages for the tag
-	element(2,ecomet_bits:foldl(fun(ID,{AccPatterns,AccStorages})->
+	element(2,ecomet_bitmap:foldl(fun(ID,{AccPatterns,AccStorages})->
 		Map=ecomet_pattern:get_map({?PATTERN_PATTERN,ID}),
 		case ecomet_field:get_storage(Map,Field) of
 			% TAG is actual for the Pattern, add storage for the Field
@@ -319,7 +319,7 @@ build_tag_config(Patterns,Field)->
 						false->none;
 						{_,DefinedPatterns,_}->DefinedPatterns
 					end,
-				{ecomet_bits:set_bit(ID,AccPatterns),[{Storage,ecomet_bits:set_bit(ID,StorageBits),[]}|proplists:delete(Storage,AccStorages)]};
+				{ecomet_bitmap:set_bit(AccPatterns,ID),[{Storage,ecomet_bitmap:set_bit(StorageBits,ID),[]}|proplists:delete(Storage,AccStorages)]};
 			% TAG a priory is empty for the Pattern,
 			{error,undefined_field}->{AccPatterns,AccStorages}
 		end
@@ -383,13 +383,13 @@ pbits_oper('AND',X1,X2)->
 	case {X1,X2} of
 		{'UNDEFINED',_}->X2;
 		{_,'UNDEFINED'}->X1;
-		_->ecomet_bits:oper('AND',X1,X2)
+		_->ecomet_bitmap:oper('AND',X1,X2)
 	end;
 pbits_oper('OR',X1,X2)->
 	case {X1,X2} of
 		{'UNDEFINED',_}->'UNDEFINED';
 		{_,'UNDEFINED'}->'UNDEFINED';
-		_->ecomet_bits:oper('OR',X1,X2)
+		_->ecomet_bitmap:oper('OR',X1,X2)
 	end.
 %%
 %%	Query normalization. Simplified example:
@@ -679,23 +679,23 @@ execute_local(DB,Conditions,Map,{Oper,RS})->
 		{Patterns,_}->
 			DB_RS=get_db_branch(DB,RS),
       % Patterns cycle
-			RunPatterns=if Oper=='ANDNOT'->Patterns; true->ecomet_bits:oper(Oper,Patterns,get_branch([],DB_RS)) end,
+			RunPatterns=if Oper=='ANDNOT'->Patterns; true->ecomet_bitmap:oper(Oper,Patterns,get_branch([],DB_RS)) end,
 			ResultRS=
-      	element(2,ecomet_bits:foldr(fun(IDP,{IDPBits,IDPMap})->
+      	element(2,ecomet_bitmap:foldr(fun(IDP,{IDPBits,IDPMap})->
 					% IDHIGH search
 					{HBits,Conditions1}=seacrh_idhs(Conditions,DB,IDP),
-					RunHBits=if Oper=='ANDNOT'->HBits; true->ecomet_bits:oper(Oper,HBits,get_branch([IDP],DB_RS)) end,
+					RunHBits=if Oper=='ANDNOT'->HBits; true->ecomet_bitmap:oper(Oper,HBits,get_branch([IDP],DB_RS)) end,
 					% IDH cycle
-					case element(2,ecomet_bits:foldr(fun(IDH,{IDHBits,IDHMap})->
+					case element(2,ecomet_bitmap:foldr(fun(IDH,{IDHBits,IDHMap})->
 						% IDLOW search
 						LBits=search_idls(Conditions1,DB,IDP,IDH),
-						case ecomet_bits:oper(Oper,LBits,get_branch([IDP,IDH],DB_RS)) of
+						case ecomet_bitmap:oper(Oper,LBits,get_branch([IDP,IDH],DB_RS)) of
 							none->{IDHBits,IDHMap};
-							ResIDLs->{ecomet_bits:set_bit(IDH,IDHBits),maps:put(IDH,ecomet_bits:shrink(ResIDLs),IDHMap)}
+							ResIDLs->{ecomet_bitmap:set_bit(IDHBits,IDH),maps:put(IDH,ResIDLs,IDHMap)}
 						end
 					end,new_branch(),RunHBits,{none,none})) of
 						{none,_}->{IDPBits,IDPMap};
-						{IDHBits,IDHMap}->{ecomet_bits:set_bit(IDP,IDPBits),maps:put(IDP,{ecomet_bits:shrink(IDHBits),IDHMap},IDPMap)}
+						{IDHBits,IDHMap}->{ecomet_bitmap:set_bit(IDPBits,IDP),maps:put(IDP,{IDHBits,IDHMap},IDPMap)}
 					end
 				end,new_branch(),RunPatterns,{none,none})),
 			Map([{DB,ResultRS}])
@@ -712,7 +712,7 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 				% Define storages where field is defined
 				Field=element(1,Tag),
 				FoundStorages=
-					element(2,ecomet_bits:foldl(fun(ID,AccStorages)->
+					element(2,ecomet_bitmap:foldl(fun(ID,AccStorages)->
 						Map=ecomet_pattern:get_map({?PATTERN_PATTERN,ID}),
 						case ecomet_field:get_storage(Map,Field) of
 							{ok,Storage}->ordsets:add_element(Storage,AccStorages);
@@ -727,7 +727,7 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 			case ecomet_index:read_tag(DB,Storage,[],Tag) of
 				none->{AccPatterns,AccStorages};
 				StoragePatterns->
-					{ecomet_bits:oper('OR',AccPatterns,StoragePatterns),[{Storage,StoragePatterns,[]}|AccStorages]}
+					{ecomet_bitmap:oper('OR',AccPatterns,StoragePatterns),[{Storage,StoragePatterns,[]}|AccStorages]}
 			end
 		end,{none,[]},Storages),
 	{'TAG',Tag,Config};
@@ -748,7 +748,7 @@ search_patterns({'OR',Conditions,'UNDEFINED'},DB,ExtBits)->
 	lists:foldr(fun(Condition,{AccPatterns,AccCond})->
 		PatternedCond=search_patterns(Condition,DB,ExtBits),
 		{CBits,_}=element(3,PatternedCond),
-		{ecomet_bits:oper('OR',AccPatterns,CBits),[PatternedCond|AccCond]}
+		{ecomet_bitmap:oper('OR',AccPatterns,CBits),[PatternedCond|AccCond]}
 	end,{none,[]},Conditions),
 	% !!! EMPTY {'OR',[]} MAY KILL ALL RESULTS
 	{'OR',ResConditions,{ResPaterns,[]}};
@@ -773,7 +773,7 @@ search_patterns(Condition,_DB,_ExtBits)->Condition.
 %% 	Search IDHs
 %%
 get_idh_storage([{Storage,SIDPBits,SIDHList}|Rest],IDP)->
-	case ecomet_bits:get_bit(IDP,SIDPBits) of
+	case ecomet_bitmap:get_bit(SIDPBits,IDP) of
 		true->{Storage,SIDPBits,SIDHList};
 		false->get_idh_storage(Rest,IDP)
 	end;
@@ -793,7 +793,7 @@ seacrh_idhs({'TAG',Tag,{IDPBits,Storages}},DB,IDP)->
 			end
 	end;
 seacrh_idhs({Type,Condition,{IDPBits,IDHList}},DB,IDP)->
-	case ecomet_bits:get_bit(IDP,IDPBits) of
+	case ecomet_bitmap:get_bit(IDPBits,IDP) of
 		false->{none,{Type,Condition,{IDPBits,IDHList}}};
 		true->
 			{IDHBits,ResCondition}=search_type(Type,Condition,DB,IDP),
@@ -807,13 +807,13 @@ search_type('AND',Conditions,DB,IDP)->
 			AccBits==none->{none,AccConditions};
 			true->
 				{CBits,Condition1}=seacrh_idhs(Condition,DB,IDP),
-				{ecomet_bits:oper('AND',AccBits,CBits),[Condition1|AccConditions]}
+				{ecomet_bitmap:oper('AND',AccBits,CBits),[Condition1|AccConditions]}
 		end
 	end,{start,[]},Conditions);
 search_type('OR',Conditions,DB,IDP)->
 	lists:foldr(fun(Condition,{AccBits,AccConditions})->
 		{CBits,Condition1}=seacrh_idhs(Condition,DB,IDP),
-		{ecomet_bits:oper('OR',AccBits,CBits),[Condition1|AccConditions]}
+		{ecomet_bitmap:oper('OR',AccBits,CBits),[Condition1|AccConditions]}
 	end,{none,[]},Conditions);
 search_type('ANDNOT',{Condition1,Condition2},DB,IDP)->
 	case seacrh_idhs(Condition1,DB,IDP) of
@@ -841,7 +841,7 @@ search_idls({'TAG',Tag,Config},DB,IDP,IDH)->
 				% Nothing found for the Pattern, no sense to search storage
 				undefined->none;
 				IDHBits->
-					case ecomet_bits:get_bit(IDH,IDHBits) of
+					case ecomet_bitmap:get_bit(IDHBits,IDH) of
 						% Nothing found for the IDH
 						false->none;
 						true->ecomet_index:read_tag(DB,Storage,[IDP,IDH],Tag)
@@ -853,7 +853,7 @@ search_idls({Type,Condition,{_,IDHList}},DB,IDP,IDH)->
 		% Branch is empty for the IDP, no sense to search
 		undefined->none;
 		IDHBits->
-			case ecomet_bits:get_bit(IDH,IDHBits) of
+			case ecomet_bitmap:get_bit(IDHBits,IDH) of
 				% Branch is empty for the IDH
 				false->none;
 				true->search_type(Type,Condition,DB,IDP,IDH)
@@ -866,36 +866,36 @@ search_type('AND',Conditions,DB,IDP,IDH)->
 			AccBits==none->none;
 			true->
 				CBits=search_idls(Condition,DB,IDP,IDH),
-				ecomet_bits:oper('AND',AccBits,CBits)
+				ecomet_bitmap:oper('AND',AccBits,CBits)
 		end
 	end,start,Conditions);
 search_type('OR',Conditions,DB,IDP,IDH)->
 	lists:foldl(fun(Condition,AccBits)->
 		CBits=search_idls(Condition,DB,IDP,IDH),
-		ecomet_bits:oper('OR',AccBits,CBits)
+		ecomet_bitmap:oper('OR',AccBits,CBits)
 	end,none,Conditions);
 search_type('ANDNOT',{Condition1,Condition2},DB,IDP,IDH)->
 	case search_idls(Condition1,DB,IDP,IDH) of
 		none->none;
 		C1Bits->
 			C2Bits=search_idls(Condition2,DB,IDP,IDH),
-			ecomet_bits:oper('ANDNOT',C1Bits,C2Bits)
+			ecomet_bitmap:oper('ANDNOT',C1Bits,C2Bits)
 	end;
 search_type('NORM',{{AND,ANDNOT},{DAND,DANDNOT}},DB,IDP,IDH)->
 	case search_idls(AND,DB,IDP,IDH) of
 		none->none;
 		ANDBits->
 			ANDNOTBits=search_idls(ANDNOT,DB,IDP,IDH),
-			case ecomet_bits:oper('ANDNOT',ANDBits,ANDNOTBits) of
+			case ecomet_bitmap:oper('ANDNOT',ANDBits,ANDNOTBits) of
 				none->none;
 				TBits->
-					element(2,ecomet_bits:foldl(fun(IDL,AccBits)->
+					element(2,ecomet_bitmap:foldl(fun(IDL,AccBits)->
 						Object=ecomet_object:construct({IDP,IDH*?BITSTRING_LENGTH+IDL}),
 						case check_direct(DAND,'AND',Object) of
-							false->ecomet_bits:reset_bit(IDL,AccBits);
+							false->ecomet_bitmap:reset_bit(AccBits,IDL);
 							true->
 								case check_direct(DANDNOT,'OR',Object) of
-									true->ecomet_bits:reset_bit(IDL,AccBits);
+									true->ecomet_bitmap:reset_bit(AccBits,IDL);
 									false->AccBits
 								end
 						end
@@ -957,9 +957,9 @@ direct_like(String,Pattern) when (is_binary(Pattern) and is_binary(String))->
 %%=====================================================================
 count(RS)->
 	lists:foldr(fun({_DB,DB_RS},RSAcc)->
-		element(2,ecomet_bits:foldr(fun(IDP,PatternAcc)->
-			element(2,ecomet_bits:foldr(fun(IDH,Acc)->
-				Acc+ecomet_bits:count(ecomet_bits:to_vector(get_branch([IDP,IDH],DB_RS)),0)
+		element(2,ecomet_bitmap:foldr(fun(IDP,PatternAcc)->
+			element(2,ecomet_bitmap:foldr(fun(IDH,Acc)->
+				Acc+ecomet_bitmap:count(get_branch([IDP,IDH],DB_RS),0)
 			end,PatternAcc,get_branch([IDP],DB_RS),{none,none}))
 		end,RSAcc,get_branch([],DB_RS),{none,none}))
 	end,0,RS).
@@ -976,9 +976,9 @@ foldl(F,Acc,RS,Page)->
 
 fold(F,Acc,RS,Scan,none)->
   lists:Scan(fun({_DB,DB_RS},RSD)->
-    element(2,ecomet_bits:Scan(fun(IDP,RSP)->
-			element(2,ecomet_bits:Scan(fun(IDH,RSH)->
-				element(2,ecomet_bits:Scan(fun(IDL,RSL)->
+    element(2,ecomet_bitmap:Scan(fun(IDP,RSP)->
+			element(2,ecomet_bitmap:Scan(fun(IDH,RSH)->
+				element(2,ecomet_bitmap:Scan(fun(IDL,RSL)->
           F({IDP,IDH*?BITSTRING_LENGTH+IDL},RSL)
         end,RSH,get_branch([IDP,IDH],DB_RS),{none,none}))
       end,RSP,get_branch([IDP],DB_RS),{none,none}))
@@ -988,9 +988,9 @@ fold(F,Acc,RS,Scan,{Page,Length})->
   From=(Page-1)*Length,
   To=From+Length,
   lists:Scan(fun({_DB,DB_RS},RSD)->
-    element(2,ecomet_bits:Scan(fun(IDP,RSP)->
-      element(2,ecomet_bits:Scan(fun(IDH,{Count,RSH})->
-				{BitsCount,NewAcc}=ecomet_bits:Scan(fun(IDL,RSL)->
+    element(2,ecomet_bitmap:Scan(fun(IDP,RSP)->
+      element(2,ecomet_bitmap:Scan(fun(IDH,{Count,RSH})->
+				{BitsCount,NewAcc}=ecomet_bitmap:Scan(fun(IDL,RSL)->
 					F({IDP,IDH*?BITSTRING_LENGTH+IDL},RSL)
         end,RSH,get_branch([IDP,IDH],DB_RS),{From-Count,To-Count}),
 				{Count+BitsCount,NewAcc}
