@@ -54,7 +54,8 @@
   inherit_rights/1,
   recursive_rights/1,
   apply_recursion/1,
-  apply_rights/3
+  apply_rights/3,
+  rights_changes/2
 ]).
 -endif.
 

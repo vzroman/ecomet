@@ -30,7 +30,8 @@
   check_database_test/1,
   inherit_rights_test/1,
   recursive_rights_test/1,
-  apply_rigths_test/1,
+  rights_changes_test/1,
+  apply_rights_test/1,
   apply_recursion_test/1,
   on_create_test/1,
   on_edit_test/1,
@@ -42,7 +43,8 @@ all() ->
     check_database_test,
     inherit_rights_test,
     recursive_rights_test,
-    apply_rigths_test,
+    rights_changes_test,
+    apply_rights_test,
     apply_recursion_test,
     on_create_test,
     on_edit_test,
@@ -154,12 +156,27 @@ inherit_rights_test(_Config) ->
 
 
 recursive_rights_test(_Config) ->
-
-
   ok
 .
 
-apply_rigths_test(_Config) ->
+rights_changes_test(_Config) ->
+  meck:new(ecomet),
+  meck:expect(ecomet, field_changes, fun(Object, Field) -> maps:get(Field, Object, none) end),
+%%  #{
+%%    <<".readgroups">> => {[]},
+%%    <<".writegroups">> => []
+%%  },
+  none = ecomet_folder:rights_changes(#{ <<".writegroups">> => {[{1, 2}], none}}, <<".readgroups">>),
+  none = ecomet_folder:rights_changes(#{<<".readgroups">> => {none, none}}, <<".readgroups">>),
+  {[{1, 5}, {3, 4}],[]} = ecomet_folder:rights_changes(#{
+    <<".readgroups">> => {[{3, 4}, {1, 5}, {3, 4}], none}}, <<".readgroups">>),
+
+  {[], [{1, 5}, {3, 4}]} = ecomet_folder:rights_changes(#{
+    <<".readgroups">> => {none, [{3, 4}, {1, 5}, {3, 4}]}}, <<".readgroups">>),
+  meck:unload(ecomet),
+  ok.
+
+apply_rights_test(_Config) ->
   meck:new([ecomet]),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object, none)} end),
   meck:expect(ecomet, edit_object, fun(_Object, Fields) -> put(edit, Fields), ok end),
