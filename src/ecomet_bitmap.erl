@@ -87,7 +87,7 @@ reset_bit(Bitmap, Bit)->
 
   bit_andnot(Bitmap,<<Prefix/bitstring,Bucket/bitstring>>).
 
-get_bit(Bit,Bitmap)->
+get_bit(Bitmap,Bit)->
   case is_empty(Bitmap) of
     true->false;
     _->
@@ -100,24 +100,24 @@ get_bit(Bit,Bitmap)->
         <<?SPARSE_FULL:2,Head:?WORD_LENGTH,Full:?WORD_LENGTH,Data/bitstring>>->
           HighBit = Bit div ?WORD_LENGTH rem ?WORD_LENGTH,
           if
-            ?BIT(HighBit) band Head =:= 0 -> false ;
+            (?BIT(HighBit)) band Head =:= 0 -> false ;
             true ->
               if
-                ?BIT(HighBit) band Full >0 -> true ;
+                (?BIT(HighBit)) band Full >0 -> true ;
                 true ->
+                  Word = find_word( HighBit, Head, Full, Data ),
                   LowBit = Bit rem ?WORD_LENGTH,
-                  Word = find_word( LowBit, Head, Full, Data ),
-                  ?BIT(LowBit) band Word>0
+                  (?BIT(LowBit)) band Word>0
               end
           end;
         <<?SPARSE:2,Head:?WORD_LENGTH,Data/bitstring>>->
           HighBit = Bit div ?WORD_LENGTH rem ?WORD_LENGTH,
           if
-            ?BIT(HighBit) band Head =:= 0 -> false ;
+            (?BIT(HighBit)) band Head =:= 0 -> false ;
             true ->
+              Word = find_word( HighBit, Head, 0, Data ),
               LowBit = Bit rem ?WORD_LENGTH,
-              Word = find_word( LowBit, Head, 0, Data ),
-              ?BIT(LowBit) band Word>0
+              (?BIT(LowBit)) band Word>0
           end
       end
   end.
@@ -439,9 +439,9 @@ compress(Data)->
 compress([0|Tail],High,Full,Bit,Acc)->
   compress(Tail,High,Full,Bit bsl 1,Acc);
 compress([?FULL_WORD|Tail],High,Full,Bit,Acc)->
-  compress(Tail,High,Full bor Bit, Bit bsl 1 ,Acc);
+  compress(Tail,High bor Bit,Full bor Bit, Bit bsl 1 ,Acc);
 compress([Word|Tail],High,Full,Bit,Acc)->
-  compress(Tail, High bor Bit, Full, Bit bsl 1, <<Acc/binary,Word:?WORD_LENGTH>> );
+  compress(Tail, High bor Bit, Full, Bit bsl 1, <<Acc/bitstring,Word:?WORD_LENGTH>> );
 compress([],High,Full,_Bit,Data)->
   if
     High =:=0 ->

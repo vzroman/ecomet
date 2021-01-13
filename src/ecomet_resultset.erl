@@ -773,7 +773,7 @@ search_patterns(Condition,_DB,_ExtBits)->Condition.
 %% 	Search IDHs
 %%
 get_idh_storage([{Storage,SIDPBits,SIDHList}|Rest],IDP)->
-	case ecomet_bitmap:get_bit(IDP,SIDPBits) of
+	case ecomet_bitmap:get_bit(SIDPBits,IDP) of
 		true->{Storage,SIDPBits,SIDHList};
 		false->get_idh_storage(Rest,IDP)
 	end;
@@ -793,7 +793,7 @@ seacrh_idhs({'TAG',Tag,{IDPBits,Storages}},DB,IDP)->
 			end
 	end;
 seacrh_idhs({Type,Condition,{IDPBits,IDHList}},DB,IDP)->
-	case ecomet_bitmap:get_bit(IDP,IDPBits) of
+	case ecomet_bitmap:get_bit(IDPBits,IDP) of
 		false->{none,{Type,Condition,{IDPBits,IDHList}}};
 		true->
 			{IDHBits,ResCondition}=search_type(Type,Condition,DB,IDP),
@@ -841,7 +841,7 @@ search_idls({'TAG',Tag,Config},DB,IDP,IDH)->
 				% Nothing found for the Pattern, no sense to search storage
 				undefined->none;
 				IDHBits->
-					case ecomet_bitmap:get_bit(IDH,IDHBits) of
+					case ecomet_bitmap:get_bit(IDHBits,IDH) of
 						% Nothing found for the IDH
 						false->none;
 						true->ecomet_index:read_tag(DB,Storage,[IDP,IDH],Tag)
@@ -853,7 +853,7 @@ search_idls({Type,Condition,{_,IDHList}},DB,IDP,IDH)->
 		% Branch is empty for the IDP, no sense to search
 		undefined->none;
 		IDHBits->
-			case ecomet_bitmap:get_bit(IDH,IDHBits) of
+			case ecomet_bitmap:get_bit(IDHBits,IDH) of
 				% Branch is empty for the IDH
 				false->none;
 				true->search_type(Type,Condition,DB,IDP,IDH)
