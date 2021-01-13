@@ -589,8 +589,18 @@ on_edit(Object)->
 
 on_delete(Object)->
   case is_system(Object) of
-    true->?ERROR(system_object);
-    _->ok
+    true->
+      % We are not allowed to delete system objects until it is not the
+      % delete of the containing folder
+      {ok, FolderID} = ecomet:read_field(Object, <<".folder">>),
+      try
+        open(FolderID,none),
+        ?ERROR(system_object)
+      catch
+          _:object_deleted ->ok
+      end;
+    _->
+      ok
   end,
   ok.
 

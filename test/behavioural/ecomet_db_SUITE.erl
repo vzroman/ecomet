@@ -29,9 +29,9 @@
   check_id_test/1,
   create_database_test/1,
   check_name_test/1,
-  delete_test/1,
-  edit_test/1,
-  create_test/1
+  on_create_test/1,
+  on_edit_test/1,
+  on_delete_test/1
 ]).
 
 
@@ -40,9 +40,9 @@ all() ->
     check_id_test,
     create_database_test,
     check_name_test,
-    delete_test,
-    edit_test,
-    create_test
+    on_delete_test,
+    on_edit_test,
+    on_create_test
   ].
 
 group() ->
@@ -78,49 +78,33 @@ check_name_test(_Config) ->
 
 
 % We create new Object with invalid name, prog have to crash %
-  try
-    ecomet_db:check_name(#{<<".name">> => {<<"Invalid-name(?)">>, none}, value => 123, <<"id">> => 100000})
-  catch
-    error:invalid_name -> invalid_name
-  end,
+  ?assertError(invalid_name, ecomet_db:check_name(#{<<".name">> => {<<"Invalid-name(?)">>, none},
+    value => 123, <<"id">> => 100000})),
+  ?assertError(invalid_name, ecomet_db:check_name(#{<<".name">> => {<<"1nvaliI) Nam3">>, none},
+    value => 123, <<"id">> => 100000})),
 
-  try ecomet_db:check_name(#{<<".name">> => {<<"1nvaliI) Nam3">>, none}, value => 123, <<"id">> => 100000})
-  catch
-    error:invalid_name -> invalid_name
-  end,
-  try ecomet_db:check_name(#{<<".name">> => {<<"Invalid&&Name">>, none}, value => 123, <<"id">> => 100000})
-  catch
-    error:invalid_name -> invalid_name
-  end,
-  try ecomet_db:check_name(#{<<".name">> => {<<";)(:%%%">>, none}, value => 123, <<"id">> => 100000})
-  catch
-    error:invalid_name -> invalid_name
-  end,
-  try ecomet_db:check_name(#{<<".name">> => {"Seems_to_be_valid)", none}, value => 123, <<"id">> => 100000})
-  catch
-    error:invalid_name -> invalid_name
-  end,
+  ?assertError(invalid_name, ecomet_db:check_name(#{<<".name">> => {<<"Invalid&&Name">>, none},
+    value => 123, <<"id">> => 100000})),
 
+  ?assertError(invalid_name, ecomet_db:check_name(#{<<".name">> => {<<";)(:%%%">>, none},
+    value => 123, <<"id">> => 100000})),
+
+  ?assertError(invalid_name, ecomet_db:check_name(#{<<".name">> => {"Seems_to_be_valid)", none},
+    value => 123, <<"id">> => 100000})),
 
 
   % We edit name, have to crash or smth like that %
-  try ecomet_db:check_name(#{<<".name">> => {<<"Issa">>, <<"Roman">>}, val => [1, 1, {11, 12}]})
-  catch
-    error:renaming_is_not_allowed -> renaming_is_not_allowed
-  end,
+  ?assertError(renaming_is_not_allowed, ecomet_db:check_name(#{<<".name">> => {<<"Issa">>, <<"Roman">>},
+    val => [1, 1, {11, 12}]})),
+  ?assertError(renaming_is_not_allowed, ecomet_db:check_name(#{<<".name">> => {<<"Galym">>, <<"Abay">>},
+    value => 123, <<"id">> => <<"qwe">>})),
 
-  try ecomet_db:check_name(#{<<".name">> => {<<"Galym">>, <<"Abay">>}, value => 123, <<"id">> => <<"qwe">>})
-  catch
-    error:renaming_is_not_allowed -> renaming_is_not_allowed
-  end,
-
-  try ecomet_db:check_name(#{<<".name">> => {<<"Faceplate">>, <<"EComet">>}, <<"id">> => {1, 1}})
-  catch
-    error:renaming_is_not_allowed -> renaming_is_not_allowed
-  end,
+  ?assertError(renaming_is_not_allowed, ecomet_db:check_name(#{<<".name">> => {<<"Faceplate">>, <<"EComet">>},
+    <<"id">> => {1, 1}})),
 
   meck:unload(ecomet),
-  ok.
+  ok
+.
 
 % Object == {<<"id">> => {NewId, OldID}}  %
 % Other fieds are not important in this case%
@@ -140,21 +124,16 @@ check_id_test(_Config) ->
   ok = ecomet_db:check_id(#{ <<"id">> => {<<"ID">>, none}, <<".name">> => {<<"Change">>, <<"Me">>} }),
 
   % We try to change id, error occur here %
-  try ecomet_db:check_id(#{ <<"id">> => {1, 2}, <<".name">> => {<<"Change">>, <<"Me">>} })
-  catch
-    error:change_id_is_not_allowed ->change_id_is_not_allowed
-  end,
-  try ecomet_db:check_id(#{ <<"id">> => {happy, sad}, <<".name">> => smth, 3 => 5.5 })
-  catch
-    error:change_id_is_not_allowed ->change_id_is_not_allowed
-  end,
+  ?assertError(change_id_is_not_allowed, ecomet_db:check_id(#{ <<"id">> => {1, 2},
+    <<".name">> => {<<"Change">>, <<"Me">>} })),
 
-  try ecomet_db:check_id(#{ <<"id">> => {<<"qwe">>, <<"asd">>} })
-  catch
-    error:change_id_is_not_allowed ->change_id_is_not_allowed
-  end,
+  ?assertError(change_id_is_not_allowed, ecomet_db:check_id(#{ <<"id">> => {happy, sad},
+    <<".name">> => smth, 3 => 5.5 })),
 
-  meck:unload(ecomet)
+  ?assertError(change_id_is_not_allowed, ecomet_db:check_id(#{ <<"id">> => {<<"qwe">>, <<"asd">>} })),
+
+  meck:unload(ecomet),
+  ok
 .
 
 % Just putting %
@@ -188,7 +167,7 @@ create_database_test(_Config) ->
   ok.
 
 % Object == {id1, id2} %
-delete_test(_Config) ->
+on_delete_test(_Config) ->
 
   ecomet_user:on_init_state(),
   % We create object. but not mount should return ok %
@@ -235,7 +214,6 @@ delete_test(_Config) ->
   <<"database">>=>?OID(TestDB_4)
   }),
 
-
   ?assertError({is_mounted,_}, ecomet:delete_object(TestDB_3)),
   ?assertError({is_mounted,_}, ecomet:delete_object(TestDB_4)),
   ok = ecomet:edit_object(TestFolder_3, #{<<"database">> => none}),
@@ -250,7 +228,7 @@ delete_test(_Config) ->
 
 % Object =  {<<".name">> => {NewName, OldName}, <<"id">> => {NewId, OldId}} or #{} %
 % Other fields are not important in this case %
-edit_test(_Config) ->
+on_edit_test(_Config) ->
 
   meck:new(ecomet, [no_link]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
@@ -261,22 +239,13 @@ edit_test(_Config) ->
   ok = ecomet_db:on_edit(#{}),
 
   % We try to edit Name or ID, error or smtn like %
-  try ecomet_db:on_edit(#{ <<".name">> => {new, old}, <<"id">> => {6, 5.5} })
-  catch
-    error:renaming_is_not_allowed -> renaming_is_not_allowed;
-    error:change_id_is_not_allowed -> change_id_is_not_allowed
-  end,
-  try ecomet_db:on_edit(#{ <<".name">> => {new, old}, id => {old, veryold} })
-  catch
-    error:renaming_is_not_allowed -> renaming_is_not_allowed;
-    error:change_id_is_not_allowed -> change_id_is_not_allowed
-  end,
+  ?assertError(renaming_is_not_allowed, ecomet_db:on_edit(#{ <<".name">> => {new, old},
+    <<"id">> => {6, 5.5} })),
 
-  try ecomet_db:on_edit(#{ name=> {old, new}, <<"id">> => {1, 2} })
-  catch
-    error:renaming_is_not_allowed -> renaming_is_not_allowed;
-    error:change_id_is_not_allowed -> change_id_is_not_allowed
-  end,
+  ?assertError(renaming_is_not_allowed, ecomet_db:on_edit(#{ <<".name">> => {new, old},
+    id => {old, veryold} })),
+
+  ?assertError(change_id_is_not_allowed, ecomet_db:on_edit(#{ name=> {old, new}, <<"id">> => {1, 2} })),
 
   meck:unload(ecomet)
 .
@@ -284,10 +253,9 @@ edit_test(_Config) ->
 
 % Object == #{<<".name">> => {NewName, OldName}} %
 % This is Object creation, name field should be %
-create_test(_Config) ->
+on_create_test(_Config) ->
   ecomet_user:on_init_state(),
-  AA =  ?OID(<<"/root">>),
-  ct:pal("OID  /root/.databases ~p", [AA]),
+
   TestDB = ecomet:create_object(#{
     <<".name">>=><<"my_db">>,
     <<".folder">>=>?OID(<<"/root/.databases">>),
@@ -300,7 +268,6 @@ create_test(_Config) ->
     <<".pattern">>=>?OID(<<"/root/.patterns/.folder">>),
    <<"database">>=>?OID(TestDB)
   }),
-
   my_db = ecomet_schema:get_mounted_db(?OID(Folder)),
   ok = ecomet:delete_object(Folder),
   ok = ecomet:delete_object(TestDB),

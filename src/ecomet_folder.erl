@@ -45,6 +45,19 @@
   on_delete/1
 ]).
 
+%%====================================================================
+%%		Test API
+%%====================================================================
+-ifdef(TEST).
+-export([
+  check_database/1,
+  inherit_rights/1,
+  recursive_rights/1,
+  apply_recursion/1,
+  apply_rights/3
+]).
+-endif.
+
 %%=================================================================
 %%	API
 %%=================================================================
@@ -162,6 +175,15 @@ on_delete(Object)->
       Item = ecomet:open(ItemID,_Lock=none),
       ok = ecomet:delete_object(Item)
     end || ItemID <- get_content_system(?OID(Object)) ],
+
+  % Unmount a database if some is mounted
+  case ecomet:read_field(Object,<<"database">>) of
+    {ok,DB} when DB=/=none->
+      ok = ecomet_schema:unmount_db(?OID(Object));
+    _->
+      ok
+  end,
+
   ok.
 
 
