@@ -368,26 +368,32 @@ foldr(F,InitAcc,Bitmap,{From,To})->
 bucket_foldr(<<?EMPTY:2>>,Acc,_Fun)->
   Acc;
 bucket_foldr(<<?FULL:2>>,Acc,Fun)->
-  lists:foldr(Fun,Acc,lists:seq(0,?WORD_LENGTH*?WORD_LENGTH-1));
+  full_foldr(?WORD_LENGTH*?WORD_LENGTH-1,0,Acc,Fun);
 bucket_foldr(Bucket,Acc,Fun)->
   Data = decompress(Bucket),
-  NumData = lists:zip( lists:seq(0,length(Data)-1), Data),
-  data_foldr( lists:reverse(NumData), Acc, Fun ).
+  data_foldr( length(Data)-1, 0 ,lists:reverse(Data), Acc, Fun ).
 
-data_foldr([{_N,0}|Tail],Acc,Fun)->
-  data_foldr(Tail,Acc,Fun);
-data_foldr([{N,?FULL_WORD}|Tail],Acc,Fun)->
-  Offset = N * ?WORD_LENGTH,
-  Acc1 = lists:foldr(Fun,Acc,lists:seq(Offset,Offset+?WORD_LENGTH-1)),
-  data_foldr(Tail,Acc1,Fun);
-data_foldr([{N,Word}|Tail],Acc,Fun)->
-  Bits = word_to_bits(Word, N*?WORD_LENGTH),
-  Acc1 = lists:foldr(Fun,Acc,Bits),
-  data_foldr(Tail,Acc1,Fun);
-data_foldr([],Acc,_Fun)->
+data_foldr(I,Stop,_Data,Acc,_Fun) when I<Stop->
+  Acc;
+data_foldr(I,Stop,[0|Tail],Acc,Fun)->
+  data_foldr(I-1,Stop,Tail,Acc,Fun);
+data_foldr(I,Stop,[?FULL_WORD|Tail],Acc,Fun)->
+  Offset = I * ?WORD_LENGTH,
+  data_foldr(I-1,Stop,Tail,full_foldr(Offset+?WORD_LENGTH-1, Offset, Acc, Fun),Fun);
+data_foldr(I,Stop,[Word|Tail],Acc,Fun)->
+  data_foldr(I-1,Stop,Tail,word_foldr(Word,I*?WORD_LENGTH,Acc,Fun),Fun).
+
+word_foldr(0,_I,Acc,_Fun)->
+  Acc;
+word_foldr(W,I,Acc,Fun) when W rem 2=:=1->
+  Fun(I,word_foldr( W bsr 1, I+1, Acc, Fun ));
+word_foldr(W,I,Acc,Fun)->
+  word_foldr(W bsr 1,I+1,Acc,Fun).
+
+full_foldr(I,Stop,Acc,Fun) when I>=Stop->
+  full_foldr(I-1,Stop,Fun(I,Acc),Fun);
+full_foldr(_I,_Stop,Acc,_Fun)->
   Acc.
-
-
 %%------------------------------------------------------------------------------------
 %%  Bucket utilities
 %%------------------------------------------------------------------------------------
