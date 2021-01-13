@@ -132,10 +132,10 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
       % Get the schema of the object type
       Map=ecomet_pattern:get_map(PatternID),
       % Inherit rights
-      Fields1=Fields#{
+      Fields1= maps:merge(#{
         <<".readgroups">>=>Read,
         <<".writegroups">>=>Write
-      },
+      },Fields),
       % Parse fields
       Fields2=ecomet_field:build_new(Map,Fields1),
       % Generate new ID for the object
