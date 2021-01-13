@@ -852,17 +852,17 @@ check_tag(Tag,Db,StorageTypes,OIDs)->
           AccBits;
         Bits->
           true=lists:member(Storage,SStorages),
-          ecomet_bits:oper('OR',AccBits,Bits)
+          ecomet_bitmap:oper('OR',AccBits,Bits)
       end
     end,none,RStorages),
   ct:pal("PatternsBits: ~p",[PatternsBits]),
   FoundOIDs=
     lists:foldl(fun(Storage,AccOIDs)->
-      element(2,ecomet_bits:foldl(fun(PatternId,POIDs)->
+      element(2,ecomet_bitmap:foldl(fun(PatternId,POIDs)->
         IDHBits=ecomet_index:read_tag(Db,Storage,[PatternId],Tag),
-        element(2,ecomet_bits:foldl(fun(IDH,HOIDs)->
+        element(2,ecomet_bitmap:foldl(fun(IDH,HOIDs)->
           IDLBits=ecomet_index:read_tag(Db,Storage,[PatternId,IDH],Tag),
-          element(2,ecomet_bits:foldl(fun(IDL,LOIDs)->
+          element(2,ecomet_bitmap:foldl(fun(IDL,LOIDs)->
             [{PatternId,IDH*?BITSTRING_LENGTH+IDL}|LOIDs]
           end,HOIDs,IDLBits,{none,none}))
         end,POIDs,IDHBits,{none,none}))

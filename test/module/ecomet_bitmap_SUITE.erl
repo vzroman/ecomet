@@ -86,13 +86,28 @@ bit_test(_Config) ->
   {1,[0]} = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],B1,{none,none}),
 
   B2 = <<?SPARSE:2,2#1:?WORD_LENGTH,2#101:?WORD_LENGTH>> = ecomet_bitmap:set_bit(B1,2),
-  B3 = <<?SPARSE:2,2#1:?WORD_LENGTH,2#10:(?WORD_LENGTH-16),2#101:16>> = ecomet_bitmap:set_bit(B2,17),
+  true = ecomet_bitmap:get_bit(B2,0),
+  false = ecomet_bitmap:get_bit(B2,1),
+  true = ecomet_bitmap:get_bit(B2,2),
+  2 = ecomet_bitmap:count(B2),
+  {2,[2,0]} = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],B2,{none,none}),
 
+  B3 = <<?SPARSE:2,2#1:?WORD_LENGTH,2#10:(?WORD_LENGTH-16),2#101:16>> = ecomet_bitmap:set_bit(B2,17),
+  true = ecomet_bitmap:get_bit(B3,17),
+  3 = ecomet_bitmap:count(B3),
+  {3,[17,2,0]} = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],B3,{none,none}),
+  {3,[0,2,17]} = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],B3,{none,none}),
 
   % The last bit in the word
+  false = ecomet_bitmap:get_bit(B3,63),
   B4 = <<?SPARSE:2,2#1:?WORD_LENGTH,2#1:1,2#10:(?WORD_LENGTH-16-1),2#101:16>> = ecomet_bitmap:set_bit(B3,63),
+  true = ecomet_bitmap:get_bit(B4,63),
+  4 = ecomet_bitmap:count(B4),
+  {4,[63,17,2,0]} = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],B4,{none,none}),
+  {4,[0,2,17,63]} = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],B4,{none,none}),
 
   % The word after next word
+  false = ecomet_bitmap:get_bit(B4,128),
   B5 =
     <<
       ?SPARSE:2,
@@ -105,7 +120,13 @@ bit_test(_Config) ->
       2#1:?WORD_LENGTH                 % 128 bit
     >> = ecomet_bitmap:set_bit(B4,128),
 
+  true = ecomet_bitmap:get_bit(B5,128),
+  5 = ecomet_bitmap:count(B5),
+  {5,[128,63,17,2,0]} = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],B5,{none,none}),
+  {5,[0,2,17,63,128]} = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],B5,{none,none}),
+
   % The bit in the last word (max bit in the bucket WORD_LENGTH * WORD_LENGTH = 4096)
+  false = ecomet_bitmap:get_bit(B5,4093),
   B6 =
     <<
       ?SPARSE:2,
@@ -123,8 +144,14 @@ bit_test(_Config) ->
       2#0:(?WORD_LENGTH-3)
     >> = ecomet_bitmap:set_bit(B5,4093),
 
+  true = ecomet_bitmap:get_bit(B6,4093),
+  6 = ecomet_bitmap:count(B6),
+  {6,[4093,128,63,17,2,0]} = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],B6,{none,none}),
+  {6,[0,2,17,63,128,4093]} = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],B6,{none,none}),
+
   % The last bit in the last word
-  _Bucket0 =
+  false = ecomet_bitmap:get_bit(B6,4095),
+  Bucket0 =
     <<
       ?SPARSE:2,
       % Header
@@ -141,6 +168,10 @@ bit_test(_Config) ->
       2#0:(?WORD_LENGTH-3)
     >> = ecomet_bitmap:set_bit(B6,4095),
 
+  true = ecomet_bitmap:get_bit(Bucket0,4095),
+  7 = ecomet_bitmap:count(Bucket0),
+  {7,[4095,4093,128,63,17,2,0]} = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],Bucket0,{none,none}),
+  {7,[0,2,17,63,128,4093,4095]} = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],Bucket0,{none,none}),
   %-----------------2 bucket---------------------------------
 
 
