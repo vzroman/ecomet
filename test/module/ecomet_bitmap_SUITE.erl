@@ -415,6 +415,56 @@ bit_sparse_full(_Config) ->
   Bucket0_Bucket1_Bucket5Fbits = Bucket0_5Bits ++ (Bucket1BitsF--[4097])++Bucket5BitsF,
   {_, Bucket0_Bucket1_Bucket5Fbits } = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],Bucket0_Bucket1_Bucket5F,{none,none}),
 
+  % Reset word 3 in bucket 1
+  Word67bits = lists:seq(67*?WORD_LENGTH,68*?WORD_LENGTH-1),
+  Bucket0_Bucket1_0_Bucket5F = <<
+    Bucket0_5:Bucket0Size/bitstring,
+
+    % Bucket 1
+    ?SPARSE_FULL:2,
+    % Header
+    2#1111111111111111111111111111111111111111111111111111111111110111:?WORD_LENGTH,          % 63 word (3 in bucket) is absent
+    % Full
+    2#1111111111111111111111111111111111111111111111111111111111110110:?WORD_LENGTH,
+    % Data
+    2#1111111111111111111111111111111111111111111111111111111111111101:?WORD_LENGTH,           % 4097 (1 bit) is absent
+
+    ?EMPTY:2,   % Bucket 2
+    ?EMPTY:2,   % Bucket 3
+    ?EMPTY:2,   % Bucket 4
+    ?FULL:2     % Bucket 5
+  >> = lists:foldl( fun(Bit,Acc)->ecomet_bitmap:reset_bit(Acc,Bit) end,Bucket0_Bucket1_Bucket5F,Word67bits),
+
+  Bucket0_Bucket1_0_Bucket5Fbits = Bucket0_Bucket1_Bucket5Fbits -- Word67bits,
+  {_, Bucket0_Bucket1_0_Bucket5Fbits } = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],Bucket0_Bucket1_0_Bucket5F,{none,none}),
+
+  % Reset entire bucket 1
+  Bucket0_Bucket1_1_Bucket5F = <<
+    Bucket0_5:Bucket0Size/bitstring,
+    ?EMPTY:2,   % Bucket 1 (reset)
+    ?EMPTY:2,   % Bucket 2
+    ?EMPTY:2,   % Bucket 3
+    ?EMPTY:2,   % Bucket 4
+    ?FULL:2     % Bucket 5
+  >> = lists:foldl( fun(Bit,Acc)->ecomet_bitmap:reset_bit(Acc,Bit) end,Bucket0_Bucket1_0_Bucket5F,Bucket1BitsF),
+
+  Bucket0_Bucket1_1_Bucket5Fbits = Bucket0_Bucket1_Bucket5Fbits -- Bucket1BitsF,
+  {_, Bucket0_Bucket1_1_Bucket5Fbits } = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],Bucket0_Bucket1_1_Bucket5F,{none,none}),
+
+  % Reset bucket 5
+  Bucket0_Bucket1_1_Bucket5_1 = <<
+    Bucket0_5:Bucket0Size/bitstring,
+    ?EMPTY:2,   % Bucket 1 (reset)
+    ?EMPTY:2,   % Bucket 2
+    ?EMPTY:2,   % Bucket 3
+    ?EMPTY:2,   % Bucket 4
+    ?EMPTY:2     % Bucket 5
+  >> = lists:foldl( fun(Bit,Acc)->ecomet_bitmap:reset_bit(Acc,Bit) end,Bucket0_Bucket1_1_Bucket5F,Bucket5BitsF),
+
+  Bucket0_Bucket1_1_Bucket5_1bits = Bucket0_Bucket1_1_Bucket5Fbits -- Bucket5BitsF,
+  {_, Bucket0_Bucket1_1_Bucket5_1bits } = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],Bucket0_Bucket1_1_Bucket5_1,{none,none}),
+
+
   ok.
 
 
