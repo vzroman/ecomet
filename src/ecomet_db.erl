@@ -180,7 +180,12 @@ sync_segment(Segment)->
 
       end;
     true ->
-      ok
+      Node = node(),
+      case ecomet:read_field(Object,<<"nodes">>) of
+        {ok,[Node]}->ok;
+        _->
+          ecomet:edit_object(Object,#{<<"nodes">>=>[Node]})
+      end
   end,
 
   update_segment(OID),
