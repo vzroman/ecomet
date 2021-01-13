@@ -282,6 +282,8 @@ bit_sparse_full(_Config) ->
   >> = lists:foldl(fun(Bit,Acc)->ecomet_bitmap:set_bit(Acc,Bit) end,<<>>,Bucket0Bits),
 
   {7,Bucket0Bits} = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],Bucket0_0,{none,none}),
+  Bucket0BitsR = lists:reverse(Bucket0Bits),
+  {7,Bucket0BitsR} = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],Bucket0_0,{none,none}),
 
   % Fill the word 1
   Word1Bits = lists:seq(?WORD_LENGTH,2*?WORD_LENGTH-1),
@@ -294,6 +296,8 @@ bit_sparse_full(_Config) ->
     2#10:?WORD_LENGTH
   >> = lists:foldl( fun(Bit,Acc)->ecomet_bitmap:set_bit(Acc,Bit) end,<<>>,Word1Bits),
   {64, Word1Bits } = ecomet_bitmap:foldr(fun(N,Acc)->[N|Acc] end,[],Bucket0_1,{none,none}),
+  Word1BitsR = lists:reverse(Word1Bits),
+  {64, Word1BitsR } = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],Bucket0_1,{none,none}),
 
   % Add to Bucket0_0
   Bucket0_2 = <<
