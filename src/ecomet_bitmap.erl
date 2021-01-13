@@ -317,24 +317,33 @@ foldl(F,InitAcc,Bitmap,{From,To})->
 bucket_foldl(<<?EMPTY:2>>,Acc,_Fun)->
   Acc;
 bucket_foldl(<<?FULL:2>>,Acc,Fun)->
-  lists:foldl(Fun,Acc,lists:seq(0,?WORD_LENGTH*?WORD_LENGTH-1));
+  full_foldl(0,?WORD_LENGTH*?WORD_LENGTH-1,Acc,Fun);
 bucket_foldl(Bucket,Acc,Fun)->
   Data = decompress(Bucket),
-  NumData = lists:zip( lists:seq(0,length(Data)-1), Data),
-  data_foldl( NumData, Acc, Fun ).
+  data_foldl( 0, length(Data)-1, Data, Acc, Fun ).
 
-data_foldl([{_N,0}|Tail],Acc,Fun)->
-  data_foldl(Tail,Acc,Fun);
-data_foldl([{N,?FULL_WORD}|Tail],Acc,Fun)->
-  Offset = N * ?WORD_LENGTH,
-  Acc1 = lists:foldl(Fun,Acc,lists:seq(Offset,Offset+?WORD_LENGTH-1)),
-  data_foldl(Tail,Acc1,Fun);
-data_foldl([{N,Word}|Tail],Acc,Fun)->
-  Bits = word_to_bits(Word, N*?WORD_LENGTH),
-  Acc1 = lists:foldl(Fun,Acc,Bits),
-  data_foldl(Tail,Acc1,Fun);
-data_foldl([],Acc,_Fun)->
+data_foldl(I,Stop,_Data,Acc,_Fun) when I>Stop->
+  Acc;
+data_foldl(I,Stop,[0|Tail],Acc,Fun)->
+  data_foldl(I+1,Stop,Tail,Acc,Fun);
+data_foldl(I,Stop,[?FULL_WORD|Tail],Acc,Fun)->
+  Offset = I * ?WORD_LENGTH,
+  data_foldl(I+1,Stop,Tail,full_foldl(Offset, Offset+?WORD_LENGTH-1, Acc, Fun),Fun);
+data_foldl(I,Stop,[Word|Tail],Acc,Fun)->
+  data_foldl(I+1,Stop,Tail,word_foldl(Word,I*?WORD_LENGTH,Acc,Fun),Fun).
+
+
+full_foldl(I,Stop,Acc,Fun) when I=<Stop->
+  full_foldl(I+1,Stop,Fun(I,Acc),Fun);
+full_foldl(_I,_Stop,Acc,_Fun)->
   Acc.
+
+word_foldl(0,_I,Acc,_Fun)->
+  Acc;
+word_foldl(W,I,Acc,Fun) when W rem 2=:=1->
+  word_foldl(W bsr 1,I+1,Fun(I,Acc),Fun);
+word_foldl(W,I,Acc,Fun)->
+  word_foldl(W bsr 1,I+1,Acc,Fun).
 
 % From the most significant bit to the least significant
 foldr(_F,Acc,none,_Page)->
@@ -477,14 +486,6 @@ bit_count(0,Acc)->
 bit_count(Value,Acc)->
   Bit = Value rem 2,
   bit_count(Value bsr 1,Acc+Bit).
-
-
-word_to_bits(0,_N)->
-  [];
-word_to_bits(Word,N) when Word rem 2=:=1->
-  [N|word_to_bits(Word bsr 1,N+1)];
-word_to_bits(Word,N)->
-  word_to_bits(Word bsr 1,N+1).
 
 
 
