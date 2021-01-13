@@ -303,7 +303,7 @@ foldl(F,InitAcc,Bitmap,{From,To})->
       Count1 = Count+1,
       Acc1=
         if
-          Count1 < Start->
+          Count1 =< Start->
             Acc;
          Count1 > Stop, Stop=/=-1->
             Acc;
@@ -354,7 +354,7 @@ foldr(F,InitAcc,Bitmap,{From,To})->
       Count1 = Count+1,
       Acc1=
         if
-          Count1 < Start->
+          Count1 =< Start->
             Acc;
           Count1 > Stop, Stop=/=-1->
             Acc;

@@ -1231,7 +1231,8 @@ search_patterns(Config)->
   S1Res=ecomet_resultset:search_patterns(S1Query,root,'UNDEFINED'),
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=S1Res,
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=ecomet_resultset:search_patterns(S1Query,root,Ext12),
-  {'TAG',{<<".pattern">>,PatternID1,simple},{none,[{disc,Ext1,[]}]}}=ecomet_resultset:search_patterns(S1Query,root,Ext2),
+  {'TAG',{<<".pattern">>,PatternID1,simple},{Empty,[{disc,Ext1,[]}]}}=ecomet_resultset:search_patterns(S1Query,root,Ext2),
+  true = ecomet_bitmap:is_empty(Empty),
 
   % S2. Single tag, pattern is not defined
   S2Query=ecomet_resultset:prepare({<<"string1">>,'=',<<"value1">>}),

@@ -892,10 +892,10 @@ search_type('NORM',{{AND,ANDNOT},{DAND,DANDNOT}},DB,IDP,IDH)->
 					element(2,ecomet_bitmap:foldl(fun(IDL,AccBits)->
 						Object=ecomet_object:construct({IDP,IDH*?BITSTRING_LENGTH+IDL}),
 						case check_direct(DAND,'AND',Object) of
-							false->ecomet_bitmap:reset_bit(IDL,AccBits);
+							false->ecomet_bitmap:reset_bit(AccBits,IDL);
 							true->
 								case check_direct(DANDNOT,'OR',Object) of
-									true->ecomet_bitmap:reset_bit(IDL,AccBits);
+									true->ecomet_bitmap:reset_bit(AccBits,IDL);
 									false->AccBits
 								end
 						end
