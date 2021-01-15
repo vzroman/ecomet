@@ -696,21 +696,6 @@ is_system(Object)->
 %%============================================================================
 %%	Internal helpers
 %%============================================================================
-% Unique object identification. The principles:
-% * the id is a tuple of 2 elements: { PatternID, ObjectID }
-%   - the PatternID is an id of the pattern (type) of the object. It defines its schema.
-%    The PatternID consists only of the second (ObjectID) of the related pattern
-%   - the ObjectID is a unique (system wide) id of the object within a pattern (type)
-% * the ObjectID is a composed integer that can be presented as:
-%   - IDHIGH = ObjectID div ?BITSTRING_LENGTH. It's sort of high level degree
-%   - IDLOW  = ObjectID rem ?BITSTRING_LENGTH (low level degree)
-% * The system wide increment is too expensive, so the initial increment is unique node-wide only
-%   and then the unique ID of the node is twisted into the IDHIGH. Actually it is added
-%   as 2 least significant bytes to the IDHIGH (IDHIGH = IDHIGH bsl 16 + NodeID )
-% * To be able to obtain the database to which the object belongs we insert (code) it into
-%   the IDHIGH the same way as we do with the NodeID: IDHIGH = IDHIGH bsl 8 + MountID.
-% The final IDHIGH is:
-%   <IDHIGH,NodeID:16,DB:8>
 new_id(_FolderID,?ObjectID(_,?PATTERN_PATTERN))->
   % Patterns have system-wide unique Id via schema locking,
   % IMPORTANT! Patterns are allowed to be created only in the root database
@@ -727,7 +712,9 @@ new_id(FolderID,?ObjectID(_,PatternID))->
 
   % The ID is unique only node-wide. To make the OID unique system-wide
   % we add the system-wide unique nodeId (current node) to the ServiceID
-  % of the object
+  % of the object.
+  % Additionally, to be able to define the database the object is stored in
+  % we add the database id to the serviceId too
   NodeID = ecomet_node:get_unique_id(),
   DB = ecomet_folder:get_db_id( FolderID ),
 
