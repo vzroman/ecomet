@@ -20,8 +20,8 @@
 -include("ecomet.hrl").
 -include("ecomet_test.hrl").
 
--define(PROCESSES,5).
--define(OBJECTS,600000).
+-define(PROCESSES,2).
+-define(OBJECTS,500000).
 -define(STORAGE,disc).
 
 %% API

@@ -142,16 +142,16 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
       },Fields),
       % Parse fields
       Fields2=ecomet_field:build_new(Map,Fields1),
-      % Generate new ID for the object
-      OID=new_id(FolderID,PatternID),
-      Object=#object{ oid=OID, edit=true, map=Map, db=get_db_name(OID) },
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
+        % Generate new ID for the object
+        OID=new_id(FolderID,PatternID),
+        Object=#object{ oid=OID, edit=true, map=Map, db=get_db_name(OID) },
         % Put empty storages to dict. Trick for no real lookups
         put_empty_storages(OID,Map),
-        save(Object,Fields2,on_create)
-      end),
-      Object;
+        save(Object,Fields2,on_create),
+        Object
+      end);
     _->?ERROR(access_denied)
   end.
 
@@ -711,6 +711,13 @@ is_system(Object)->
 %   the IDHIGH the same way as we do with the NodeID: IDHIGH = IDHIGH bsl 8 + MountID.
 % The final IDHIGH is:
 %   <IDHIGH,NodeID:16,DB:8>
+new_id(_FolderID,?ObjectID(_,?PATTERN_PATTERN))->
+  % Patterns have system-wide unique Id via schema locking,
+  % IMPORTANT! Patterns are allowed to be created only in the root database
+  % which has 0 id, therefore the ServiceID of the pattern
+  % always equals its PatternID
+  Id = ecomet_schema:new_pattern_id(),
+  {?PATTERN_PATTERN,Id};
 new_id(FolderID,?ObjectID(_,PatternID))->
 
   ID= ecomet_schema:local_increment({id,PatternID}),
@@ -718,7 +725,9 @@ new_id(FolderID,?ObjectID(_,PatternID))->
   PatternIDH = PatternID bsr ?PATTERN_IDL_LENGTH,
   PatternIDL = PatternID rem (1 bsl ?PATTERN_IDL_LENGTH),
 
-
+  % The ID is unique only node-wide. To make the OID unique system-wide
+  % we add the system-wide unique nodeId (current node) to the ServiceID
+  % of the object
   NodeID = ecomet_node:get_unique_id(),
   DB = ecomet_folder:get_db_id( FolderID ),
 
