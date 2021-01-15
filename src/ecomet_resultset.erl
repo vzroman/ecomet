@@ -959,7 +959,7 @@ count(RS)->
 	lists:foldr(fun({_DB,DB_RS},RSAcc)->
 		element(2,ecomet_bitmap:foldr(fun(IDP,PatternAcc)->
 			element(2,ecomet_bitmap:foldr(fun(IDH,Acc)->
-				Acc+ecomet_bitmap:count(get_branch([IDP,IDH],DB_RS),0)
+				Acc+ecomet_bitmap:count(get_branch([IDP,IDH],DB_RS))
 			end,PatternAcc,get_branch([IDP],DB_RS),{none,none}))
 		end,RSAcc,get_branch([],DB_RS),{none,none}))
 	end,0,RS).

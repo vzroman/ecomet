@@ -228,7 +228,7 @@ build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN)->
 bitmap_level(add,DB,Storage,Tag,ID)->
   case ecomet_backend:read(DB,?INDEX,Storage,Tag,write) of
     not_found->
-      Value = ecomet_bitmap:set_bit(<<>>,ID),
+      Value = ecomet_bitmap:set_bit(none,ID),
       ok = ecomet_backend:write(DB,?INDEX,Storage,Tag,Value),
       % The index didn't exist before, we need to add the value to the upper level also
       up;

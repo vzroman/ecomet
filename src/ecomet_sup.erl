@@ -58,7 +58,7 @@ init([]) ->
   },
 
   {ok, {Supervisor,
-    [SchemaSrv|Listeners] -- [SchemaSrv|Listeners]
+    [SchemaSrv|Listeners]
   }}.
 
 build_listeners([http|Rest],Acc)->
