@@ -32,6 +32,7 @@
   commit/2,
   get_db_id/1,
   get_db_name/1,
+  get_node_id/1,
   get_pattern/1,
   get_id/1
 ]).
@@ -81,6 +82,9 @@
 -type object_handler() :: #object{}.
 -export_type([object_handler/0]).
 
+-define(NODE_ID_LENGTH,16).
+-define(DB_ID_LENGTH,8).
+-define(PATTERN_IDL_LENGTH,16).
 
 -define(ObjectID(PatternID,ObjectID),{PatternID,ObjectID}).
 -define(TRANSACTION(Fun),
@@ -356,12 +360,6 @@ is_oid(_Invalid)->
 
 %%Return object oid
 get_oid(#object{oid=OID})->OID.
-
-%%Return oid of pattern of the object
-get_pattern_oid(#object{oid=OID})->
-  get_pattern_oid(OID);
-get_pattern_oid(?ObjectID(PatternID,_))->
-  ?ObjectID(?PATTERN_PATTERN,PatternID).
 
 %% Check context user rights for the object
 check_rights(#object{}=Object)->
@@ -714,30 +712,46 @@ is_system(Object)->
 % The final IDHIGH is:
 %   <IDHIGH,NodeID:16,DB:8>
 new_id(FolderID,?ObjectID(_,PatternID))->
+
+  ID= ecomet_schema:local_increment({id,PatternID}),
+
+  PatternIDH = PatternID bsr ?PATTERN_IDL_LENGTH,
+  PatternIDL = PatternID rem (1 bsl ?PATTERN_IDL_LENGTH),
+
+
   NodeID = ecomet_node:get_unique_id(),
   DB = ecomet_folder:get_db_id( FolderID ),
-  ID= ecomet_schema:local_increment({id,PatternID}),
-  % We can get id that is unique for this node. Unique id for entire system is too expensive.
-  % To resolve the problem we mix NodeId (it's unique for entire system) into IDH.
-  % IDH format - <IDH,NodeID:16>
-  IDH=ID div ?BITSTRING_LENGTH,
-  IDL=ID rem ?BITSTRING_LENGTH,
-  IDH1 = ((IDH bsl 16) + NodeID) bsl 8 + DB,
-  { PatternID, IDH1 * ?BITSTRING_LENGTH + IDL }.
 
-get_db_id(?ObjectID(_,ID))->
-  IDH=ID div ?BITSTRING_LENGTH,
-  IDH rem (1 bsl 8).
+  ServiceID = ((((PatternIDH bsl ?NODE_ID_LENGTH) + NodeID) bsl ?DB_ID_LENGTH + DB) bsl ?PATTERN_IDL_LENGTH) + PatternIDL,
+
+  { ServiceID, ID }.
+
+get_db_id(?ObjectID(ServiceID,_))->
+  IDH=ServiceID bsr ?PATTERN_IDL_LENGTH,
+  IDH rem (1 bsl ?DB_ID_LENGTH).
 
 get_db_name(OID)->
   ID = get_db_id(OID),
   ecomet_schema:get_db_name(ID).
+
+get_node_id(?ObjectID(ServiceID,_))->
+  IDH=ServiceID bsr (?DB_ID_LENGTH + ?PATTERN_IDL_LENGTH),
+  IDH rem (1 bsl ?NODE_ID_LENGTH).
 
 get_pattern(?ObjectID(PatternID,_))->
   PatternID.
 
 get_id(?ObjectID(_,ObjectID))->
   ObjectID.
+
+%%Return oid of pattern of the object
+get_pattern_oid(#object{oid=OID})->
+  get_pattern_oid(OID);
+get_pattern_oid(?ObjectID(ServiceID,_))->
+  IDH = ServiceID div (1 bsl (?NODE_ID_LENGTH + ?DB_ID_LENGTH + ?PATTERN_IDL_LENGTH)),
+  IDL = ServiceID rem (1 bsl ?PATTERN_IDL_LENGTH),
+  PatternID = IDH * (1 bsl ?PATTERN_IDL_LENGTH) + IDL,
+  ?ObjectID(?PATTERN_PATTERN,PatternID).
 
 % Acquire lock on object
 get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->

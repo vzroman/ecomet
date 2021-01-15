@@ -20,8 +20,8 @@
 -include("ecomet.hrl").
 -include("ecomet_test.hrl").
 
--define(PROCESSES,1).
--define(OBJECTS,100000).
+-define(PROCESSES,5).
+-define(OBJECTS,600000).
 -define(STORAGE,disc).
 
 %% API
@@ -36,9 +36,19 @@
   end_per_suite/1
 ]).
 
-%% Search group
+%% Create group
 -export([
   create/1
+]).
+
+%% Create group
+-export([
+  search1/1,
+  search2/1,
+  search3/1,
+  search4/1,
+  search5/1,
+  search6/1
 ]).
 
 
@@ -47,6 +57,7 @@ all()->
   [
     {group,create}
     %{group,create_log_index}
+    ,{group,search}
   ].
 
 groups()->[
@@ -57,6 +68,18 @@ groups()->[
   {create_log_index,
     [parallel],
     [create||_<-lists:seq(1,?PROCESSES)]
+  },
+
+  {search,
+    [sequence],
+    [
+      search1,
+      search2,
+      search3,
+      search4,
+      search5,
+      search6
+    ]
   }
 ].
 
@@ -161,6 +184,11 @@ init_per_group(create_log_index,Config)->
 %%    {[],[],[],BackTags}
 %%  end),
 
+%%  meck:new(ecomet_backend, [non_strict,no_link,passthrough]),
+%%  meck:expect(ecomet_backend, read, fun(DB,Storage,Type,Key,Lock)->
+%%    ecomet_backend:dirty_read(DB,Storage,Type,Key,Lock)
+%%  end),
+
   Config;
 
 init_per_group(_,Config)->
@@ -184,7 +212,12 @@ create(Config)->
 
   PID = integer_to_binary(erlang:unique_integer([positive])),
 
+  ct:timetrap(12*3600*1000),
+
+  %put(index_off,true),
+
   [begin
+     if I rem 1000=:=0->ct:pal("create ~p",[I]); true->ok end,
      IB=integer_to_binary(I),
      S1=integer_to_binary(I rem 100),
      String1= <<"value",S1/binary>>,
@@ -213,3 +246,80 @@ create(Config)->
 
   ok.
 
+search1(Config)->
+  ecomet_user:on_init_state(),
+  Pattern=?config(pattern, Config),
+  {_Header,Items} = ecomet_query:get([root],[<<".name">>,<<"integer">>],{'AND',[
+    {<<".pattern">>,'=',Pattern},
+    {'OR',[
+      {<<"string1">>,'=',<<"value1">>},
+      {<<"string1">>,'=',<<"value2">>}
+    ]}
+  ]}),
+  ct:pal("result: ~p",[length(Items)]),
+  ok.
+
+search2(Config)->
+  ecomet_user:on_init_state(),
+  Pattern=?config(pattern, Config),
+  Res = ecomet_query:get([root],[count],{'AND',[
+    {<<".pattern">>,'=',Pattern},
+    {'OR',[
+      {<<"string1">>,'=',<<"value1">>},
+      {<<"string1">>,'=',<<"value2">>}
+    ]}
+  ]}),
+  ct:pal("result: ~p",[Res]),
+  ok.
+
+search3(Config)->
+  ecomet_user:on_init_state(),
+  Pattern=?config(pattern, Config),
+  Res = ecomet_query:get([root],[<<".oid">>],{'AND',[
+    {<<".pattern">>,'=',Pattern},
+    {'OR',[
+      {<<"string1">>,'=',<<"value1">>},
+      {<<"string1">>,'=',<<"value2">>}
+    ]}
+  ]}),
+  ct:pal("result: ~p",[length(Res)]),
+  ok.
+
+search4(Config)->
+  ecomet_user:on_init_state(),
+  Pattern=?config(pattern, Config),
+  {_Header,Items} = ecomet_query:get([root],[<<".name">>,<<"integer">>],{'AND',[
+    {<<".pattern">>,'=',Pattern},
+    {'OR',[
+      {<<"string2">>,'=',<<"value53">>},
+      {<<"string2">>,'=',<<"value2">>}
+    ]}
+  ]}),
+  ct:pal("result: ~p",[length(Items)]),
+  ok.
+
+search5(Config)->
+  ecomet_user:on_init_state(),
+  Pattern=?config(pattern, Config),
+  Res=ecomet_query:get([root],[count],{'AND',[
+    {<<".pattern">>,'=',Pattern},
+    {'OR',[
+      {<<"string2">>,'=',<<"value53">>},
+      {<<"string2">>,'=',<<"value2">>}
+    ]}
+  ]}),
+  ct:pal("result: ~p",[Res]),
+  ok.
+
+search6(Config)->
+  ecomet_user:on_init_state(),
+  Pattern=?config(pattern, Config),
+  Res=ecomet_query:get([root],[<<".oid">>],{'AND',[
+    {<<".pattern">>,'=',Pattern},
+    {'OR',[
+      {<<"string2">>,'=',<<"value53">>},
+      {<<"string2">>,'=',<<"value2">>}
+    ]}
+  ]}),
+  ct:pal("result: ~p",[length(Res)]),
+  ok.
