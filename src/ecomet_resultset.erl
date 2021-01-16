@@ -255,7 +255,7 @@ define_patterns({Oper,List}) when (Oper=='AND') or (Oper=='OR')->
 	lists:foldl(fun(Condition,{Bits,ResultList})->
 		ReadyCondition=define_patterns(Condition),
 		CBits=element(3,ReadyCondition),
-		ResultBits=pbits_oper(Oper,Bits,CBits),
+		ResultBits=bitmap_oper(Oper,Bits,CBits),
 		{ResultBits,[ReadyCondition|ResultList]}
 	end,{Start,[]},List),
 	{Oper,lists:reverse(ConditionList),PatternBits};
@@ -270,7 +270,7 @@ define_patterns({'ANDNOT',Condition1,Condition2})->
 build_conditions({'LEAF',{Oper,Field,Value},IntBits},ExtBits)
 	when (Oper=='=');(Oper=='LIKE');(Oper=='DATETIME')->
 	Config=
-	case pbits_oper('AND',IntBits,ExtBits) of
+	case bitmap_oper('AND',IntBits,ExtBits) of
 		'UNDEFINED'->'UNDEFINED';
 		Patterns->
 			build_tag_config(Patterns,Field)
@@ -289,7 +289,7 @@ build_conditions({'LEAF',Condition,_},_)->
 	end,
 	{{'DIRECT',Condition,'UNDEFINED'},true};
 build_conditions({Oper,ConditionList,IntBits},ExtBits) when (Oper=='AND') or (Oper=='OR')->
-	XBits=pbits_oper('AND',ExtBits,IntBits),
+	XBits=bitmap_oper('AND',ExtBits,IntBits),
 	{ResConditons,ResDirect}=
 	lists:foldr(fun(C,{AccConditions,AccDirect})->
 		{Condition,CDirect}=build_conditions(C,XBits),
@@ -299,7 +299,7 @@ build_conditions({Oper,ConditionList,IntBits},ExtBits) when (Oper=='AND') or (Op
 	Config=if XBits=='UNDEFINED'->'UNDEFINED'; true->{XBits,[]} end,
 	{{Oper,ResConditons,Config},ResDirect};
 build_conditions({'ANDNOT',{Condition1,Condition2},IntBits},ExtBits)->
-	XBits=pbits_oper('AND',IntBits,ExtBits),
+	XBits=bitmap_oper('AND',IntBits,ExtBits),
 	{C1,C1Direct}=build_conditions(Condition1,XBits),
 	{C2,C2Direct}=build_conditions(Condition2,XBits),
 	Config=if XBits=='UNDEFINED'->'UNDEFINED'; true->{XBits,[]} end,
@@ -379,18 +379,31 @@ build_leaf({'DATETIME',Field,[From,To]},Config)->
 	dt_query(Field,FromIndex,ToIndex,Config).
 
 
-pbits_oper('AND',X1,X2)->
+bitmap_oper('AND',X1,X2)->
 	case {X1,X2} of
 		{'UNDEFINED',_}->X2;
 		{_,'UNDEFINED'}->X1;
-		_->ecomet_bitmap:oper('AND',X1,X2)
+		_->bitmap_result(ecomet_bitmap:oper('AND',X1,X2))
 	end;
-pbits_oper('OR',X1,X2)->
+bitmap_oper('OR',X1,X2)->
 	case {X1,X2} of
 		{'UNDEFINED',_}->'UNDEFINED';
 		{_,'UNDEFINED'}->'UNDEFINED';
-		_->ecomet_bitmap:oper('OR',X1,X2)
+		_->bitmap_result(ecomet_bitmap:oper('OR',X1,X2))
+	end;
+bitmap_oper('ANDNOT',X1,X2)->
+	case {X1,X2} of
+		{'UNDEFINED',_}->'UNDEFINED';
+		{_,'UNDEFINED'}->X1;
+		_->bitmap_result(ecomet_bitmap:oper('ANDNOT',X1,X2))
 	end.
+bitmap_result(Bitmap)->
+	Zip = ecomet_bitmap:zip(Bitmap),
+	case ecomet_bitmap:is_empty(Zip) of
+		false->Zip;
+		true->none
+	end.
+
 %%
 %%	Query normalization. Simplified example:
 %%	Source query:
@@ -737,7 +750,7 @@ search_patterns({'AND',Conditions,'UNDEFINED'},DB,ExtBits)->
 			PatternedCond=search_patterns(Condition,DB,AccPatterns),
 			% If one branch can be true only for PATTERNS1, then hole AND can be true only for PATTERNS1
 			{CBits,_}=element(3,PatternedCond),
-			{pbits_oper('AND',AccPatterns,CBits),[PatternedCond|AccCond]}
+			{bitmap_oper('AND',AccPatterns,CBits),[PatternedCond|AccCond]}
 		end,{ExtBits,[]},Conditions),
 	% 'UNDEFINED' only if AND contains no real tags.
 	% !!! EMPTY {'AND',[]} MAY KILL ALL RESULTS
@@ -764,7 +777,7 @@ search_patterns({'NORM',{{AND,ANDNOT},Direct},'UNDEFINED'},DB,ExtBits)->
 	ResANDNOT=search_patterns(ANDNOT,DB,ANDBits),
 	{'NORM',{{ResAND,ResANDNOT},Direct},{ANDBits,[]}};
 search_patterns({Oper,Conditions,{IntBits,IDHList}},_DB,ExtBits)->
-	XBits=pbits_oper('AND',ExtBits,IntBits),
+	XBits=bitmap_oper('AND',ExtBits,IntBits),
 	{Oper,Conditions,{XBits,IDHList}};
 % Strict operations
 search_patterns(Condition,_DB,_ExtBits)->Condition.
