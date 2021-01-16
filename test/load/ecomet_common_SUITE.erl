@@ -21,7 +21,7 @@
 -include("ecomet_test.hrl").
 
 -define(PROCESSES,2).
--define(OBJECTS,50).
+-define(OBJECTS,10000).
 -define(STORAGE,disc).
 
 %% API
@@ -51,7 +51,8 @@
   search2_3/1,
   search3_1/1,
   search3_2/1,
-  search3_3/1
+  search3_3/1,
+  search3_4/1
 ]).
 
 
@@ -84,7 +85,8 @@ groups()->[
       search2_3,
       search3_1,
       search3_2,
-      search3_3
+      search3_3,
+      search3_4
     ]
   }
 ].
@@ -341,6 +343,7 @@ search3_1(Config)->
     {<<".folder">>,'=',Folder}
   ]}),
   ct:pal("result: ~p",[Res]),
+  Res = ?OBJECTS * ?PROCESSES,
   ok.
 
 search3_2(Config)->
@@ -366,5 +369,18 @@ search3_3(Config)->
     {<<".pattern">>,':=',Pattern},
     {<<".folder">>,'=',Folder}
   ]}),
+  ct:pal("result: ~p",[length(Res)]),
+  ok.
+
+search3_4(Config)->
+  ecomet_user:on_init_state(),
+
+  Pattern=?config(pattern, Config),
+  Folder=?config(folder, Config),
+
+  Res=ecomet_query:get([root],[<<".oid">>,<<".name">>],{'AND',[
+    {<<".pattern">>,':=',Pattern},
+    {<<".folder">>,'=',Folder}
+  ]},#{page=>{1,10}}),
   ct:pal("result: ~p",[Res]),
   ok.

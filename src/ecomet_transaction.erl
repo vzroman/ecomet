@@ -50,6 +50,7 @@
 internal(Fun)->
   tstart(internal),
   case ecomet_backend:transaction(fun()->
+    clean(),
     Result=Fun(),
     {Log,OnCommits}=tcommit(),
     {Result,Log,OnCommits}
@@ -146,6 +147,29 @@ rollback()->
       put(?TKEY,Parent#state{locks=Locks})
   end,
   ok.
+
+clean()->
+  State = get(?TKEY),
+  case State of
+    undefined->?ERROR(no_transaction);
+    % Main transaction
+    #state{parent=none}->
+      put(?TKEY,State#state{
+        locks= #{},
+        dict= #{},
+        log=[],
+        droplog=[],
+        oncommit=[]
+      });
+    #state{parent=Parent }->
+      put(?TKEY,State#state{
+        locks=Parent#state.locks,
+        dict= Parent#state.dict,
+        log=[],
+        droplog=[],
+        oncommit=[]
+      })
+  end.
 
 % Get type of current transaction
 get_type()->

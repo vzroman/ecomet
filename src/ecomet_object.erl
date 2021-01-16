@@ -142,16 +142,18 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
       },Fields),
       % Parse fields
       Fields2=ecomet_field:build_new(Map,Fields1),
+
+      % Generate new ID for the object
+      OID=new_id(FolderID,PatternID),
+      Object=#object{ oid=OID, edit=true, map=Map, db=get_db_name(OID) },
+
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
-        % Generate new ID for the object
-        OID=new_id(FolderID,PatternID),
-        Object=#object{ oid=OID, edit=true, map=Map, db=get_db_name(OID) },
         % Put empty storages to dict. Trick for no real lookups
         put_empty_storages(OID,Map),
-        save(Object,Fields2,on_create),
-        Object
-      end);
+        save(Object,Fields2,on_create)
+      end),
+      Object;
     _->?ERROR(access_denied)
   end.
 
