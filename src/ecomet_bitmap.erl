@@ -19,16 +19,18 @@
 
 -define(WORD_LENGTH,64).
 
--define(EMPTY,0).
--define(SPARSE,1).
--define(SPARSE_FULL,2).
--define(FULL,3).
--define(FULL_WORD,2#1111111111111111111111111111111111111111111111111111111111111111).
+-define(F,1).
+-define(W,0).
+
+-define(X,0).
+-define(XX,1).
+
+-define(FULL,2#1111111111111111111111111111111111111111111111111111111111111111).
+
 -define(BIT(X), 1 bsl X).
--define(LONG,1).
--define(SHORT,0).
--define(SHORT_LENGTH,5).
--define(LONG_LENGTH,29).
+
+-define(SHORT,5).
+-define(LONG,29).
 
 %%------------------------------------------------------------------------------------
 %%  BITS API
@@ -71,8 +73,8 @@ set_bit( Bitmap, Bit )->
   HighBit = Bit div ?WORD_LENGTH rem ?WORD_LENGTH,
   LowBit = Bit rem ?WORD_LENGTH,
 
-  Bucket = << ?SPARSE:2, (?BIT(HighBit)):?WORD_LENGTH, (?BIT(LowBit)):?WORD_LENGTH>>,
-  Prefix = fill(?EMPTY,BucketNum),
+  Bucket = << ?W:1,?X:1, (?BIT(HighBit)):?WORD_LENGTH, (?BIT(LowBit)):?WORD_LENGTH>>,
+  Prefix = fill(0,BucketNum),
 
   bit_or(Bitmap,<<Prefix/bitstring,Bucket/bitstring>>).
 
@@ -86,8 +88,8 @@ reset_bit(Bitmap, Bit)->
   HighBit = Bit div ?WORD_LENGTH rem ?WORD_LENGTH,
   LowBit = Bit rem ?WORD_LENGTH,
 
-  Bucket = << ?SPARSE:2, (?BIT(HighBit)):?WORD_LENGTH, (?BIT(LowBit)):?WORD_LENGTH>>,
-  Prefix = fill(?EMPTY,BucketNum),
+  Bucket = << ?W:1,?X:1, (?BIT(HighBit)):?WORD_LENGTH, (?BIT(LowBit)):?WORD_LENGTH>>,
+  Prefix = fill(0,BucketNum),
 
   bit_andnot(Bitmap,<<Prefix/bitstring,Bucket/bitstring>>).
 
@@ -96,12 +98,19 @@ get_bit(Bitmap,Bit)->
     true->false;
     _->
       BucketNum = Bit div ?WORD_LENGTH div ?WORD_LENGTH,
-      case find_bucket(BucketNum,Bitmap) of
-        <<?EMPTY:2>>->
-          false;
-        <<?FULL:2>>->
-          true;
-        <<?SPARSE_FULL:2,Head:?WORD_LENGTH,Full:?WORD_LENGTH,Data/bitstring>>->
+      case find_bucket(Bitmap,BucketNum) of
+        <<?F:1,V:1,_/bitstring>>->
+          V=:=1;
+        <<?W:1,?X:1,Head:?WORD_LENGTH,Data/bitstring>>->
+          HighBit = Bit div ?WORD_LENGTH rem ?WORD_LENGTH,
+          if
+            (?BIT(HighBit)) band Head =:= 0 -> false ;
+            true ->
+              Word = find_word( HighBit, Head, 0, Data ),
+              LowBit = Bit rem ?WORD_LENGTH,
+              (?BIT(LowBit)) band Word>0
+          end;
+        <<?W:1,?XX:1,Head:?WORD_LENGTH,Full:?WORD_LENGTH,Data/bitstring>>->
           HighBit = Bit div ?WORD_LENGTH rem ?WORD_LENGTH,
           if
             (?BIT(HighBit)) band Head =:= 0 -> false ;
@@ -113,15 +122,6 @@ get_bit(Bitmap,Bit)->
                   LowBit = Bit rem ?WORD_LENGTH,
                   (?BIT(LowBit)) band Word>0
               end
-          end;
-        <<?SPARSE:2,Head:?WORD_LENGTH,Data/bitstring>>->
-          HighBit = Bit div ?WORD_LENGTH rem ?WORD_LENGTH,
-          if
-            (?BIT(HighBit)) band Head =:= 0 -> false ;
-            true ->
-              Word = find_word( HighBit, Head, 0, Data ),
-              LowBit = Bit rem ?WORD_LENGTH,
-              (?BIT(LowBit)) band Word>0
           end
       end
   end.
@@ -130,7 +130,9 @@ is_empty(none)->
   true;
 is_empty(<<>>)->
   true;
-is_empty(<<?EMPTY:2,?SHORT:1,_:?SHORT_LENGTH,Tail/bitstring>>)->
+is_empty(<<?F:1,0:1,?X:1,_:?SHORT,Tail/bitstring>>)->
+  is_empty(Tail);
+is_empty(<<?F:1,0:1,?XX:1,_:?LONG,Tail/bitstring>>)->
   is_empty(Tail);
 is_empty(_Other)->
   false.
@@ -139,21 +141,17 @@ count(none)->
   0;
 count(<<>>)->
   0;
-count(<<?EMPTY:2,?SHORT:1,_:?SHORT_LENGTH,Tail/bitstring>>)->
-  count(Tail);
-count(<<?EMPTY:2,?LONG:1,_:?LONG_LENGTH,Tail/bitstring>>)->
-  count(Tail);
-count(<<?FULL:2,?SHORT:1,Length:?SHORT_LENGTH,Tail/bitstring>>)->
-  Length * ?WORD_LENGTH * ?WORD_LENGTH + count(Tail);
-count(<<?FULL:2,?LONG:1,Length:?LONG_LENGTH,Tail/bitstring>>)->
-  Length * ?WORD_LENGTH * ?WORD_LENGTH + count(Tail);
+count(<<?F:1,V:1,?X:1,L:?SHORT,Tail/bitstring>>)->
+  V * L * ?WORD_LENGTH * ?WORD_LENGTH + count(Tail);
+count(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>)->
+  V * L * ?WORD_LENGTH * ?WORD_LENGTH + count(Tail);
 count(Bitmap)->
-  { Bucket, Tail } = get_bucket(Bitmap),
+  { Bucket, Tail } = first(Bitmap),
   bucket_count(Bucket) + count(Tail).
 
-bucket_count(<<?SPARSE:2,Head:?WORD_LENGTH,Data/bitstring>>)->
+bucket_count(<<?W:1,?X:1,Head:?WORD_LENGTH,Data/bitstring>>)->
   data_count(Head,_Full=0,Data,0);
-bucket_count(<<?SPARSE_FULL:2,Head:?WORD_LENGTH,Full:?WORD_LENGTH,Data/bitstring>>)->
+bucket_count(<<?W:1,?XX:1,Head:?WORD_LENGTH,Full:?WORD_LENGTH,Data/bitstring>>)->
   data_count(Head,Full,Data,0).
 
 data_count(0,_F,_D,Acc)->
@@ -195,45 +193,36 @@ bit_and(<<>>,_Bitmap2)->
   <<>>;
 bit_and(_Bitmap1,<<>>)->
   <<>>;
-bit_and(<<?EMPTY:2,?SHORT:1,L:?SHORT_LENGTH,Tail1/bitstring>>,Bitamp2)->
-  {_,Tail2} = split(Bitamp2,L),
-  bit_and(Tail1,Tail2);
-bit_and(<<?EMPTY:2,?LONG:1,L:?LONG_LENGTH,Tail1/bitstring>>,Bitamp2)->
-  {_,Tail2} = split(Bitamp2,L),
-  bit_and(Tail1,Tail2);
-bit_and(Bitamp1,<<?EMPTY:2,?SHORT:1,L:?SHORT_LENGTH,Tail2/bitstring>>)->
-  {_,Tail1} = split(Bitamp1,L),
-  bit_and(Tail1,Tail2);
-bit_and(Bitamp1,<<?EMPTY:2,?LONG:1,L:?LONG_LENGTH,Tail2/bitstring>>)->
-  {_,Tail1} = split(Bitamp1,L),
-  bit_and(Tail1,Tail2);
-
-bit_and(<<?FULL:2,?SHORT:1,L:?SHORT_LENGTH,Tail1/bitstring>>,Bitamp2)->
-  {Head2,Tail2} = split(Bitamp2,L),
+% Short empty
+bit_and(<<?F:1,0:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
+  bit_and(Tail1,tail(Bitamp2,L));
+bit_and(Bitamp1,<<?F:1,0:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
+  bit_and(tail(Bitamp1,L),Tail2);
+% Short full
+bit_and(<<?F:1,1:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
+  { Head2, Tail2 } = split( Bitamp2, L),
   <<Head2/bitstring,(bit_and(Tail1,Tail2))/bitstring>>;
-bit_and(<<?FULL:2,?LONG:1,L:?LONG_LENGTH,Tail1/bitstring>>,Bitamp2)->
-  {Head2,Tail2} = split(Bitamp2,L),
-  <<Head2/bitstring,(bit_and(Tail1,Tail2))/bitstring>>;
-bit_and(Bitamp1,<<?FULL:2,?SHORT:1,L:?SHORT_LENGTH,Tail2/bitstring>>)->
-  {Head1,Tail1} = split(Bitamp1,L),
+bit_and(Bitamp1,<<?F:1,1:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
+  { Head1, Tail1 } = split( Bitamp1, L),
   <<Head1/bitstring,(bit_and(Tail1,Tail2))/bitstring>>;
-bit_and(Bitamp1,<<?FULL:2,?LONG:1,L:?LONG_LENGTH,Tail2/bitstring>>)->
-  {Head1,Tail1} = split(Bitamp1,L),
+% Long empty
+bit_and(<<?F:1,0:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
+  bit_and(Tail1,tail(Bitamp2,L));
+bit_and(Bitamp1,<<?F:1,0:1,?XX:1,L:?LONG,Tail2/bitstring>>)->
+  bit_and(tail(Bitamp1,L),Tail2);
+% Long full
+bit_and(<<?F:1,1:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
+  { Head2, Tail2 } = split( Bitamp2, L),
+  <<Head2/bitstring,(bit_and(Tail1,Tail2))/bitstring>>;
+bit_and(Bitamp1,<<?F:1,1:1,?XX:1,L:?LONG,Tail2/bitstring>>)->
+  { Head1, Tail1 } = split( Bitamp1, L),
   <<Head1/bitstring,(bit_and(Tail1,Tail2))/bitstring>>;
 
 bit_and(Bitmap1,Bitmap2)->
-  { Bucket1, Tail1 } = get_bucket(Bitmap1),
-  { Bucket2, Tail2 } = get_bucket(Bitmap2),
+  { Bucket1, Tail1 } = first(Bitmap1),
+  { Bucket2, Tail2 } = first(Bitmap2),
   << (bucket_and(Bucket1,Bucket2))/bitstring, (bit_and( Tail1, Tail2 ))/bitstring >>.
 
-bucket_and(<<?EMPTY:2>>,_Bucket2)->
-  <<?EMPTY:2>>;
-bucket_and(_Bucket1,<<?EMPTY:2>>)->
-  <<?EMPTY:2>>;
-bucket_and(<<?FULL:2>>,Bucket2)->
-  Bucket2;
-bucket_and(Bucket1,<<?FULL:2>>)->
-  Bucket1;
 bucket_and(Bucket1,Bucket2)->
   Data1 = decompress(Bucket1),
   Data2 = decompress(Bucket2),
@@ -254,18 +243,35 @@ bit_or( <<>>, Bitmap2 )->
   Bitmap2;
 bit_or( Bitmap1, <<>> )->
   Bitmap1;
+% Short empty
+bit_or(<<?F:1,0:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
+  { Head2, Tail2 } = split(Bitamp2, L),
+  <<Head2/bitstring,(bit_or(Tail1,Tail2))/bitstring>>;
+bit_or(Bitamp1,<<?F:1,0:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
+  { Head1, Tail1 } = split(Bitamp1, L),
+  <<Head1/bitstring,(bit_or(Tail1,Tail2))/bitstring>>;
+% Short full
+bit_or(<<?F:1,1:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
+  <<?F:1,1:1,?X:1,L:?SHORT,(bit_or(Tail1,tail(Bitamp2,L)))/bitstring>>;
+bit_or(Bitamp1,<<?F:1,1:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
+  <<?F:1,1:1,?X:1,L:?SHORT,(bit_or(tail(Bitamp1,L),Tail2))/bitstring>>;
+% Long empty
+bit_or(<<?F:1,0:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
+  { Head2, Tail2 } = split(Bitamp2, L),
+  <<Head2/bitstring,(bit_or(Tail1,Tail2))/bitstring>>;
+bit_or(Bitamp1,<<?F:1,0:1,?XX:1,L:?LONG,Tail2/bitstring>>)->
+  { Head1, Tail1 } = split(Bitamp1, L),
+  <<Head1/bitstring,(bit_or(Tail1,Tail2))/bitstring>>;
+% Long full
+bit_or(<<?F:1,1:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
+  <<?F:1,1:1,?XX:1,L:?LONG,(bit_or(Tail1,tail(Bitamp2,L)))/bitstring>>;
+bit_or(Bitamp1,<<?F:1,1:1,?XX:1,L:?LONG,Tail2/bitstring>>)->
+  <<?F:1,1:1,?XX:1,L:?LONG,(bit_or(tail(Bitamp1,L),Tail2))/bitstring>>;
+
 bit_or( Bitmap1, Bitmap2 )->
-  { Bucket1, Tail1 } = get_bucket(Bitmap1),
-  { Bucket2, Tail2 } = get_bucket(Bitmap2),
+  { Bucket1, Tail1 } = first(Bitmap1),
+  { Bucket2, Tail2 } = first(Bitmap2),
   << (bucket_or(Bucket1,Bucket2))/bitstring, (bit_or( Tail1, Tail2 ))/bitstring >>.
-bucket_or(<<?FULL:2>>,_Bucket2)->
-  <<?FULL:2>>;
-bucket_or(_Bucket1,<<?FULL:2>>)->
-  <<?FULL:2>>;
-bucket_or(<<?EMPTY:2>>,Bucket2)->
-  Bucket2;
-bucket_or(Bucket1,<<?EMPTY:2>>)->
-  Bucket1;
 bucket_or(Bucket1,Bucket2)->
   Data1 = decompress(Bucket1),
   Data2 = decompress(Bucket2),
@@ -286,21 +292,36 @@ bit_andnot( <<>>, _Bitmap2 )->
   <<>>;
 bit_andnot( Bitmap1, <<>> )->
   Bitmap1;
+% Short empty
+bit_andnot(<<?F:1,0:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
+  bit_andnot(Tail1,tail(Bitamp2,L));
+bit_andnot(Bitamp1,<<?F:1,0:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
+  { Head1, Tail1 } = split(Bitamp1,L),
+  <<Head1/bitstring,(bit_andnot(Tail1,Tail2))/bitstring>>;
+% Short full
+bit_andnot(<<?F:1,1:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
+  { Head2, Tail2 } = split( Bitamp2, L),
+  <<(bit_not(Head2))/bitstring,(bit_andnot(Tail1,Tail2))/bitstring>>;
+bit_andnot(Bitamp1,<<?F:1,1:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
+  <<?F:1,0:1,?X:1,L:?SHORT,(bit_andnot(tail(Bitamp1,L),Tail2))/bitstring>>;
+% Long empty
+bit_andnot(<<?F:1,0:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
+  bit_andnot(Tail1,tail(Bitamp2,L));
+bit_andnot(Bitamp1,<<?F:1,0:1,?XX:1,L:?LONG,Tail2/bitstring>>)->
+  { Head1, Tail1 } = split(Bitamp1,L),
+  <<Head1/bitstring,(bit_andnot(Tail1,Tail2))/bitstring>>;
+% Long full
+bit_andnot(<<?F:1,1:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
+  { Head2, Tail2 } = split( Bitamp2, L),
+  <<(bit_not(Head2))/bitstring,(bit_andnot(Tail1,Tail2))/bitstring>>;
+bit_andnot(Bitamp1,<<?F:1,1:1,?XX:1,L:?LONG,Tail2/bitstring>>)->
+  <<?F:1,0:1,?XX:1,L:?LONG,(bit_andnot(tail(Bitamp1,L),Tail2))/bitstring>>;
+
 bit_andnot( Bitmap1, Bitmap2 )->
-  { Bucket1, Tail1 } = get_bucket(Bitmap1),
-  { Bucket2, Tail2 } = get_bucket(Bitmap2),
+  { Bucket1, Tail1 } = first(Bitmap1),
+  { Bucket2, Tail2 } = first(Bitmap2),
   << (bucket_andnot(Bucket1,Bucket2))/bitstring, (bit_andnot( Tail1, Tail2 ))/bitstring >>.
-bucket_andnot(<<?EMPTY:2>>,_Bucket2)->
-  <<?EMPTY:2>>;
-bucket_andnot(Bucket1,<<?EMPTY:2>>)->
-  Bucket1;
-bucket_andnot(_Bucket1,<<?FULL:2>>)->
-  <<?EMPTY:2>>;
-bucket_andnot(<<?FULL:2>>,Bucket)->
-  Data1 = [?FULL_WORD || _<- lists:seq(1,?WORD_LENGTH)],
-  Data2 = decompress(Bucket),
-  Data = data_andnot(Data1, Data2 ),
-  compress(Data);
+
 bucket_andnot(Bucket1,Bucket2)->
   Data1 = decompress(Bucket1),
   Data2 = decompress(Bucket2),
@@ -313,6 +334,36 @@ data_andnot( [], _T2 )->
   [];
 data_andnot( T1, [] )->
   T1.
+
+%%------------------------------------------------------------------------------------
+%%  NOT
+%%------------------------------------------------------------------------------------
+bit_not(<<>>)->
+  <<>>;
+% Short
+bit_not(<<?F:1,0:1,?X:1,L:?SHORT,Tail/bitstring>>)->
+  <<?F:1,1:1,?X:1,L:?SHORT,(bit_not(Tail))/bitstring>>;
+bit_not(<<?F:1,1:1,?X:1,L:?SHORT,Tail/bitstring>>)->
+  <<?F:1,0:1,?X:1,L:?SHORT,(bit_not(Tail))/bitstring>>;
+% Long
+bit_not(<<?F:1,0:1,?XX:1,L:?LONG,Tail/bitstring>>)->
+  <<?F:1,1:1,?XX:1,L:?LONG,(bit_not(Tail))/bitstring>>;
+bit_not(<<?F:1,1:1,?XX:1,L:?LONG,Tail/bitstring>>)->
+  <<?F:1,0:1,?XX:1,L:?LONG,(bit_not(Tail))/bitstring>>;
+
+bit_not(Bitmap)->
+  { Bucket, Tail } = first(Bitmap),
+  <<(bucket_not(Bucket))/bitstring,(bit_not(Tail))/bitstring>>.
+
+bucket_not(Bucket1)->
+  Data1 = decompress(Bucket1),
+  Data = data_not(Data1),
+  compress(Data).
+
+data_not( [W1|T] )->
+  [ W1  bxor ?FULL | data_not(T) ];
+data_not( [])->
+  [].
 
 %%------------------------------------------------------------------------------------
 %%  Iterators
@@ -438,56 +489,87 @@ full_foldr(_I,_Stop,Acc,_Fun)->
 %%------------------------------------------------------------------------------------
 %%  Bucket utilities
 %%------------------------------------------------------------------------------------
-find_bucket(_N,<<>>)->
-  <<?EMPTY:2>>;
-find_bucket(N,<<?EMPTY:2,?SHORT:1,L:?SHORT_LENGTH,_/bitstring>>) when N =< L->
-  <<?EMPTY:2>>;
-find_bucket(N,<<?EMPTY:2,?LONG:1,L:?LONG_LENGTH,_/bitstring>>) when N =< L->
-  <<?EMPTY:2>>;
-find_bucket(N,<<?EMPTY:2,?SHORT:1,L:?SHORT_LENGTH,Tail/bitstring>>) when N > L->
-  find_bucket(N-L,Tail);
-find_bucket(N,<<?EMPTY:2,?LONG:1,L:?LONG_LENGTH,Tail/bitstring>>) when N > L->
-  find_bucket(N-L,Tail);
-find_bucket(N,<<?FULL:2,?SHORT:1,L:?SHORT_LENGTH,_/bitstring>>) when N =< L->
-  <<?FULL:2>>;
-find_bucket(N,<<?FULL:2,?SHORT:1,L:?SHORT_LENGTH,_/bitstring>>) when N =< L->
-  <<?FULL:2>>;
-find_bucket(N,<<?FULL:2,?SHORT:1,L:?SHORT_LENGTH,Tail/bitstring>>) when N > L->
-  find_bucket(N-L,Tail);
-find_bucket(N,<<?FULL:2,?LONG:1,L:?LONG_LENGTH,Tail/bitstring>>) when N > L->
-  find_bucket(N-L,Tail);
-find_bucket(N,Bitmap)->
-  { Bucket, Tail } = get_bucket(Bitmap),
-  if
-    N=:=0 -> Bucket;
-    true ->
-      find_bucket(N-1,Tail)
+find_bucket(Bitmap,N)->
+  case tail(Bitmap,N) of
+    <<>>->
+      <<?F:1,0:1,?X:1,1:?SHORT>>;
+    <<?F:1,V:1,_/bitstring>>->
+      <<?F:1,V:1,?X:1,1:?SHORT>>;
+    Left->
+      {Bucket,_Tail} = first(Left),
+      Bucket
   end.
+
+tail(<<>>,_N)->
+  <<>>;
+tail(Bitmap,N) when N =<0 ->
+  Bitmap;
+% Short
+tail(<<?F:1,V:1,?X:1,L:?SHORT,Tail/bitstring>>,N) when N < L ->
+  <<?F:1,V:1,?X:1,(L-N):?SHORT,Tail/bitstring>>;
+tail(<<?F:1,_V:1,?X:1,L:?SHORT,Tail/bitstring>>,N) when N =:= L ->
+  Tail;
+tail(<<?F:1,_V:1,?X:1,L:?SHORT,Tail/bitstring>>,N) when N > L ->
+  tail(Tail,N-L);
+% Long
+tail(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N) when N < L ->
+  <<(fill(V,L-N))/bitstring,Tail/bitstring>>;
+tail(<<?F:1,_V:1,?XX:1,L:?LONG,Tail/bitstring>>,N) when N =:= L ->
+  Tail;
+tail(<<?F:1,_V:1,?XX:1,L:?LONG,Tail/bitstring>>,N) when N > L ->
+  tail(Tail,N-L);
+tail(Bitmap,N)->
+  {_Bucket, Tail } = first(Bitmap),
+  tail( Tail, N-1 ).
+
+split(Bitmap,N)->
+  split(Bitmap,N,<<>>).
+split(<<>>,_N, Head)->
+  { Head, <<>> };
+split(Bitmap, N, Head) when N=<0->
+  { Head, Bitmap };
+% Short
+split(<<?F:1,V:1,?X:1,L:?SHORT,Tail/bitstring>>,N,Head) when N < L->
+  { <<Head/bitstring,(fill(V,N))/bitstring>>, <<(fill(V,L-N))/bitstring,Tail/bitstring>> };
+split(<<?F:1,V:1,?X:1,L:?SHORT,Tail/bitstring>>,N,Head) when N =:= L->
+  { <<Head/bitstring,?F:1,V:1,?X:1,L:?SHORT>>, Tail };
+split(<<?F:1,V:1,?X:1,L:?SHORT,Tail/bitstring>>,N, Head) when N > L->
+  split(Tail,N-L,<<Head/bitstring,?F:1,V:1,?X:1,L:?SHORT>>);
+% Long
+split(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N,Head) when N < L->
+  { <<Head/bitstring,(fill(V,N))/bitstring>>, <<(fill(V,L-N))/bitstring,Tail/bitstring>> };
+split(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N,Head) when N =:= L->
+  { <<Head/bitstring,?F:1,V:1,?XX:1,L:?LONG>>, Tail };
+split(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N, Head) when N > L->
+  split(Tail,N-L,<<Head/bitstring,?F:1,V:1,?X:1,L:?SHORT>>);
+% Sparse
+split(Bitmap, N, Head)->
+  { Bucket, Tail } = first(Bitmap),
+  split( Tail, N-1, <<Head/bitstring,Bucket/bitstring>> ).
 
 split_buckets(<<>>)->
   [];
 split_buckets(Bitmap)->
-  {Bucket,Tail} = get_bucket(Bitmap),
+  {Bucket,Tail} = first(Bitmap),
   [Bucket|split_buckets(Tail)].
 
-
-get_bucket(<<?SPARSE:2,HWord:?WORD_LENGTH,Rest/bitstring>>)->
+first(<<?W:1,?X:1,HWord:?WORD_LENGTH,Rest/bitstring>>)->
   Length = bit_count(HWord) * ?WORD_LENGTH,
   <<Data:Length,Tail/bitstring>> = Rest,
-  {<<?SPARSE:2,HWord:?WORD_LENGTH,Data:Length>>, Tail };
-get_bucket(<<?SPARSE_FULL:2,HWord:?WORD_LENGTH,FullWords:?WORD_LENGTH,Rest/bitstring>>)->
+  {<<?W:1,?X:1,HWord:?WORD_LENGTH,Data:Length>>, Tail };
+first(<<?W:1,?XX:1,HWord:?WORD_LENGTH,FullWords:?WORD_LENGTH,Rest/bitstring>>)->
   Length = (bit_count(HWord) - bit_count(FullWords)) * ?WORD_LENGTH,
   <<Data:Length,Tail/bitstring>> = Rest,
-  {<<?SPARSE_FULL:2,HWord:?WORD_LENGTH,FullWords:?WORD_LENGTH,Data:Length>>, Tail }.
+  {<<?W:1,?XX:1,HWord:?WORD_LENGTH,FullWords:?WORD_LENGTH,Data:Length>>, Tail }.
 
-decompress(<<?SPARSE:2,High:?WORD_LENGTH,Data/bitstring>>)->
+decompress(<<?W:1,?X:1,High:?WORD_LENGTH,Data/bitstring>>)->
   decompress(High,0,Data);
-decompress(<<?SPARSE_FULL:2,High:?WORD_LENGTH,Full:?WORD_LENGTH,Data/bitstring>>)->
+decompress(<<?W:1,?XX:1,High:?WORD_LENGTH,Full:?WORD_LENGTH,Data/bitstring>>)->
   decompress(High,Full,Data).
 decompress(0,_F,_Data)->
   [];
 decompress(H,F,Data) when F rem 2 =:= 1->
-  [?FULL_WORD|decompress(H bsr 1,F bsr 1,Data)];
+  [?FULL|decompress(H bsr 1,F bsr 1,Data)];
 decompress(H,F,Data) when H rem 2=:=0->
   [0|decompress(H bsr 1,F bsr 1,Data)];
 decompress(H,F,<<Word:?WORD_LENGTH,Tail/bitstring>>)->
@@ -497,20 +579,20 @@ compress(Data)->
   compress(Data, _High=0, _Full=0, _Bit=1, <<>>).
 compress([0|Tail],High,Full,Bit,Acc)->
   compress(Tail,High,Full,Bit bsl 1,Acc);
-compress([?FULL_WORD|Tail],High,Full,Bit,Acc)->
+compress([?FULL|Tail],High,Full,Bit,Acc)->
   compress(Tail,High bor Bit,Full bor Bit, Bit bsl 1 ,Acc);
 compress([Word|Tail],High,Full,Bit,Acc)->
   compress(Tail, High bor Bit, Full, Bit bsl 1, <<Acc/bitstring,Word:?WORD_LENGTH>> );
 compress([],High,Full,_Bit,Data)->
   if
     High =:=0 ->
-      <<?EMPTY:2>>;
-    Full =:= ?FULL_WORD->
-      <<?FULL:2>>;
+      <<?F:1,0:1,?X:1,1:?SHORT>>;
+    Full =:= ?FULL->
+      <<?F:1,1:1,?X:1,1:?SHORT>>;
     Full =:=0->
-      <<?SPARSE:2, High:?WORD_LENGTH, Data/bitstring >>;
+      <<?W:1,0:1,?X:1,High:?WORD_LENGTH, Data/bitstring >>;
     true ->
-      <<?SPARSE_FULL:2, High:?WORD_LENGTH, Full:?WORD_LENGTH, Data/bitstring >>
+      <<?W:1,1:1,?XX:1,High:?WORD_LENGTH, Full:?WORD_LENGTH, Data/bitstring >>
   end.
 
 find_word(0,_H, _F, <<Word:?WORD_LENGTH,_/bitstring>>)->
@@ -524,51 +606,11 @@ find_word(N,H,F,<<_:?WORD_LENGTH,Tail/bitstring>>)->
 
 fill(_,0)->
   <<>>;
-fill(Code,Length) when Length<(1 bsl 5)->
-  <<Code:2,?SHORT:1,Length:?SHORT_LENGTH>>;
-fill(Code,Length)->
+fill(V,Length) when Length<(1 bsl 5)->
+  <<?F:1,V:1,?X:1,Length:?SHORT>>;
+fill(V,Length)->
   % Max length 1073741824
-  <<Code:2,?LONG:1,Length:?LONG_LENGTH>>.
-
-split(<<>>,_N)->
-  {<<>>,<<>>};
-split(<<?EMPTY:2,?SHORT:1,L:?SHORT_LENGTH,Tail/bitstring>>,N) when N < L->
-  { fill(?EMPTY,N), <<(fill(?EMPTY,L-N))/bitstring,Tail/bitstring>> };
-split(<<?EMPTY:2,?LONG:1,L:?LONG_LENGTH,Tail/bitstring>>,N) when N < L->
-  { fill(?EMPTY,N), <<(fill(?EMPTY,L-N))/bitstring,Tail/bitstring>> };
-split(<<?EMPTY:2,?SHORT:1,L:?SHORT_LENGTH,Tail/bitstring>>,N) when N =:= L->
-  { <<?EMPTY:2,?SHORT:1,L:?SHORT_LENGTH>>, Tail };
-split(<<?EMPTY:2,?LONG:1,L:?LONG_LENGTH,Tail/bitstring>>,N) when N =:= L->
-  { <<?EMPTY:2,?LONG:1,L:?LONG_LENGTH>>, Tail };
-split(<<?EMPTY:2,?SHORT:1,L:?SHORT_LENGTH,Tail/bitstring>>,N) when N > L->
-  {Head,Tail1} = split(Tail,N-L),
-  { <<?EMPTY:2,?SHORT:1,L:?SHORT_LENGTH,Head/bitstring>>,Tail1 };
-split(<<?EMPTY:2,?LONG:1,L:?LONG_LENGTH,Tail/bitstring>>,N) when N > L->
-  {Head,Tail1} = split(Tail,N-L),
-  { <<?EMPTY:2,?LONG:1,L:?LONG_LENGTH,Head/bitstring>>,Tail1 };
-
-split(<<?FULL:2,?SHORT:1,L:?SHORT_LENGTH,Tail/bitstring>>,N) when N < L->
-  { fill(?FULL,N), <<(fill(?FULL,L-N))/bitstring,Tail/bitstring>> };
-split(<<?FULL:2,?LONG:1,L:?LONG_LENGTH,Tail/bitstring>>,N) when N < L->
-  { fill(?FULL,N), <<(fill(?FULL,L-N))/bitstring,Tail/bitstring>> };
-split(<<?FULL:2,?SHORT:1,L:?SHORT_LENGTH,Tail/bitstring>>,N) when N =:= L->
-  { <<?FULL:2,?SHORT:1,L:?SHORT_LENGTH>>, Tail };
-split(<<?FULL:2,?LONG:1,L:?LONG_LENGTH,Tail/bitstring>>,N) when N =:= L->
-  { <<?FULL:2,?LONG:1,L:?LONG_LENGTH>>, Tail };
-split(<<?FULL:2,?SHORT:1,L:?SHORT_LENGTH,Tail/bitstring>>,N) when N > L->
-  {Head,Tail1} = split(Tail,N-L),
-  { <<?FULL:2,?SHORT:1,L:?SHORT_LENGTH,Head/bitstring>>,Tail1 };
-split(<<?FULL:2,?LONG:1,L:?LONG_LENGTH,Tail/bitstring>>,N) when N > L->
-  {Head,Tail1} = split(Tail,N-L),
-  { <<?FULL:2,?LONG:1,L:?LONG_LENGTH,Head/bitstring>>,Tail1 };
-
-split(Bitmap,N) when N>0->
-  { Bucket, Tail } = get_bucket(Bitmap),
-  { Head, Tail1 } = split(Tail,N-1),
-  { <<Bucket/bitstring,Head/bitstring>> ,Tail1};
-split(Bitmap,_)->
-  {<<>>,Bitmap}.
-
+  <<?F:1,V:1,?XX:1,Length:?LONG>>.
 
 bit_count(Value)->
   bit_count(Value,0).
