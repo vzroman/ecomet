@@ -47,9 +47,7 @@
 %%------------------------------------------------------------------------------------
 -export([
   oper/3,
-  bit_and/2,
-  bit_or/2,
-  bit_andnot/2
+  zip/1
 ]).
 
 %%------------------------------------------------------------------------------------
@@ -185,6 +183,35 @@ oper('ANDNOT',X1,X2)->
     X2==none->X1;
     true->bit_andnot(X1,X2)
   end.
+
+%%------------------------------------------------------------------------------------
+%%  Compressing
+%%------------------------------------------------------------------------------------
+zip(<<>>)->
+  <<>>;
+% Compress
+zip(<<?F:1,V:1,?X:1,L1:?SHORT,?F:1,V:1,?X:1,L2:?SHORT,Tail/bitstring>>)->
+  zip(<<(fill(V,L1+L2))/bitstring,Tail/bitstring>>);
+zip(<<?F:1,V:1,?X:1,L1:?SHORT,?F:1,V:1,?XX:1,L2:?LONG,Tail/bitstring>>)->
+  zip(<<(fill(V,L1+L2))/bitstring,Tail/bitstring>>);
+zip(<<?F:1,V:1,?XX:1,L1:?LONG,?F:1,V:1,?X:1,L2:?SHORT,Tail/bitstring>>)->
+  zip(<<(fill(V,L1+L2))/bitstring,Tail/bitstring>>);
+zip(<<?F:1,V:1,?XX:1,L1:?LONG,?F:1,V:1,?XX:1,L2:?LONG,Tail/bitstring>>)->
+  zip(<<(fill(V,L1+L2))/bitstring,Tail/bitstring>>);
+% Empty end
+zip(<<?F:1,0:1,?X:1,_:?SHORT>>)->
+  <<>>;
+zip(<<?F:1,0:1,?XX:1,_L:?LONG>>)->
+  <<>>;
+% Run fill
+zip(<<?F:1,V:1,?X:1,L:?SHORT,Tail/bitstring>>)->
+  <<?F:1,V:1,?X:1,L:?SHORT,(zip(Tail))/bitstring>>;
+zip(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>)->
+  <<?F:1,V:1,?XX:1,L:?LONG,(zip(Tail))/bitstring>>;
+% Sparse
+zip(Bitmap)->
+  { Bucket, Tail } = first(Bitmap),
+  <<Bucket/bitstring,(zip(Tail))/bitstring>>.
 
 %%------------------------------------------------------------------------------------
 %%  AND
@@ -355,10 +382,11 @@ bit_not(Bitmap)->
   { Bucket, Tail } = first(Bitmap),
   <<(bucket_not(Bucket))/bitstring,(bit_not(Tail))/bitstring>>.
 
-bucket_not(Bucket1)->
-  Data1 = decompress(Bucket1),
+bucket_not(<<?W:1,_:1,Head:?WORD_LENGTH,_/bitstring>> = Bucket)->
+  Data1 = decompress(Bucket),
   Data = data_not(Data1),
-  compress(Data).
+  Full = Head bxor ?FULL,
+  compress(Data, Full, Full, _Bit=1, <<>>).
 
 data_not( [W1|T] )->
   [ W1  bxor ?FULL | data_not(T) ];
@@ -366,126 +394,140 @@ data_not( [])->
   [].
 
 %%------------------------------------------------------------------------------------
-%%  Iterators
+%%  From the less significant to the most significant iterator
 %%------------------------------------------------------------------------------------
-% From the least significant bit to the most significant
-foldl(_F,Acc,none,_Page)->
+foldl(_Fun,Acc,none,_Page)->
   {0,Acc};
-foldl(_F,Acc,<<>>,_Page)->
+foldl(_Fun,Acc,[],_Page)->
   {0,Acc};
-foldl(F,InitAcc,Bitmap,{From,To})->
-  Start=if is_integer(From)->From; true->0 end,
-  Stop=if is_integer(To)->To; true->-1 end,
-
+foldl(Fun,InAcc,Bitmap,{From,To})->
+  Iterator = get_iterator(From,To,Fun),
   Buckets=split_buckets(Bitmap),
-  NumBuckets=lists:zip(lists:seq(0,length(Buckets)-1),Buckets),
+  buckets_foldl(Buckets,Iterator,{ _Count=0, InAcc }).
 
-  lists:foldl(fun({N,Bucket},TotalAcc)->
-    Offset = N * ?WORD_LENGTH*?WORD_LENGTH,
-    bucket_foldl(Bucket,TotalAcc,fun(Bit, {Count,Acc} )->
-      Count1 = Count+1,
-      Acc1=
-        if
-          Count1 =< Start->
-            Acc;
-         Count1 > Stop, Stop=/=-1->
-            Acc;
-          true ->
-            F(Offset + Bit, Acc)
-        end,
-      {Count1, Acc1}
-     end)
-  end,{0,InitAcc}, NumBuckets ).
+% Short
+buckets_foldl([ { _N, <<?F:1,0:1,?X:1,_L:?SHORT>> } | Tail ], Fun, Acc )->
+  buckets_foldl( Tail, Fun, Acc );
+buckets_foldl([ { N, <<?F:1,1:1,?X:1,L:?SHORT>> } | Tail ], Fun, Acc )->
+  From = N * ?WORD_LENGTH*?WORD_LENGTH,
+  To = L * ?WORD_LENGTH * ?WORD_LENGTH + From - 1,
+  buckets_foldl( Tail, Fun, full_foldl(From,To,Fun,Acc) );
+% Long
+buckets_foldl([ {_N, <<?F:1,0:1,?XX:1,_L:?LONG>>} | Tail ], Fun, Acc )->
+  buckets_foldl( Tail, Fun, Acc );
+buckets_foldl([ {N, <<?F:1,1:1,?XX:1,L:?LONG>>} | Tail ], Fun, Acc )->
+  From = N * ?WORD_LENGTH*?WORD_LENGTH,
+  To = L * ?WORD_LENGTH * ?WORD_LENGTH + From - 1,
+  buckets_foldl( Tail, Fun, full_foldl(From,To,Acc,Fun) );
 
-bucket_foldl(<<?EMPTY:2>>,Acc,_Fun)->
-  Acc;
-bucket_foldl(<<?FULL:2>>,Acc,Fun)->
-  full_foldl(0,?WORD_LENGTH*?WORD_LENGTH-1,Acc,Fun);
-bucket_foldl(Bucket,Acc,Fun)->
+buckets_foldl([ {N, Bucket} | Tail ], Fun, Acc )->
   Data = decompress(Bucket),
-  data_foldl( 0, length(Data)-1, Data, Acc, Fun ).
+  Offset = N * ?WORD_LENGTH,
+  buckets_foldl(Tail, Fun, data_foldl( Data, Offset, Fun, Acc ) );
 
-data_foldl(I,Stop,_Data,Acc,_Fun) when I>Stop->
-  Acc;
-data_foldl(I,Stop,[0|Tail],Acc,Fun)->
-  data_foldl(I+1,Stop,Tail,Acc,Fun);
-data_foldl(I,Stop,[?FULL_WORD|Tail],Acc,Fun)->
-  Offset = I * ?WORD_LENGTH,
-  data_foldl(I+1,Stop,Tail,full_foldl(Offset, Offset+?WORD_LENGTH-1, Acc, Fun),Fun);
-data_foldl(I,Stop,[Word|Tail],Acc,Fun)->
-  data_foldl(I+1,Stop,Tail,word_foldl(Word,I*?WORD_LENGTH,Acc,Fun),Fun).
-
-
-full_foldl(I,Stop,Acc,Fun) when I=<Stop->
-  full_foldl(I+1,Stop,Fun(I,Acc),Fun);
-full_foldl(_I,_Stop,Acc,_Fun)->
+buckets_foldl([], _Fun, Acc )->
   Acc.
 
-word_foldl(0,_I,Acc,_Fun)->
-  Acc;
-word_foldl(W,I,Acc,Fun) when W rem 2=:=1->
-  word_foldl(W bsr 1,I+1,Fun(I,Acc),Fun);
-word_foldl(W,I,Acc,Fun)->
-  word_foldl(W bsr 1,I+1,Acc,Fun).
+data_foldl([0|Tail], N, Fun, Acc)->
+  data_foldl( Tail, N+1, Fun, Acc );
+data_foldl([?FULL|Tail], N, Fun, Acc)->
+  From = N * ?WORD_LENGTH,
+  To = From + ?WORD_LENGTH - 1,
+  data_foldl(Tail, N+1, Fun, full_foldl(From, To, Fun, Acc) );
+data_foldl([Word|Tail],N,Fun,Acc)->
+  Offset = N*?WORD_LENGTH,
+  data_foldl(Tail, N+1, Fun, word_foldl(Word,Offset,Fun,Acc) );
+data_foldl([],_N,_Fun,Acc)->
+  Acc.
 
-% From the most significant bit to the least significant
+full_foldl(I,Stop,Fun,Acc) when I=<Stop->
+  full_foldl(I+1, Stop, Fun, Fun(I,Acc) );
+full_foldl(_I,_Stop,_Fun,Acc)->
+  Acc.
+
+word_foldl(0,_I,_Fun,Acc)->
+  Acc;
+word_foldl(W,I,Fun,Acc) when W rem 2=:=1->
+  word_foldl(W bsr 1,I+1,Fun,Fun(I,Acc));
+word_foldl(W,I,Fun,Acc)->
+  word_foldl(W bsr 1,I+1,Fun,Acc).
+
+%%------------------------------------------------------------------------------------
+%%  From the less significant to the most significant iterator
+%%------------------------------------------------------------------------------------
 foldr(_F,Acc,none,_Page)->
   {0,Acc};
-foldr(_F,Acc,<<>>,_Page)->
+foldr(_F,Acc,[],_Page)->
   {0,Acc};
-foldr(F,InitAcc,Bitmap,{From,To})->
+foldr(Fun,InAcc,Bitmap,{From,To})->
+  Iterator = get_iterator(From,To,Fun),
+  Buckets=split_buckets(Bitmap),
+  buckets_foldr( Buckets, Iterator, { _Count=0, InAcc } ).
+% Short
+buckets_foldr( [ { _N, <<?F:1,0:1,?X:1,_L:?SHORT>> } | Tail ], Fun, Acc )->
+  buckets_foldr( Tail, Fun, Acc );
+buckets_foldr( [ { N, <<?F:1,1:1,?X:1,L:?SHORT>> } | Tail ], Fun, Acc )->
+  From = N * ?WORD_LENGTH*?WORD_LENGTH,
+  To = L * ?WORD_LENGTH * ?WORD_LENGTH + From - 1,
+  full_foldr( From, To, Fun, buckets_foldr( Tail, Fun, Acc ) );
+% Long
+buckets_foldr( [ { _N, <<?F:1,0:1,?XX:1,_L:?LONG>> } | Tail ], Fun, Acc )->
+  buckets_foldr( Tail, Fun, Acc );
+buckets_foldr( [ { N, <<?F:1,1:1,?XX:1,L:?LONG>> } | Tail ], Fun, Acc )->
+  To = N * ?WORD_LENGTH*?WORD_LENGTH,
+  From = L * ?WORD_LENGTH * ?WORD_LENGTH + To - 1,
+  full_foldr( From, To, Fun, buckets_foldr( Tail, Fun, Acc ) );
+
+buckets_foldr([ {N, Bucket} | Tail ], Fun, Acc )->
+  Data = decompress(Bucket),
+  Offset = N * ?WORD_LENGTH,
+  data_foldr( Data, Offset, Fun, buckets_foldr( Tail, Fun, Acc ) );
+
+buckets_foldr([], _Fun, Acc )->
+  Acc.
+
+data_foldr([0|Tail],N,Fun,Acc)->
+  data_foldr(Tail,N+1,Fun,Acc);
+data_foldr([?FULL|Tail], N, Fun, Acc)->
+  From = N * ?WORD_LENGTH,
+  To = From + ?WORD_LENGTH - 1,
+  full_foldr(From, To, Fun, data_foldr(Tail,N+1,Fun,Acc) );
+
+data_foldr([Word|Tail],N,Fun,Acc)->
+  Offset = N*?WORD_LENGTH,
+  word_foldr(Word,Offset,Fun, data_foldr(Tail,N+1,Fun,Acc));
+data_foldr([],_N,_Fun,Acc)->
+  Acc.
+
+full_foldr(I,Stop,Fun,Acc) when I=<Stop->
+  Fun(I, full_foldr(I+1,Stop,Fun,Acc) );
+full_foldr(_I,_Stop,_Fun,Acc)->
+  Acc.
+
+word_foldr(0,_I,_Fun,Acc)->
+  Acc;
+word_foldr(W,I,Fun,Acc) when W rem 2=:=1->
+  Fun(I,word_foldr( W bsr 1, I+1, Fun, Acc ));
+word_foldr(W,I,Fun,Acc)->
+  word_foldr(W bsr 1,I+1,Fun,Acc).
+
+get_iterator(From,To,Fun)->
   Start=if is_integer(From)->From; true->0 end,
   Stop=if is_integer(To)->To; true->-1 end,
+  fun(Bit,{Count,Acc})->
+    Count1 = Count+1,
+    Acc1=
+      if
+        Count1 =< Start->
+          Acc;
+        Count1 > Stop, Stop=/=-1->
+          Acc;
+        true ->
+          Fun(Bit, Acc)
+      end,
+    {Count1, Acc1}
+  end.
 
-  Buckets=split_buckets(Bitmap),
-  NumBuckets=lists:zip(lists:seq(0,length(Buckets)-1),Buckets),
-
-  lists:foldr(fun({N,Bucket},TotalAcc)->
-    Offset = N * ?WORD_LENGTH*?WORD_LENGTH,
-    bucket_foldr(Bucket,TotalAcc,fun(Bit, {Count,Acc} )->
-      Count1 = Count+1,
-      Acc1=
-        if
-          Count1 =< Start->
-            Acc;
-          Count1 > Stop, Stop=/=-1->
-            Acc;
-          true ->
-            F(Offset + Bit, Acc)
-        end,
-      {Count1, Acc1}
-    end)
-  end,{0,InitAcc}, NumBuckets ).
-
-bucket_foldr(<<?EMPTY:2>>,Acc,_Fun)->
-  Acc;
-bucket_foldr(<<?FULL:2>>,Acc,Fun)->
-  full_foldr(?WORD_LENGTH*?WORD_LENGTH-1,0,Acc,Fun);
-bucket_foldr(Bucket,Acc,Fun)->
-  Data = decompress(Bucket),
-  data_foldr( length(Data)-1, 0 ,lists:reverse(Data), Acc, Fun ).
-
-data_foldr(I,Stop,_Data,Acc,_Fun) when I<Stop->
-  Acc;
-data_foldr(I,Stop,[0|Tail],Acc,Fun)->
-  data_foldr(I-1,Stop,Tail,Acc,Fun);
-data_foldr(I,Stop,[?FULL_WORD|Tail],Acc,Fun)->
-  Offset = I * ?WORD_LENGTH,
-  data_foldr(I-1,Stop,Tail,full_foldr(Offset+?WORD_LENGTH-1, Offset, Acc, Fun),Fun);
-data_foldr(I,Stop,[Word|Tail],Acc,Fun)->
-  data_foldr(I-1,Stop,Tail,word_foldr(Word,I*?WORD_LENGTH,Acc,Fun),Fun).
-
-word_foldr(0,_I,Acc,_Fun)->
-  Acc;
-word_foldr(W,I,Acc,Fun) when W rem 2=:=1->
-  Fun(I,word_foldr( W bsr 1, I+1, Acc, Fun ));
-word_foldr(W,I,Acc,Fun)->
-  word_foldr(W bsr 1,I+1,Acc,Fun).
-
-full_foldr(I,Stop,Acc,Fun) when I>=Stop->
-  full_foldr(I-1,Stop,Fun(I,Acc),Fun);
-full_foldr(_I,_Stop,Acc,_Fun)->
-  Acc.
 %%------------------------------------------------------------------------------------
 %%  Bucket utilities
 %%------------------------------------------------------------------------------------
@@ -524,10 +566,10 @@ tail(Bitmap,N)->
 
 split(Bitmap,N)->
   split(Bitmap,N,<<>>).
-split(<<>>,_N, Head)->
-  { Head, <<>> };
 split(Bitmap, N, Head) when N=<0->
   { Head, Bitmap };
+split(<<>>, N, Head)->
+  { <<Head/bitstring,(fill(0,N))/bitstring>>, <<>> };
 % Short
 split(<<?F:1,V:1,?X:1,L:?SHORT,Tail/bitstring>>,N,Head) when N < L->
   { <<Head/bitstring,(fill(V,N))/bitstring>>, <<(fill(V,L-N))/bitstring,Tail/bitstring>> };
@@ -547,11 +589,17 @@ split(Bitmap, N, Head)->
   { Bucket, Tail } = first(Bitmap),
   split( Tail, N-1, <<Head/bitstring,Bucket/bitstring>> ).
 
-split_buckets(<<>>)->
-  [];
 split_buckets(Bitmap)->
-  {Bucket,Tail} = first(Bitmap),
-  [Bucket|split_buckets(Tail)].
+  split_buckets(Bitmap,_N=0).
+split_buckets(<<>>,_N)->
+  [];
+split_buckets(<<?F:1,V:1,?X:1,L:?SHORT,Tail/bitstring>>,N)->
+  [{N,<<?F:1,V:1,?X:1,L:?SHORT>>}|split_buckets(Tail,N+L)];
+split_buckets(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N)->
+  [{N,<<?F:1,V:1,?XX:1,L:?LONG>>}|split_buckets(Tail,N+L)];
+split_buckets(Bitmap,N)->
+  {Bucket, Tail} = first(Bitmap),
+  [{N,Bucket}|split_buckets(Tail,N+1)].
 
 first(<<?W:1,?X:1,HWord:?WORD_LENGTH,Rest/bitstring>>)->
   Length = bit_count(HWord) * ?WORD_LENGTH,
@@ -590,9 +638,9 @@ compress([],High,Full,_Bit,Data)->
     Full =:= ?FULL->
       <<?F:1,1:1,?X:1,1:?SHORT>>;
     Full =:=0->
-      <<?W:1,0:1,?X:1,High:?WORD_LENGTH, Data/bitstring >>;
+      <<?W:1,?X:1,High:?WORD_LENGTH, Data/bitstring >>;
     true ->
-      <<?W:1,1:1,?XX:1,High:?WORD_LENGTH, Full:?WORD_LENGTH, Data/bitstring >>
+      <<?W:1,?XX:1,High:?WORD_LENGTH, Full:?WORD_LENGTH, Data/bitstring >>
   end.
 
 find_word(0,_H, _F, <<Word:?WORD_LENGTH,_/bitstring>>)->
