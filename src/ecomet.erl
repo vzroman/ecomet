@@ -36,6 +36,7 @@
   read_field/2,read_field/3,read_fields/2,
   read_all/1,read_all/2,
   field_changes/2,
+  field_type/2,
   edit_object/2,edit_object/3,
   delete_object/1,
   copy_object/2
@@ -77,7 +78,27 @@
 -export([
   to_oid/1,
   to_path/1,
-  is_object/1
+  is_object/1,
+  is_oid/1
+]).
+
+%%=================================================================
+%%	Formatters
+%%=================================================================
+-export([
+  to_string/2,
+  from_string/2,
+
+  to_json/2,
+  from_json/2
+]).
+
+%%=================================================================
+%%	Utilities
+%%=================================================================
+-export([
+  ts/0,
+  stop/0
 ]).
 
 % @edoc ecomet object denotes map where each key is field_key()
@@ -177,6 +198,9 @@ read_all(Object,Params)->
 field_changes(Object, Field)->
   ecomet_object:field_changes(Object,Field).
 
+field_type(Object, Field)->
+  ecomet_object:field_type(Object,Field).
+
 % @edoc Deletes existing ecomet object
 -spec edit_object(Object :: object_handler(), Fields :: map()) -> ok.
 
@@ -256,6 +280,7 @@ rollback_transaction()->
 
 on_commit(Fun)->
   ecomet_transaction:on_commit(Fun).
+
 %%=================================================================
 %%	Identification API
 %%=================================================================
@@ -267,4 +292,32 @@ to_path(Object)->
 
 is_object(Object)->
   ecomet_object:is_object(Object).
+
+is_oid(Value)->
+  ecomet_object:is_oid(Value).
+
+%%=================================================================
+%%	Formatters
+%%=================================================================
+to_string(Type,Value)->
+  ecomet_types:to_string(Type,Value).
+
+from_string(Type,Value)->
+  ecomet_types:from_string(Type,Value).
+
+to_json(Type,Value)->
+  ecomet_types:to_json(Type,Value).
+
+from_json(Type,Value)->
+  ecomet_types:from_json(Type,Value).
+
+%%=================================================================
+%%	Utilities
+%%=================================================================
+ts()->
+  ecomet_lib:ts().
+
+stop()->
+  application:stop(ecomet),
+  dlss:stop().
 
