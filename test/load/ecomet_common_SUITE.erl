@@ -21,7 +21,7 @@
 -include("ecomet_test.hrl").
 
 -define(PROCESSES,2).
--define(OBJECTS,500000).
+-define(OBJECTS,10000).
 -define(STORAGE,disc).
 
 %% API
@@ -43,12 +43,16 @@
 
 %% Create group
 -export([
-  search1/1,
-  search2/1,
-  search3/1,
-  search4/1,
-  search5/1,
-  search6/1
+  search1_1/1,
+  search1_2/1,
+  search1_3/1,
+  search2_1/1,
+  search2_2/1,
+  search2_3/1,
+  search3_1/1,
+  search3_2/1,
+  search3_3/1,
+  search3_4/1
 ]).
 
 
@@ -65,20 +69,24 @@ groups()->[
     [parallel],
     [create||_<-lists:seq(1,?PROCESSES)]
   },
-  {create_log_index,
-    [parallel],
-    [create||_<-lists:seq(1,?PROCESSES)]
-  },
+%%  {create_log_index,
+%%    [parallel],
+%%    [create||_<-lists:seq(1,?PROCESSES)]
+%%  },
 
   {search,
     [sequence],
     [
-      search1,
-      search2,
-      search3,
-      search4,
-      search5,
-      search6
+      search1_1,
+      search1_2,
+      search1_3,
+      search2_1,
+      search2_2,
+      search2_3,
+      search3_1,
+      search3_2,
+      search3_3,
+      search3_4
     ]
   }
 ].
@@ -246,11 +254,11 @@ create(Config)->
 
   ok.
 
-search1(Config)->
+search1_1(Config)->
   ecomet_user:on_init_state(),
   Pattern=?config(pattern, Config),
   {_Header,Items} = ecomet_query:get([root],[<<".name">>,<<"integer">>],{'AND',[
-    {<<".pattern">>,'=',Pattern},
+    {<<".pattern">>,':=',Pattern},
     {'OR',[
       {<<"string1">>,'=',<<"value1">>},
       {<<"string1">>,'=',<<"value2">>}
@@ -259,11 +267,11 @@ search1(Config)->
   ct:pal("result: ~p",[length(Items)]),
   ok.
 
-search2(Config)->
+search1_2(Config)->
   ecomet_user:on_init_state(),
   Pattern=?config(pattern, Config),
   Res = ecomet_query:get([root],[count],{'AND',[
-    {<<".pattern">>,'=',Pattern},
+    {<<".pattern">>,':=',Pattern},
     {'OR',[
       {<<"string1">>,'=',<<"value1">>},
       {<<"string1">>,'=',<<"value2">>}
@@ -272,11 +280,11 @@ search2(Config)->
   ct:pal("result: ~p",[Res]),
   ok.
 
-search3(Config)->
+search1_3(Config)->
   ecomet_user:on_init_state(),
   Pattern=?config(pattern, Config),
   Res = ecomet_query:get([root],[<<".oid">>],{'AND',[
-    {<<".pattern">>,'=',Pattern},
+    {<<".pattern">>,':=',Pattern},
     {'OR',[
       {<<"string1">>,'=',<<"value1">>},
       {<<"string1">>,'=',<<"value2">>}
@@ -285,11 +293,11 @@ search3(Config)->
   ct:pal("result: ~p",[length(Res)]),
   ok.
 
-search4(Config)->
+search2_1(Config)->
   ecomet_user:on_init_state(),
   Pattern=?config(pattern, Config),
   {_Header,Items} = ecomet_query:get([root],[<<".name">>,<<"integer">>],{'AND',[
-    {<<".pattern">>,'=',Pattern},
+    {<<".pattern">>,':=',Pattern},
     {'OR',[
       {<<"string2">>,'=',<<"value53">>},
       {<<"string2">>,'=',<<"value2">>}
@@ -298,11 +306,11 @@ search4(Config)->
   ct:pal("result: ~p",[length(Items)]),
   ok.
 
-search5(Config)->
+search2_2(Config)->
   ecomet_user:on_init_state(),
   Pattern=?config(pattern, Config),
   Res=ecomet_query:get([root],[count],{'AND',[
-    {<<".pattern">>,'=',Pattern},
+    {<<".pattern">>,':=',Pattern},
     {'OR',[
       {<<"string2">>,'=',<<"value53">>},
       {<<"string2">>,'=',<<"value2">>}
@@ -311,15 +319,68 @@ search5(Config)->
   ct:pal("result: ~p",[Res]),
   ok.
 
-search6(Config)->
+search2_3(Config)->
   ecomet_user:on_init_state(),
   Pattern=?config(pattern, Config),
   Res=ecomet_query:get([root],[<<".oid">>],{'AND',[
-    {<<".pattern">>,'=',Pattern},
+    {<<".pattern">>,':=',Pattern},
     {'OR',[
       {<<"string2">>,'=',<<"value53">>},
       {<<"string2">>,'=',<<"value2">>}
     ]}
   ]}),
   ct:pal("result: ~p",[length(Res)]),
+  ok.
+
+search3_1(Config)->
+  ecomet_user:on_init_state(),
+
+  Pattern=?config(pattern, Config),
+  Folder=?config(folder, Config),
+
+  Res=ecomet_query:get([root],[count],{'AND',[
+    {<<".pattern">>,':=',Pattern},
+    {<<".folder">>,'=',Folder}
+  ]}),
+  ct:pal("result: ~p",[Res]),
+  Res = ?OBJECTS * ?PROCESSES,
+  ok.
+
+search3_2(Config)->
+  ecomet_user:on_init_state(),
+
+  Pattern=?config(pattern, Config),
+  Folder=?config(folder, Config),
+
+  Res=ecomet_query:get([root],[<<".oid">>],{'AND',[
+    {<<".pattern">>,':=',Pattern},
+    {<<".folder">>,'=',Folder}
+  ]},#{page=>{3,20}}),
+  ct:pal("result: ~p",[Res]),
+  ok.
+
+search3_3(Config)->
+  ecomet_user:on_init_state(),
+
+  Pattern=?config(pattern, Config),
+  Folder=?config(folder, Config),
+
+  Res=ecomet_query:get([root],[<<".oid">>],{'AND',[
+    {<<".pattern">>,':=',Pattern},
+    {<<".folder">>,'=',Folder}
+  ]}),
+  ct:pal("result: ~p",[length(Res)]),
+  ok.
+
+search3_4(Config)->
+  ecomet_user:on_init_state(),
+
+  Pattern=?config(pattern, Config),
+  Folder=?config(folder, Config),
+
+  Res=ecomet_query:get([root],[<<".oid">>,<<".name">>],{'AND',[
+    {<<".pattern">>,':=',Pattern},
+    {<<".folder">>,'=',Folder}
+  ]},#{page=>{1,10}}),
+  ct:pal("result: ~p",[Res]),
   ok.
