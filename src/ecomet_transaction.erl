@@ -48,9 +48,9 @@
 
 % Run fun within transaction
 internal(Fun)->
-  tstart(internal),
+  State = tstart(internal),
   case ecomet_backend:transaction(fun()->
-    clean(),
+    clean(State),
     Result=Fun(),
     {Log,OnCommits}=tcommit(),
     {Result,Log,OnCommits}
@@ -69,7 +69,7 @@ internal_sync(Fun)->
     Result=Fun(),
     {Log,OnCommits}=tcommit(),
     {Result,Log,OnCommits}
-                                  end) of
+  end) of
     {ok,{Result,Log,OnCommits}}->
       on_commit(Log,OnCommits),
       {ok,Result};
@@ -83,40 +83,43 @@ start()->tstart(external).
 
 % Start transaction
 tstart(Type)->
-  case get(?TKEY) of
-    % It is root transaction
-    undefined->
-      put(?TKEY,#state{
-        locks= #{},
-        dict= #{},
-        log=[],
-        droplog=[],
-        parent=none,
-        oncommit=[],
-        type=Type
-      });
-    % Subtransaction
-    Parent->
-      % Variants:
-      SubType=
-        case {Parent#state.type,Type} of
-          % parent is external. Sub run as external, even if it is claimed as internal
-          {external,_}->external;
-          % parent is internal, sub is internal. Run as internal
-          {internal,internal}->internal;
-          % parent is internal, sub is external. Error
-          {internal,external}->?ERROR(external_transaction_within_internal)
-        end,
-      put(?TKEY,#state{
-        locks=Parent#state.locks,
-        dict= Parent#state.dict,
-        log=[],
-        droplog=[],
-        parent=Parent,
-        oncommit=[],
-        type=SubType
-      })
-  end.
+  State=
+    case get(?TKEY) of
+      % It is root transaction
+      undefined->
+        #state{
+          locks= #{},
+          dict= #{},
+          log=[],
+          droplog=[],
+          parent=none,
+          oncommit=[],
+          type=Type
+        };
+      % Subtransaction
+      Parent->
+        % Variants:
+        SubType=
+          case {Parent#state.type,Type} of
+            % parent is external. Sub run as external, even if it is claimed as internal
+            {external,_}->external;
+            % parent is internal, sub is internal. Run as internal
+            {internal,internal}->internal;
+            % parent is internal, sub is external. Error
+            {internal,external}->?ERROR(external_transaction_within_internal)
+          end,
+        #state{
+          locks=Parent#state.locks,
+          dict= Parent#state.dict,
+          log=[],
+          droplog=[],
+          parent=Parent,
+          oncommit=[],
+          type=SubType
+        }
+    end,
+  put(?TKEY,State),
+  State.
 
 % Commit transaction
 commit()->
@@ -148,28 +151,8 @@ rollback()->
   end,
   ok.
 
-clean()->
-  State = get(?TKEY),
-  case State of
-    undefined->?ERROR(no_transaction);
-    % Main transaction
-    #state{parent=none}->
-      put(?TKEY,State#state{
-        locks= #{},
-        dict= #{},
-        log=[],
-        droplog=[],
-        oncommit=[]
-      });
-    #state{parent=Parent }->
-      put(?TKEY,State#state{
-        locks=Parent#state.locks,
-        dict= Parent#state.dict,
-        log=[],
-        droplog=[],
-        oncommit=[]
-      })
-  end.
+clean(State)->
+  put(?TKEY,State).
 
 % Get type of current transaction
 get_type()->

@@ -692,17 +692,17 @@ execute_local(DB,Conditions,Map,{Oper,RS})->
 		{Patterns,_}->
 			DB_RS=get_db_branch(DB,RS),
       % Patterns cycle
-			RunPatterns=if Oper=='ANDNOT'->Patterns; true->ecomet_bitmap:oper(Oper,Patterns,get_branch([],DB_RS)) end,
+			RunPatterns=if Oper=='ANDNOT'->Patterns; true->bitmap_oper(Oper,Patterns,get_branch([],DB_RS)) end,
 			ResultRS=
       	element(2,ecomet_bitmap:foldr(fun(IDP,{IDPBits,IDPMap})->
 					% IDHIGH search
 					{HBits,Conditions1}=seacrh_idhs(Conditions,DB,IDP),
-					RunHBits=if Oper=='ANDNOT'->HBits; true->ecomet_bitmap:oper(Oper,HBits,get_branch([IDP],DB_RS)) end,
+					RunHBits=if Oper=='ANDNOT'->HBits; true->bitmap_oper(Oper,HBits,get_branch([IDP],DB_RS)) end,
 					% IDH cycle
 					case element(2,ecomet_bitmap:foldr(fun(IDH,{IDHBits,IDHMap})->
 						% IDLOW search
 						LBits=search_idls(Conditions1,DB,IDP,IDH),
-						case ecomet_bitmap:oper(Oper,LBits,get_branch([IDP,IDH],DB_RS)) of
+						case bitmap_oper(Oper,LBits,get_branch([IDP,IDH],DB_RS)) of
 							none->{IDHBits,IDHMap};
 							ResIDLs->{ecomet_bitmap:set_bit(IDHBits,IDH),maps:put(IDH,ResIDLs,IDHMap)}
 						end
@@ -740,7 +740,7 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 			case ecomet_index:read_tag(DB,Storage,[],Tag) of
 				none->{AccPatterns,AccStorages};
 				StoragePatterns->
-					{ecomet_bitmap:oper('OR',AccPatterns,StoragePatterns),[{Storage,StoragePatterns,[]}|AccStorages]}
+					{bitmap_oper('OR',AccPatterns,StoragePatterns),[{Storage,StoragePatterns,[]}|AccStorages]}
 			end
 		end,{none,[]},Storages),
 	{'TAG',Tag,Config};
@@ -761,7 +761,7 @@ search_patterns({'OR',Conditions,'UNDEFINED'},DB,ExtBits)->
 	lists:foldr(fun(Condition,{AccPatterns,AccCond})->
 		PatternedCond=search_patterns(Condition,DB,ExtBits),
 		{CBits,_}=element(3,PatternedCond),
-		{ecomet_bitmap:oper('OR',AccPatterns,CBits),[PatternedCond|AccCond]}
+		{bitmap_oper('OR',AccPatterns,CBits),[PatternedCond|AccCond]}
 	end,{none,[]},Conditions),
 	% !!! EMPTY {'OR',[]} MAY KILL ALL RESULTS
 	{'OR',ResConditions,{ResPaterns,[]}};
@@ -820,13 +820,13 @@ search_type('AND',Conditions,DB,IDP)->
 			AccBits==none->{none,AccConditions};
 			true->
 				{CBits,Condition1}=seacrh_idhs(Condition,DB,IDP),
-				{ecomet_bitmap:oper('AND',AccBits,CBits),[Condition1|AccConditions]}
+				{bitmap_oper('AND',AccBits,CBits),[Condition1|AccConditions]}
 		end
 	end,{start,[]},Conditions);
 search_type('OR',Conditions,DB,IDP)->
 	lists:foldr(fun(Condition,{AccBits,AccConditions})->
 		{CBits,Condition1}=seacrh_idhs(Condition,DB,IDP),
-		{ecomet_bitmap:oper('OR',AccBits,CBits),[Condition1|AccConditions]}
+		{bitmap_oper('OR',AccBits,CBits),[Condition1|AccConditions]}
 	end,{none,[]},Conditions);
 search_type('ANDNOT',{Condition1,Condition2},DB,IDP)->
 	case seacrh_idhs(Condition1,DB,IDP) of
@@ -879,27 +879,27 @@ search_type('AND',Conditions,DB,IDP,IDH)->
 			AccBits==none->none;
 			true->
 				CBits=search_idls(Condition,DB,IDP,IDH),
-				ecomet_bitmap:oper('AND',AccBits,CBits)
+				bitmap_oper('AND',AccBits,CBits)
 		end
 	end,start,Conditions);
 search_type('OR',Conditions,DB,IDP,IDH)->
 	lists:foldl(fun(Condition,AccBits)->
 		CBits=search_idls(Condition,DB,IDP,IDH),
-		ecomet_bitmap:oper('OR',AccBits,CBits)
+		bitmap_oper('OR',AccBits,CBits)
 	end,none,Conditions);
 search_type('ANDNOT',{Condition1,Condition2},DB,IDP,IDH)->
 	case search_idls(Condition1,DB,IDP,IDH) of
 		none->none;
 		C1Bits->
 			C2Bits=search_idls(Condition2,DB,IDP,IDH),
-			ecomet_bitmap:oper('ANDNOT',C1Bits,C2Bits)
+			bitmap_oper('ANDNOT',C1Bits,C2Bits)
 	end;
 search_type('NORM',{{AND,ANDNOT},{DAND,DANDNOT}},DB,IDP,IDH)->
 	case search_idls(AND,DB,IDP,IDH) of
 		none->none;
 		ANDBits->
 			ANDNOTBits=search_idls(ANDNOT,DB,IDP,IDH),
-			case ecomet_bitmap:oper('ANDNOT',ANDBits,ANDNOTBits) of
+			case bitmap_oper('ANDNOT',ANDBits,ANDNOTBits) of
 				none->none;
 				TBits->
 					element(2,ecomet_bitmap:foldl(fun(IDL,AccBits)->
