@@ -50,7 +50,12 @@
   bit_sparse/1,
   bit_sparse_full/1,
   decompress_test/1,
-  compress_test/1
+  compress_test/1,
+  tail_test/1,
+  first_test/1,
+  split_test/1,
+  data_and_test/1,
+  data_or_test/1
 ]).
 
 
@@ -59,7 +64,12 @@ all()->
     bit_sparse,
     bit_sparse_full,
     decompress_test,
-    compress_test
+    compress_test,
+    tail_test,
+    first_test,
+    split_test,
+    data_and_test,
+    data_or_test
   ].
 
 groups()->
@@ -500,7 +510,47 @@ decompress_test(_Config) ->
   ok.
 
 compress_test(_Config) ->
-
+  <<1:1, 0:1, 0:1, 1:5>> = ecomet_bitmap:compress([]),
+  <<1:1, 0:1, 0:1, 1:5>> = ecomet_bitmap:compress([0, 0, 0, 0, 0, 0, 0]),
+  FullW =  1 bsl 64 - 1,
+  <<0:2, 1:64,(1 bsl 16 + 1):64>> = ecomet_bitmap:compress([(1 bsl 16 + 1)]),
+  <<0:1, 1:1, 7:64, 7:64>> = ecomet_bitmap:compress([FullW, FullW, FullW]),
+  <<0:1, 1:1, 5:64, 1:64, 100:64>> = ecomet_bitmap:compress([FullW, 0, 100]),
   ok.
 
 
+tail_test(_Config) ->
+  <<>> = ecomet_bitmap:tail(<<>>, <<(1 bsl 16):64>>),
+  <<42:8>> = ecomet_bitmap:tail(<<42:8>>, -1),
+  <<1:1, 1:1, 0:1, 30:5, 65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 31:5, 65>>, 1),
+  <<65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 65>>, 16),
+  <<>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 193>>, 17),
+  ok.
+
+first_test(_Config) ->
+  {<<0:1, 0:1, 257:64, 32:128>>, <<1:1>>} = ecomet_bitmap:first(<<0:1, 0:1, 257:64, 65:129>>),
+  {<<0:1, 1:1, 257:64, 256:64, 0:64>>, <<65:64>>} = ecomet_bitmap:first(<<0:1, 1:1, 257:64, 256:64, 65:128>>),
+  ok.
+
+split_test(_Config) ->
+  {<<1:1, 0:1, 0:1, 30:5>> ,<<>>} = ecomet_bitmap:split(<<>>, 30),
+  {<<1:1, 0:1, 1:1, 33:29>> ,<<>>} = ecomet_bitmap:split(<<>>, 33),
+  {<<1:1, 1:1, 0:1, 16:5>>, <<1:1, 1:1, 0:1, 14:5, 29>>} = ecomet_bitmap:split(<<1:1, 1:1, 0:1, 30:5, 29>>, 16),
+  {<<1:1, 0:1, 0:1, 30:5>>, <<29>>} = ecomet_bitmap:split(<<1:1, 0:1, 0:1, 30:5, 29>>, 30),
+  {<<1:1, 0:1, 0:1, 30:5, 1:1, 1:1, 0:1, 1:5>>, <<>>} = ecomet_bitmap:split(<<1:1, 0:1, 0:1, 30:5, 193>>, 31),
+
+  ok.
+
+data_and_test(_Config) ->
+  [] = ecomet_bitmap:data_and([], [1, 2, 3]),
+  [] = ecomet_bitmap:data_and([1, 2, 3], []),
+  [1, 2] = ecomet_bitmap:data_and([5, 2, 3], [3, 6]),
+  [1, 2] = ecomet_bitmap:data_and([3, 6], [5, 2, 3]),
+  ok.
+
+data_or_test(_Config) ->
+  [1, 2, 3] = ecomet_bitmap:data_or([1, 2, 3], []),
+  [1, 2, 3] = ecomet_bitmap:data_or([], [1, 2, 3]),
+  [3, 2, 3] = ecomet_bitmap:data_or([1, 2, 3], [2, 0]),
+  [3, 2, 3] = ecomet_bitmap:data_or([2, 0], [1, 2, 3]),
+  ok.
