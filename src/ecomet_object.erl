@@ -32,6 +32,7 @@
   commit/2,
   get_db_id/1,
   get_db_name/1,
+  get_node_id/1,
   get_pattern/1,
   get_id/1
 ]).
@@ -81,6 +82,9 @@
 -type object_handler() :: #object{}.
 -export_type([object_handler/0]).
 
+-define(NODE_ID_LENGTH,16).
+-define(DB_ID_LENGTH,8).
+-define(PATTERN_IDL_LENGTH,16).
 
 -define(ObjectID(PatternID,ObjectID),{PatternID,ObjectID}).
 -define(TRANSACTION(Fun),
@@ -138,9 +142,11 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
       },Fields),
       % Parse fields
       Fields2=ecomet_field:build_new(Map,Fields1),
+
       % Generate new ID for the object
       OID=new_id(FolderID,PatternID),
       Object=#object{ oid=OID, edit=true, map=Map, db=get_db_name(OID) },
+
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
         % Put empty storages to dict. Trick for no real lookups
@@ -356,12 +362,6 @@ is_oid(_Invalid)->
 
 %%Return object oid
 get_oid(#object{oid=OID})->OID.
-
-%%Return oid of pattern of the object
-get_pattern_oid(#object{oid=OID})->
-  get_pattern_oid(OID);
-get_pattern_oid(?ObjectID(PatternID,_))->
-  ?ObjectID(?PATTERN_PATTERN,PatternID).
 
 %% Check context user rights for the object
 check_rights(#object{}=Object)->
@@ -698,46 +698,58 @@ is_system(Object)->
 %%============================================================================
 %%	Internal helpers
 %%============================================================================
-% Unique object identification. The principles:
-% * the id is a tuple of 2 elements: { PatternID, ObjectID }
-%   - the PatternID is an id of the pattern (type) of the object. It defines its schema.
-%    The PatternID consists only of the second (ObjectID) of the related pattern
-%   - the ObjectID is a unique (system wide) id of the object within a pattern (type)
-% * the ObjectID is a composed integer that can be presented as:
-%   - IDHIGH = ObjectID div ?BITSTRING_LENGTH. It's sort of high level degree
-%   - IDLOW  = ObjectID rem ?BITSTRING_LENGTH (low level degree)
-% * The system wide increment is too expensive, so the initial increment is unique node-wide only
-%   and then the unique ID of the node is twisted into the IDHIGH. Actually it is added
-%   as 2 least significant bytes to the IDHIGH (IDHIGH = IDHIGH bsl 16 + NodeID )
-% * To be able to obtain the database to which the object belongs we insert (code) it into
-%   the IDHIGH the same way as we do with the NodeID: IDHIGH = IDHIGH bsl 8 + MountID.
-% The final IDHIGH is:
-%   <IDHIGH,NodeID:16,DB:8>
+new_id(_FolderID,?ObjectID(_,?PATTERN_PATTERN))->
+  % Patterns have system-wide unique Id via schema locking,
+  % IMPORTANT! Patterns are allowed to be created only in the root database
+  % which has 0 id, therefore the ServiceID of the pattern
+  % always equals its PatternID
+  Id = ecomet_schema:new_pattern_id(),
+  {?PATTERN_PATTERN,Id};
 new_id(FolderID,?ObjectID(_,PatternID))->
+
+  ID= ecomet_schema:local_increment({id,PatternID}),
+
+  PatternIDH = PatternID bsr ?PATTERN_IDL_LENGTH,
+  PatternIDL = PatternID rem (1 bsl ?PATTERN_IDL_LENGTH),
+
+  % The ID is unique only node-wide. To make the OID unique system-wide
+  % we add the system-wide unique nodeId (current node) to the ServiceID
+  % of the object.
+  % Additionally, to be able to define the database the object is stored in
+  % we add the database id to the serviceId too
   NodeID = ecomet_node:get_unique_id(),
   DB = ecomet_folder:get_db_id( FolderID ),
-  ID= ecomet_schema:local_increment({id,PatternID}),
-  % We can get id that is unique for this node. Unique id for entire system is too expensive.
-  % To resolve the problem we mix NodeId (it's unique for entire system) into IDH.
-  % IDH format - <IDH,NodeID:16>
-  IDH=ID div ?BITSTRING_LENGTH,
-  IDL=ID rem ?BITSTRING_LENGTH,
-  IDH1 = ((IDH bsl 16) + NodeID) bsl 8 + DB,
-  { PatternID, IDH1 * ?BITSTRING_LENGTH + IDL }.
 
-get_db_id(?ObjectID(_,ID))->
-  IDH=ID div ?BITSTRING_LENGTH,
-  IDH rem (1 bsl 8).
+  ServiceID = ((((PatternIDH bsl ?NODE_ID_LENGTH) + NodeID) bsl ?DB_ID_LENGTH + DB) bsl ?PATTERN_IDL_LENGTH) + PatternIDL,
+
+  { ServiceID, ID }.
+
+get_db_id(?ObjectID(ServiceID,_))->
+  IDH=ServiceID bsr ?PATTERN_IDL_LENGTH,
+  IDH rem (1 bsl ?DB_ID_LENGTH).
 
 get_db_name(OID)->
   ID = get_db_id(OID),
   ecomet_schema:get_db_name(ID).
+
+get_node_id(?ObjectID(ServiceID,_))->
+  IDH=ServiceID bsr (?DB_ID_LENGTH + ?PATTERN_IDL_LENGTH),
+  IDH rem (1 bsl ?NODE_ID_LENGTH).
 
 get_pattern(?ObjectID(PatternID,_))->
   PatternID.
 
 get_id(?ObjectID(_,ObjectID))->
   ObjectID.
+
+%%Return oid of pattern of the object
+get_pattern_oid(#object{oid=OID})->
+  get_pattern_oid(OID);
+get_pattern_oid(?ObjectID(ServiceID,_))->
+  IDH = ServiceID div (1 bsl (?NODE_ID_LENGTH + ?DB_ID_LENGTH + ?PATTERN_IDL_LENGTH)),
+  IDL = ServiceID rem (1 bsl ?PATTERN_IDL_LENGTH),
+  PatternID = IDH * (1 bsl ?PATTERN_IDL_LENGTH) + IDL,
+  ?ObjectID(?PATTERN_PATTERN,PatternID).
 
 % Acquire lock on object
 get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->

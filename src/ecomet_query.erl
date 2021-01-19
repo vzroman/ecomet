@@ -154,6 +154,11 @@ run_statement({transaction,Statements},Acc)->
 %   {fun,[Fields]},                 - fun on fields
 %   {<<"alias">>,{fun,[Fields]}}    - alias for fun
 % ]
+% Params:
+%%	- page => {Number,ItemsPerPage} - Paginating. Return only items for defined page
+%%	- order => [{Field1,Order},{Field2,Order}] - Sorting results
+%%	- group => [Field1,Field2] - Grouping results
+%%	- lock => none|read|write - lock level on objects
 get(DBs,Fields,Conditions)->
   get(DBs,Fields,Conditions,#{}).
 get(DBs,Fields,Conditions,Params) when is_list(Params)->

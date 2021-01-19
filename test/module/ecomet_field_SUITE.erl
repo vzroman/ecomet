@@ -17,6 +17,7 @@
 %%----------------------------------------------------------------
 -module(ecomet_field_SUITE).
 
+-include_lib("ecomet_schema.hrl").
 -include_lib("ecomet_test.hrl").
 
 %% API
@@ -149,7 +150,7 @@ end_per_testcase(_,_Config)->
 %%  Build group
 %%--------------------------------------------------------------
 build(_Config)->
-  OID = {<<"sys">>, 1},
+  OID = {?OBJECT_PATTERN, 1},
   StartT=erlang:monotonic_time(),
   ObjectDescription = #{
     <<"simple">> => ecomet_field:build_description(#{ type=>string, storage=>ramdisc }),
@@ -298,7 +299,7 @@ get_changes(_Config)->
   <<"disc_value3">> =maps:get(<<"disc_field3">>,Disc).
 
 object_creation(_Config)->
-  OID={<<"sys">>,10000},
+  OID={?OBJECT_PATTERN,10000},
   Preloaded=#{
     ram=>#{},
     ramdisc=>#{},

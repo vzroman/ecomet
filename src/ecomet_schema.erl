@@ -43,6 +43,7 @@
   get_node_id/1,
 
   %-------Pattern--------------------
+  new_pattern_id/0,
   get_pattern/1,
   set_pattern/2,
   list_patterns/0,
@@ -327,6 +328,20 @@ get_node_id(Name)->
 %%=================================================================
 %%	PATTERN API
 %%=================================================================
+new_pattern_id()->
+  case mnesia:transaction(fun()->
+    NewID=
+      case mnesia:read(?SCHEMA,pattern_id,write) of
+        []->1;
+        [#kv{value = ID}]->ID + 1
+      end,
+    ok = mnesia:write(?SCHEMA,#kv{key = pattern_id,value = NewID},write),
+    NewID
+  end) of
+    { atomic, ID }-> ID;
+    { aborted, Reason }->?ERROR(Reason)
+  end.
+
 get_pattern(ID)->
   case mnesia:dirty_read(?SCHEMA,#pattern{id=ID}) of
     [#kv{value = Value}] -> Value;
