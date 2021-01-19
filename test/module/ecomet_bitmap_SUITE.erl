@@ -42,14 +42,18 @@
 
 -export([
   bit_sparse/1,
-  bit_sparse_full/1
+  bit_sparse_full/1,
+  decompress_test/1,
+  compress_test/1
 ]).
 
 
 all()->
   [
     bit_sparse,
-    bit_sparse_full
+    bit_sparse_full,
+    decompress_test,
+    compress_test
   ].
 
 groups()->
@@ -471,5 +475,18 @@ bit_sparse_full(_Config) ->
 
   ok.
 
+decompress_test(_Config) ->
+  [] = ecomet_bitmap:decompress(<<1:2,0:64, 12 >>),
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12] = ecomet_bitmap:decompress(<<1:2,(1 bsl 16):64, 12:64, 65>>),
+  [12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65] = ecomet_bitmap:decompress(<<1:2,(1 bsl 16 + 1):64, 12:64, 65:64>>),
+
+  FullW =  1 bsl 64 - 1,
+  [FullW, FullW, FullW, FullW, FullW, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65] =
+    ecomet_bitmap:decompress(<<2:2,(1 bsl 16 + 1):64, 31:64, 65:64>>),
+  ok.
+
+compress_test(_Config) ->
+
+  ok.
 
 
