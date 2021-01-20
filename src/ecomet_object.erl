@@ -651,10 +651,11 @@ check_path(Object)->
 
 % Object can not change its folder if it is in another database
 check_db(#object{oid=OID}=Object)->
+  ct:pal("I am here, checkDB ~n~p~n", [ecomet:read_field(Object, <<".name">>)]),
   case field_changes(Object,<<".folder">>) of
     none->ok;
     {FolderID,_}->
-      case {get_db_id(OID),get_db_id(FolderID)} of
+      case {get_db_id(OID),ecomet_folder:get_db_id(FolderID)} of
         {Same,Same}->ok;
         _->
           ?ERROR(different_database)
