@@ -265,6 +265,8 @@ to_string({list,Type},Value)->
 %% ====================================================================
 %% JSON FORMATTER
 %% ====================================================================
+from_json(_Type,null)->
+  none;
 from_json(Type,Value)->
   % The default from_string parser is flexible enough
   from_string(Type,Value).
