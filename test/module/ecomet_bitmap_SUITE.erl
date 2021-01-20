@@ -500,22 +500,41 @@ bit_sparse_full(_Config) ->
   ok.
 
 decompress_test(_Config) ->
-  [] = ecomet_bitmap:decompress(<<0:2,0:64, 12 >>),
-  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12] = ecomet_bitmap:decompress(<<0:2,(1 bsl 16):64, 12:64, 65>>),
+  [] = ecomet_bitmap:decompress(<<?W:1,?X:1,0:64, 12 >>),
+
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12] = ecomet_bitmap:decompress(<<0:1, 0:1, (1 bsl 16):64, 12:64, 65>>),
+ % <<0:1, 0:1,(1 bsl 16):64, 12:64, 65>> = ecomet_bitmap:compress([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12]),
+
   [12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65] = ecomet_bitmap:decompress(<<0:2,(1 bsl 16 + 1):64, 12:64, 65:64>>),
+  %<<0:2,(1 bsl 16 + 1):64, 12:64, 65:64>> = ecomet_bitmap:compress([12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65]),
 
   FullW =  1 bsl 64 - 1,
   [FullW, FullW, FullW, FullW, FullW, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65] =
-    ecomet_bitmap:decompress(<<1:2,(1 bsl 16 + 1):64, 31:64, 65:64>>),
+    ecomet_bitmap:decompress(<<0:1, 1:1, (1 bsl 16 + 1):64, 31:64, 65:64>>),
+
+  <<0:1,1:1, (1 bsl 16 + 1):64, 31:64, 65:64>> =
+    ecomet_bitmap:compress([FullW, FullW, FullW, FullW, FullW, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65]),
   ok.
 
 compress_test(_Config) ->
-  <<1:1, 0:1, 0:1, 1:5>> = ecomet_bitmap:compress([]),
-  <<1:1, 0:1, 0:1, 1:5>> = ecomet_bitmap:compress([0, 0, 0, 0, 0, 0, 0]),
   FullW =  1 bsl 64 - 1,
+
+  <<1:1, 0:1, 0:1, 1:5>> = ecomet_bitmap:compress([]),
+  %[] = ecomet_bitmap:decompress(<<1:1, 0:1, 0:1, 1:5>>),
+
+  <<1:1, 0:1, 0:1, 1:5>> = ecomet_bitmap:compress([0, 0, 0, 0, 0, 0, 0]),
+  %[0, 0, 0, 0, 0, 0, 0] = ecomet_bitmap:decompress(<<1:1, 0:1, 0:1, 1:5>>),
+
   <<0:2, 1:64,(1 bsl 16 + 1):64>> = ecomet_bitmap:compress([(1 bsl 16 + 1)]),
+  [(1 bsl 16 + 1)] = ecomet_bitmap:decompress(<<0:2, 1:64,(1 bsl 16 + 1):64>>),
+
   <<0:1, 1:1, 7:64, 7:64>> = ecomet_bitmap:compress([FullW, FullW, FullW]),
+  [FullW, FullW, FullW] = ecomet_bitmap:decompress(<<0:1, 1:1, 7:64, 7:64>>),
+
   <<0:1, 1:1, 5:64, 1:64, 100:64>> = ecomet_bitmap:compress([FullW, 0, 100]),
+  [FullW, 0, 100] = ecomet_bitmap:decompress(<<0:1, 1:1, 5:64, 1:64, 100:64>>),
+
+
   ok.
 
 
