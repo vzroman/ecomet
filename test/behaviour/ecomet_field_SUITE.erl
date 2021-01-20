@@ -142,7 +142,7 @@ check_storage_test(_Config) ->
   ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}}, IsEmptyFalse)),
   ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {?RAMLOCAL, ?RAM}}, IsEmptyFalse)),
 
-  % TODO. Add a comment about using the folder with mecking ecomet_pattern:get_storage
+  % Mecking ecomet_pattern:get_storage
   % {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
   % PatternStorage = ecomet_pattern:get_storage(PatternID),
   % In our case <<.folder>> contain PatternStorage type and ecomet_pattern:get_storage() just return it,
@@ -160,7 +160,6 @@ check_storage_test(_Config) ->
   ok = ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}, <<".folder">> => ?DISC}, IsEmptyTrue),
 
   % NewStorage != RAMDISC and NewStorage != ?DISC %
-  % TODO. Use expected values for storage types
   ok = ecomet_field:check_storage(#{<<"storage">> => {?RAM, ?RAMLOCAL}, <<".folder">> => ?RAMLOCAL}, IsEmptyTrue),
   ok = ecomet_field:check_storage(#{<<"storage">> => {?RAMLOCAL, ?DISC}, <<".folder">> => <<"MyFolder">>},IsEmptyTrue),
   ?assertError(invalid_storage_type, ecomet_field:check_storage(#{<<"storage">> => {<<"HDFS">>, <<"SSD">>}, <<"Green">> => <<"Day">>}, IsEmptyTrue)),
@@ -171,7 +170,6 @@ check_storage_test(_Config) ->
 .
 
 to_schema_test(_Config) ->
-  % TODO. Use valid parameters and values
   Params1 = #{
     <<"type">> => integer,
     <<"subtype">> => none,
@@ -356,15 +354,11 @@ check_default_test(_Config) ->
     <<"subtype">> => none
   }, IsEmptyTrue)),
 
-  % TODO. The check_default converts the new value according to the field type. Add the check for the side effect
-
   meck:unload(ecomet)
 
 .
 
 on_create_test(_Config) ->
-
-  % TODO. Comment the code, add negative tests, do the create via true object create
 
   meck:new([ecomet, ecomet_pattern]),
   meck:expect(ecomet, field_changes, fun(Object, Field) -> maps:get(Field, Object, none) end),
@@ -431,7 +425,6 @@ on_create_test(_Config) ->
 
 
 on_edit_test(_Config) ->
-  % TODO. Comment the code, add negative tests
 
   meck:new([ecomet, ecomet_pattern]),
   meck:expect(ecomet, field_changes, fun(Object, Field) -> maps:get(Field, Object, none) end),
@@ -472,7 +465,6 @@ on_edit_test(_Config) ->
 
 on_delete_test(_Config) ->
 
-  % TODO. Comment the code, add negative tests
   meck:new([ecomet, ecomet_pattern]),
   meck:expect(ecomet, open,
     fun(_PatternID, _None) ->
@@ -486,6 +478,11 @@ on_delete_test(_Config) ->
   meck:expect(ecomet_pattern, remove_field, fun(_PatternID, _Name) -> ok end),
   meck:expect(ecomet_pattern, is_empty, fun(PatternID) -> PatternID end),
 
+  % Mecking: Some checks are performed only when a field is deleted but not its
+  % pattern. Whe the pattern is deleted the contained fields are deleted without
+  % these additional checks. During delete operation to check if it is the containing
+  % pattern delete operation the code tries to open the pattern, we meck this procedure
+  % to make a difference between the two cases
   % Deleting object %
   put(open, false),
   ok = ecomet_field:on_delete(#{<<".folder">> => true, <<".name">> => <<"NazGul">>}),

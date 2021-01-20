@@ -53,6 +53,7 @@
 %%		Test API
 %%====================================================================
 -ifdef(TEST).
+
 -export([
   check_handler/1,
   check_handler_module/1,
@@ -60,6 +61,7 @@
   set_parents/1,
   wrap_transaction/2
 ]).
+
 -endif.
 
 %%===========================================================================
@@ -258,6 +260,7 @@ remove_field(Pattern,Field)->
 %%	Ecomet object behaviour
 %%=================================================================
 on_create(Object)->
+  check_db(Object),
   check_handler(Object),
   set_parents(Object),
   wrap_transaction(?OID(Object),fun(_)->
@@ -284,6 +287,13 @@ check_parent(Object)->
   case ecomet:field_changes(Object,<<"parent_pattern">>) of
     none->ok;
     _->?ERROR(cannot_change_parent)
+  end.
+
+check_db(Object)->
+  {ok,FolderID} = ecomet:read_field(Object,<<".folder">>),
+  case ecomet_object:get_db_name(FolderID) of
+    ?ROOT->ok;
+    _->?ERROR(not_root_database)
   end.
 
 check_handler(Object)->

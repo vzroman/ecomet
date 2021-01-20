@@ -77,13 +77,13 @@ check_storage_type_test(_Config) ->
 
   % Persistent folders can contain any types of objects %
   % Persistent means FolderStorage != ?RAM %
-  ok = ecomet_object:check_storage_type({?RAM, #{<<".folder">> => {?DISC, none}}}),
-  ok = ecomet_object:check_storage_type({?RAMDISC, #{<<".folder">> => {?RAMLOCAL, none}} }),
+  ok = ecomet_object:check_storage_type({ ?RAM, #{<<".folder">> => {?DISC, none}}}),
+  ok = ecomet_object:check_storage_type({ ?RAMDISC, #{<<".folder">> => {?RAMLOCAL, none}} }),
 
   % Ram only folders cannot contain persistent objects %
   % It means in case FolderStorage == ?RAM, object storage could be only ?RAM%
   ok = ecomet_object:check_storage_type({ ?RAM, #{<<".folder">> => {?RAM, none}} }),
-  ?assertError(ram_only_folder, ecomet_object:check_storage_type({ ?DISC, #{<<".folder">> => {?RAM, none}}})),
+  ?assertError(ram_only_folder, ecomet_object:check_storage_type({ ?DISC, #{<<".folder">> => {?RAM, none}} })),
 
   meck:unload([ecomet, ecomet_pattern]),
 
@@ -96,11 +96,21 @@ check_path_test(_Config) ->
     <<".folder">> => {2, 1},
     <<".pattern">> => {3, 2}
   }),
-  ok = ecomet:edit_object(Object, #{<<".folder">> => {2, 2}}),
 
   % We are trying to create object with invalid name %
   ?assertError({"the '/' symbol is not allowed in names", _},
     ecomet:edit_object(Object, #{<<".name">> => <<"Se/verus">>})),
+
+  Object2 = ecomet:create_object(#{
+    <<".name">> => <<"Forest">>,
+    <<".folder">> => {2, 2},
+    <<".pattern">> => {3, 2}
+  }),
+
+  ?assertError({{not_unique,<<"Forest">>}, _}, ecomet:edit_object(Object, #{<<".folder">> => {2, 2}})),
+  ok = ecomet:delete_object(Object2),
+  ok = ecomet:edit_object(Object, #{<<".folder">> => {2, 2}}),
+
   % Every object must have unique name %
   ?assertError({{not_unique,<<"Forest">>}, _}, ecomet:create_object(#{
     <<".name">> => <<"Forest">>,
@@ -109,8 +119,7 @@ check_path_test(_Config) ->
   })),
 
   ok = ecomet:delete_object(Object),
-  ok
-.
+  ok.
 
 edit_rights_test(_Config) ->
   ecomet_user:on_init_state(),
@@ -141,6 +150,9 @@ check_db_test(_Config) ->
     <<".readgroups">> => []
   }),
   ok = ecomet:edit_object(Object, #{<<".folder">> => {2, 2}}),
+
+  % TODO. Create a real database and mount it to some folder.
+  % then try to move the object to this new folder
   ?assertError({different_database, _}, ecomet:edit_object(Object, #{<<".folder">> => {2, 70000}})),
   ecomet:delete_object(Object),
   ok
@@ -157,8 +169,9 @@ on_create_test(_Config) ->
     <<".readgroups">> => [{2, 3}],
     <<".writegroups">> => [{4, 5}]
   }),
-  {ok, Writeg} = ecomet_object:read_field(Object, <<".writegroups">>),
-  {ok, Readg} = ecomet_object:read_field(Object, <<".readgroups">>),
+  {ok, Writeg=[{4, 5}]} = ecomet_object:read_field(Object, <<".writegroups">>),
+  {ok, Readg=[{2, 3},{4, 5}]} = ecomet_object:read_field(Object, <<".readgroups">>),
+
   ct:pal("Why ~p ~p", [Readg, Writeg]),
   ok = ecomet:edit_object(Object, #{<<".writegroups">> => [{1, 2}, {4, 3}], <<".readgroups">> => [{2 ,3}]}),
   {ok, WriteG} = ecomet_object:read_field(Object, <<".writegroups">>),
@@ -166,6 +179,7 @@ on_create_test(_Config) ->
 
   [] = WriteG -- ReadG,
   {ok, Time} = ecomet_object:read_field(Object, <<".ts">>),
+  true = is_integer(Time),
   ct:pal("time ~p", [Time]),
 
 

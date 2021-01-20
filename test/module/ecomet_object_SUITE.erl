@@ -256,9 +256,11 @@ new_id(_Config)->
     <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
     <<".ts">>=>ecomet_lib:log_ts()
   }),
-  ct:pal("Folder1: ~p", [Folder1]),    %% FOLDER 1 Object   OID = {2,3}
-  {?FOLDER_PATTERN,ID1} = ecomet_object:get_oid(Folder1),
-  IDL1 = ID1 rem ?BITSTRING_LENGTH,
+  ct:pal("Folder1: ~p", [Folder1]),
+  Folder1OID = ecomet_object:get_oid(Folder1),
+  ID1 = ecomet_object:get_id(Folder1OID),
+  0 = ecomet_object:get_db_id(Folder1OID),
+  root = ecomet_object:get_db_name(Folder1OID),
 
 %% FOLDER 2
   Folder2 = ecomet:create_object(#{
@@ -267,44 +269,38 @@ new_id(_Config)->
     <<".pattern">> => {?PATTERN_PATTERN,?FOLDER_PATTERN},
     <<".ts">>=>ecomet_lib:log_ts()
   }),
-  ct:pal("Folder2: ~p", [Folder2]),     %% FOLDER 1 Object   OID = {2,4}
-  {?FOLDER_PATTERN,ID2} = ecomet_object:get_oid(Folder2),
-  IDH2 = ID2 div ?BITSTRING_LENGTH,
-  1 = ID2 rem ?BITSTRING_LENGTH - IDL1, %% It is the low id which is increment for local pattern
-  0 = IDH2 rem (1 bsl 8),      %% to find the id of DB
-  0 = ( IDH2 bsr 8 ) rem (1 bsl 16 ),   %% to find the id of Node
-  IDHIGH2 = IDH2 bsr 24,
-  ct:pal("IDHIGH2: ~p", [IDHIGH2]),
+  ct:pal("Folder2: ~p", [Folder2]),
+  Folder2OID = ecomet_object:get_oid(Folder2),
+  1 = ecomet_object:get_id(Folder2OID) - ID1, %% It is the low id which is increment for local pattern
+  0 = ecomet_object:get_db_id(Folder2OID),
+  root = ecomet_object:get_db_name(Folder2OID),
 
 
 %% Add DB to the schema and mount it to folder_2
   {ok, ID_DB_TEST} = ecomet_schema:add_db(test_db),
-  ok = ecomet_schema:mount_db({?FOLDER_PATTERN,ID2}, test_db),
+  ok = ecomet_schema:mount_db(Folder2OID, test_db),
   ct:pal("ID_DB: ~p ", [ID_DB_TEST]),
 
 %% FOLDER 3
-  {?FOLDER_PATTERN,ID3}=ecomet_object:new_id({?FOLDER_PATTERN,ID2},{?PATTERN_PATTERN,?FOLDER_PATTERN}),
-  ct:pal("Folder3: ~p", [{?FOLDER_PATTERN,ID3}]),     %% FOLDER 3 Object   OID = {2,65541}
-  IDH3 = ID3 div ?BITSTRING_LENGTH,
-  2 = ID3 rem ?BITSTRING_LENGTH - IDL1,   %% It is the low id which is incremnt for local pattern
-%%  ct:pal("IDD: ~p", [IDD]),
-  1 = IDH3 rem (1 bsl 8),      %% to find the id of DB, as we've added a new db it is incremented by 1
-  0 = ( IDH3 bsr 8 ) rem (1 bsl 16 ),   %% to find the id of Node
-  IDHIGH3 = IDH3 bsr 24,
-  ct:pal("IDHIGH3: ~p", [IDHIGH3]),
+  Folder3OID=ecomet_object:new_id(Folder2OID,{?PATTERN_PATTERN,?FOLDER_PATTERN}),
+  ct:pal("Folder3: ~p", [Folder3OID]),
+  2 = ecomet_object:get_id(Folder3OID) - ID1,   %% It is the low id which is increment for local pattern
+  ID_DB_TEST = ecomet_object:get_db_id(Folder3OID),
+  test_db = ecomet_object:get_db_name(Folder3OID),
+
+
 %% Add node
   { ok, NodeId } = ecomet_schema:add_node(node()),
   ct:pal("NodeId: ~p", [NodeId]),   %% new update to 1
 
 %% FOLDER 4
-  {?FOLDER_PATTERN,ID4}=ecomet_object:new_id({?FOLDER_PATTERN,ID2},{?PATTERN_PATTERN,?FOLDER_PATTERN}),
-  ct:pal("Folder4: ~p", [{?FOLDER_PATTERN,ID4}]),    %% FOLDER 4 which have to have a new node_id
-  IDH4 = ID4 div ?BITSTRING_LENGTH,
-  3 = ID4 rem ?BITSTRING_LENGTH - IDL1,   %% It is the low id which is incremnt for local pattern
-  1 = IDH4 rem (1 bsl 8),      %% to find the id of DB, as we've added a new db it is incremented by 1
-  1 = ( IDH4 bsr 8 ) rem (1 bsl 16 ),   %% to find the id of Node
-  IDHIGH4 = IDH4 bsr 24,
-  ct:pal("IDHIGH4: ~p", [IDHIGH4]),
+  Folder4OID=ecomet_object:new_id(Folder2OID,{?PATTERN_PATTERN,?FOLDER_PATTERN}),
+  ct:pal("Folder4: ~p", [Folder4OID]),    %% FOLDER 4 which have to have a new node_id
+  3 = ecomet_object:get_id(Folder4OID) - ID1,   %% It is the low id which is incremnt for local pattern
+  NodeId = ecomet_object:get_node_id(Folder4OID),
+  ID_DB_TEST = ecomet_object:get_db_id(Folder4OID),
+  test_db = ecomet_object:get_db_name(Folder4OID),
+
 ok.
 
 

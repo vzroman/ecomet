@@ -228,12 +228,12 @@ build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN)->
 bitmap_level(add,DB,Storage,Tag,ID)->
   case ecomet_backend:read(DB,?INDEX,Storage,Tag,write) of
     not_found->
-      Value = ecomet_bits:bubbles_add([],ID),
+      Value = ecomet_bitmap:zip(ecomet_bitmap:set_bit(<<>>,ID)),
       ok = ecomet_backend:write(DB,?INDEX,Storage,Tag,Value),
       % The index didn't exist before, we need to add the value to the upper level also
       up;
     LevelValue->
-      Value = ecomet_bits:bubbles_add(LevelValue,ID),
+      Value = ecomet_bitmap:zip(ecomet_bitmap:set_bit(LevelValue,ID)),
       ok = ecomet_backend:write(DB,?INDEX,Storage,Tag,Value),
       % The index already exists, no need to update the upper level
       stop
@@ -249,12 +249,13 @@ bitmap_level(del,DB,Storage,Tag,ID)->
       % We are not sure if the upper level index exits, so we need to try to update it too
       up;
     LevelValue->
-      case ecomet_bits:bubbles_remove(LevelValue,ID) of
-        []->
+      LeftValue = ecomet_bitmap:zip(ecomet_bitmap:reset_bit(LevelValue,ID)),
+      case ecomet_bitmap:is_empty(LeftValue) of
+        true->
           ok = ecomet_backend:delete(DB,?INDEX,Storage,Tag),
           % The level is deleted, we need to update the upper level index
           up;
-        LeftValue->
+        _->
           ok = ecomet_backend:write(DB,?INDEX,Storage,Tag,LeftValue),
           % The level is updated (not removed) therefore there is no need to update the upper level
           stop
@@ -274,7 +275,7 @@ read_tag(DB,Storage,Vector,Tag)->
     end,
   case ecomet_backend:dirty_read(DB,?INDEX,Storage,Key) of
     not_found->none;
-    IndexValue-> ecomet_bits:bubbles_to_bits(IndexValue)
+    IndexValue-> IndexValue
   end.
 
 get_supported_types()->
