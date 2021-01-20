@@ -647,7 +647,6 @@ compress([0|Tail],High,Full,Bit,Acc)->
 compress([?FULL|Tail],High,Full,Bit,Acc)->
   compress(Tail,High bor Bit,Full bor Bit, Bit bsl 1 ,Acc);
 compress([Word|Tail],High,Full,Bit,Acc)->
-  ct:pal("data ~p~n~p~n", [Acc, Word]),
   compress(Tail, High bor Bit, Full, Bit bsl 1, <<Acc/bitstring,Word:?WORD_LENGTH>> );
 compress([],High,Full,_Bit,Data)->
   %ct:pal("I am here"),

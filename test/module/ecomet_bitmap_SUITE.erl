@@ -49,13 +49,13 @@
 -export([
   bit_sparse/1,
   bit_sparse_full/1,
-  decompress_test/1,
-  compress_test/1,
+  compress_decompress_test/1,
   tail_test/1,
   first_test/1,
   split_test/1,
   data_and_test/1,
-  data_or_test/1
+  data_or_test/1,
+  bit_and_test/1
 ]).
 
 
@@ -63,13 +63,13 @@ all()->
   [
     bit_sparse,
     bit_sparse_full,
-    decompress_test,
-    compress_test,
+    compress_decompress_test,
     tail_test,
     first_test,
     split_test,
     data_and_test,
-    data_or_test
+    data_or_test,
+    bit_and_test
   ].
 
 groups()->
@@ -499,41 +499,109 @@ bit_sparse_full(_Config) ->
 
   ok.
 
-decompress_test(_Config) ->
-  [] = ecomet_bitmap:decompress(<<?W:1,?X:1,0:64, 12 >>),
+bit_count(Value)->
+  bit_count(Value,0).
+bit_count(0,Acc)->
+  Acc;
+bit_count(Value,Acc)->
+  Bit = Value rem 2,
+  bit_count(Value bsr 1,Acc+Bit).
 
-  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12] = ecomet_bitmap:decompress(<<0:1, 0:1, (1 bsl 16):64, 12:64, 65>>),
- % <<0:1, 0:1,(1 bsl 16):64, 12:64, 65>> = ecomet_bitmap:compress([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12]),
+payload_generator(0, _UpperBound) ->
+  <<>>;
+payload_generator(N, UpperBound) ->
+  Payload = rand:uniform(UpperBound),
+  Tail = payload_generator(N - 1, UpperBound),
+  <<Payload:?WORD_LENGTH, Tail/bitstring>>.
 
-  [12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65] = ecomet_bitmap:decompress(<<0:2,(1 bsl 16 + 1):64, 12:64, 65:64>>),
-  %<<0:2,(1 bsl 16 + 1):64, 12:64, 65:64>> = ecomet_bitmap:compress([12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65]),
+bucket_generator(0) ->
+  [];
+bucket_generator(TestNumber) ->
+  Hword = rand:uniform(1 bsl 63),
+  Payload = payload_generator(bit_count(Hword), 1 bsl 63),
+  [{Hword, Payload} | bucket_generator(TestNumber - 1)].
 
-  FullW =  1 bsl 64 - 1,
-  [FullW, FullW, FullW, FullW, FullW, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65] =
-    ecomet_bitmap:decompress(<<0:1, 1:1, (1 bsl 16 + 1):64, 31:64, 65:64>>),
 
-  <<0:1,1:1, (1 bsl 16 + 1):64, 31:64, 65:64>> =
-    ecomet_bitmap:compress([FullW, FullW, FullW, FullW, FullW, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65]),
-  ok.
+compress_decompress_test(_Config) ->
 
-compress_test(_Config) ->
-  FullW =  1 bsl 64 - 1,
+  ct:pal("Checking random generator ~n~p~n", [payload_generator(5, 10)]),
+  [{Hwords, Payloads}] = bucket_generator(1),
+  <<?W:1, ?X:1, Hwords:64, Payloads/bitstring>> =
+    ecomet_bitmap:compress(ecomet_bitmap:decompress(<<?W:1, ?X:1, Hwords:64, Payloads/bitstring>>)),
 
-  <<1:1, 0:1, 0:1, 1:5>> = ecomet_bitmap:compress([]),
-  %[] = ecomet_bitmap:decompress(<<1:1, 0:1, 0:1, 1:5>>),
+  Generator =  bucket_generator(100),
+  [begin
+   Bucket = <<?W:1, ?X:1, Hword:64, Payload/bitstring>>,
+   Bucket = ecomet_bitmap:compress(ecomet_bitmap:decompress(Bucket))
+   end
+    || {Hword, Payload} <-Generator
+  ],
+  ct:pal("RANDOM very cool thing"),
+  Tmp1 = <<?W:1, ?X:1, 1:64, 123123123:?WORD_LENGTH>>,
+  Tmp1 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp1)),
 
-  <<1:1, 0:1, 0:1, 1:5>> = ecomet_bitmap:compress([0, 0, 0, 0, 0, 0, 0]),
-  %[0, 0, 0, 0, 0, 0, 0] = ecomet_bitmap:decompress(<<1:1, 0:1, 0:1, 1:5>>),
+  Tmp2 = <<?W:1, ?X:1, 255:64,
+    1253464563455:?WORD_LENGTH,
+    32654563455:?WORD_LENGTH,
+    3295465663455:?WORD_LENGTH,
+    32537435634585:?WORD_LENGTH,
+    3253464896636345:?WORD_LENGTH,
+    32534642368975:?WORD_LENGTH,
+    14604563455:?WORD_LENGTH,
+    853664563455:?WORD_LENGTH
+  >>,
+  Tmp2 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp2)),
 
-  <<0:2, 1:64,(1 bsl 16 + 1):64>> = ecomet_bitmap:compress([(1 bsl 16 + 1)]),
-  [(1 bsl 16 + 1)] = ecomet_bitmap:decompress(<<0:2, 1:64,(1 bsl 16 + 1):64>>),
+  Tmp3 = <<?W:1, ?X:1, (1 bsl 63 + 1):64,
+    35834556575746:?WORD_LENGTH,
+    1234567895746:?WORD_LENGTH
+  >>,
+  Tmp3 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp3)),
 
-  <<0:1, 1:1, 7:64, 7:64>> = ecomet_bitmap:compress([FullW, FullW, FullW]),
-  [FullW, FullW, FullW] = ecomet_bitmap:decompress(<<0:1, 1:1, 7:64, 7:64>>),
+  Tmp4 = <<?W:1, ?X:1, (42 bsl 30):64,
+    985483584:?WORD_LENGTH,
+    6456745674564:?WORD_LENGTH,
+    45789479575:?WORD_LENGTH
+  >>,
+  Tmp4 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp4)),
 
-  <<0:1, 1:1, 5:64, 1:64, 100:64>> = ecomet_bitmap:compress([FullW, 0, 100]),
-  [FullW, 0, 100] = ecomet_bitmap:decompress(<<0:1, 1:1, 5:64, 1:64, 100:64>>),
+  Tmp5 = <<?W:1, ?X:1, (2#1010101010101 bsl 10):64,
+    5345345:?WORD_LENGTH,
+    99645604:?WORD_LENGTH,
+    9349534636:?WORD_LENGTH,
+    124791582:?WORD_LENGTH,
+    97534636:?WORD_LENGTH,
+    84584700:?WORD_LENGTH,
+    111111111:?WORD_LENGTH
+  >>,
+  Tmp5 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp5)),
 
+  Tmp6 = <<?W:1, ?XX:1, 3:64, 2:64,
+    123123:?WORD_LENGTH
+  >>,
+  Tmp6 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp6)),
+
+  Tmp7 = <<?W:1, ?XX:1, 255:64, 53:64,
+    555353:?WORD_LENGTH,
+    123456789:?WORD_LENGTH,
+    9876543:?WORD_LENGTH,
+    696969:?WORD_LENGTH
+  >>,
+  Tmp7 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp7)),
+
+  Tmp8 = <<?W:1, ?XX:1, 2#111010101001:64, 2#110010100000:64,
+    54564564:?WORD_LENGTH,
+    89567957:?WORD_LENGTH,
+    9586565:?WORD_LENGTH
+  >>,
+  Tmp8 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp8)),
+
+  Tmp9 = <<?W:1, ?XX:1, 2#101100111111111:64, 2#111111111:64,
+    77868678:?WORD_LENGTH,
+    7292718:?WORD_LENGTH,
+    471998:?WORD_LENGTH
+  >>,
+  Tmp9 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp9)),
 
   ok.
 
@@ -572,4 +640,9 @@ data_or_test(_Config) ->
   [1, 2, 3] = ecomet_bitmap:data_or([], [1, 2, 3]),
   [3, 2, 3] = ecomet_bitmap:data_or([1, 2, 3], [2, 0]),
   [3, 2, 3] = ecomet_bitmap:data_or([2, 0], [1, 2, 3]),
+  ok.
+
+
+bit_and_test(_Config) ->
+  %<<0:64>> = ecomet_bitmap:bit_and(<<0:64>>, <<255:64>>),
   ok.
