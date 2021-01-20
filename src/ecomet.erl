@@ -77,6 +77,7 @@
 %%=================================================================
 -export([
   to_oid/1,
+  path2oid/1,
   to_path/1,
   is_object/1,
   is_oid/1,
@@ -290,6 +291,9 @@ on_commit(Fun)->
 %%=================================================================
 to_oid(Object)->
   ecomet_lib:to_oid(Object).
+
+path2oid(Path)->
+  ecomet_folder:path2oid(Path).
 
 to_path(Object)->
   ecomet_lib:to_path(Object).
