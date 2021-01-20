@@ -230,7 +230,7 @@ from_string({list,Type},Value) when is_binary(Value)->
   case string_to_term(Value) of
     {ok,List} when is_list(List)->
       from_string({list,Type},List);
-    _->?ERROR(invalid_list)
+    {ok,Term}->[from_string(Type,Term)]
   end;
 from_string({list,_Type},Invalid)->
   ?ERROR(Invalid).

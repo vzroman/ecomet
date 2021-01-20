@@ -305,10 +305,15 @@ check_handler(Object)->
   end.
 
 update_behaviour(Object)->
-  ParentID=get_parent(Object),
-  ParentHandlers=get_behaviours(ParentID),
-  update_behaviour(Object,ParentHandlers),
-  ok.
+  case { ?OID(Object), get_parent(Object) } of
+    { Same, Same }->
+      % Protection from loops
+      ok;
+    { _, ParentID }->
+      ParentHandlers=get_behaviours(ParentID),
+      update_behaviour(Object,ParentHandlers),
+      ok
+  end.
 
 
 check_handler_module(Module)->
