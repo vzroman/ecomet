@@ -159,14 +159,14 @@ get_children(Pattern)->
   ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
     {<<".pattern">>,':=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
     {<<"parent_pattern">>,'=',OID}
-  ]}).
+  ]})--[OID].
 
 get_children_recursive(Pattern)->
   OID=?OID(Pattern),
   ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
     {<<".pattern">>,':=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
     {<<"parents">>,'=',OID}
-  ]}).
+  ]})--[OID].
 
 get_fields(Pattern)->
   Map = get_map(Pattern),
@@ -370,7 +370,7 @@ inherit_fields(PatternID,ParentFields)->
        Child2 = ecomet_field:from_schema(Child1),
        % Edit object
        {ok, FieldID} =ecomet_folder:find_object(PatternID, Name),
-       {ok, Field} = ecomet:open(FieldID,write),
+       Field = ecomet:open(FieldID,write),
        ok = ecomet:edit_object(Field,Child2);
      _->
        % CASE 2. The field is not defined in the child yet, create a new one
