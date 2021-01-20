@@ -96,8 +96,6 @@
 -define(FOLDER_SCHEMA,?OBJECT_SCHEMA#{
   <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
   <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-  <<"only_patterns">>=>#{ type => list, subtype => link },
-  <<"exclude_patterns">>=>#{ type => list, subtype => link },
   <<"recursive_rights">> =>#{ type => bool },
   <<"database">> =>#{ type => link, index=> [simple] }
 }).
