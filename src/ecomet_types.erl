@@ -112,6 +112,10 @@ get_supported_types()->
 %% ====================================================================
 %% STRING FORMATTER
 %% ====================================================================
+from_string(string,<<>>)->
+  none;
+from_string(string,<<"none">>)->
+  none;
 %---------String-----------------------
 from_string(string,Value)
   when is_binary(Value);is_list(Value)->
@@ -235,7 +239,7 @@ from_string({list,_Type},Invalid)->
 %%	Convert value from ecomet internal type to string
 %%---------------------------------------------------------------------
 to_string(_Type,none)->
-  <<>>;
+  <<"none">>;
 to_string(string,Value)->
   Value;
 to_string(integer,Value)->
