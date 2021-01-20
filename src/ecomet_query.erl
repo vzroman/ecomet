@@ -246,6 +246,14 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
   % Fields dependencies
   FieldsDeps=ordsets:union([field_args(F)|| {_,F}<-maps:to_list(ReadMap) ]),
 
+  % If a client subscribed only on .oid field then ecomet considers
+  % that it is interested all the updates for the objects
+  FieldsDeps1=
+    case Fields of
+      [<<".oid">>]->[<<"@ANY@">>];
+      _->FieldsDeps
+    end,
+
   % Compile the subscription constraints
   CompiledSubscription = ecomet_resultset:subscription_prepare(Conditions),
 
@@ -253,7 +261,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
   TagsDeps = ecomet_resultset:subscription_fields(CompiledSubscription),
 
   % The total fields dependencies
-  Deps = ordsets:union([FieldsDeps,TagsDeps,[<<".readgroups">>]]),
+  Deps = ordsets:union([FieldsDeps1,TagsDeps,[<<".readgroups">>]]),
 
   % User rights
   Rights=
@@ -412,7 +420,7 @@ on_commit(#ecomet_log{
     {'OR',[{<<"rights">>,'=',T} || T <- [is_admin|RAdd1 ++ ROld1 ++ RDel1] ]},
 
   Dependencies =
-    {'OR',[{<<"dependencies">>,'=',F} || F <- ChangedFields1]},
+    {'OR',[{<<"dependencies">>,'=',F} || F <- [<<"@ANY@">>|ChangedFields1]]},
 
   Query = ecomet_resultset:subscription_compile({'AND',[
     Index,

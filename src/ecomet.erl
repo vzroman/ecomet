@@ -33,7 +33,7 @@
 -export([
   create_object/1,create_object/2,
   open/1,open/2,open/3,open_nolock/1,open_rlock/1,open_wlock/1,
-  read_field/2,read_field/3,read_fields/2,
+  read_field/2,read_field/3,read_fields/2,read_fields/3,
   read_all/1,read_all/2,
   field_changes/2,
   field_type/2,
@@ -79,7 +79,8 @@
   to_oid/1,
   to_path/1,
   is_object/1,
-  is_oid/1
+  is_oid/1,
+  get_pattern_oid/1
 ]).
 
 %%=================================================================
@@ -188,6 +189,9 @@ read_field(Object, Field, Params) ->
 read_fields(Object, Fields)->
   ecomet_object:read_fields(Object, Fields).
 
+read_fields(Object, Fields, Params)->
+  ecomet_object:read_fields(Object, Fields, Params).
+
 read_all(Object)->
   ecomet_object:read_all(Object).
 
@@ -295,6 +299,9 @@ is_object(Object)->
 
 is_oid(Value)->
   ecomet_object:is_oid(Value).
+
+get_pattern_oid(ID)->
+  ecomet_object:get_pattern_oid(ID).
 
 %%=================================================================
 %%	Formatters

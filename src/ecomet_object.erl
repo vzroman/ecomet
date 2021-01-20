@@ -34,6 +34,7 @@
   get_db_name/1,
   get_node_id/1,
   get_pattern/1,
+  get_pattern_oid/1,
   get_id/1
 ]).
 
