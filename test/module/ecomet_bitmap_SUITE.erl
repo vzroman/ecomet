@@ -507,6 +507,9 @@ bit_count(Value,Acc)->
   Bit = Value rem 2,
   bit_count(Value bsr 1,Acc+Bit).
 
+% Generate N blocks. Block is a sequence of bits.
+% Each block size is WORD_LENGTH(64 bit). Each block <= UpperBound
+% Return N blocks as bitstring
 payload_generator(0, _UpperBound) ->
   <<>>;
 payload_generator(N, UpperBound) ->
@@ -514,95 +517,47 @@ payload_generator(N, UpperBound) ->
   Tail = payload_generator(N - 1, UpperBound),
   <<Payload:?WORD_LENGTH, Tail/bitstring>>.
 
-bucket_generator(0) ->
+% Generate TestNumber Buckets
+% Actually it is BitMap%
+bucket_generator(0, _) ->
   [];
-bucket_generator(TestNumber) ->
-  Hword = rand:uniform(1 bsl 63),
-  Payload = payload_generator(bit_count(Hword), 1 bsl 63),
-  [{Hword, Payload} | bucket_generator(TestNumber - 1)].
-
+bucket_generator(TestNumber, false) ->
+  Hword = rand:uniform(1 bsl 64 - 1),
+  Payload = payload_generator(bit_count(Hword), 1 bsl 64 - 1),
+  [{Hword, Payload} | bucket_generator(TestNumber - 1, false)];
+bucket_generator(TestNumber, true) ->
+  if TestNumber rem 2 =:= 0 ->
+    Hword = 1 bsl 64 - 1,
+    FullWord = rand:uniform(1 bsl 64 - 1),
+    BitN = 64 - bit_count(FullWord);
+    true ->
+      Hword = rand:uniform(1 bsl 64 - 1) bor 1,
+      FullWord = 1,
+      BitN = bit_count(Hword) - 1
+  end,
+  Payload = payload_generator(BitN, 1 bsl 64 - 1),
+  [{Hword, FullWord, Payload} | bucket_generator(TestNumber - 1, true)].
 
 compress_decompress_test(_Config) ->
-
   ct:pal("Checking random generator ~n~p~n", [payload_generator(5, 10)]),
-  [{Hwords, Payloads}] = bucket_generator(1),
-  <<?W:1, ?X:1, Hwords:64, Payloads/bitstring>> =
-    ecomet_bitmap:compress(ecomet_bitmap:decompress(<<?W:1, ?X:1, Hwords:64, Payloads/bitstring>>)),
-
-  Generator =  bucket_generator(100),
+  BucketNumber = 1000,
+  Generator =  bucket_generator(BucketNumber, false),
   [begin
-   Bucket = <<?W:1, ?X:1, Hword:64, Payload/bitstring>>,
-   Bucket = ecomet_bitmap:compress(ecomet_bitmap:decompress(Bucket))
+    Bucket = <<?W:1, ?X:1, Hword:64, Payload/bitstring>>,
+    Bucket = ecomet_bitmap:compress(ecomet_bitmap:decompress(Bucket))
    end
     || {Hword, Payload} <-Generator
   ],
   ct:pal("RANDOM very cool thing"),
-  Tmp1 = <<?W:1, ?X:1, 1:64, 123123123:?WORD_LENGTH>>,
-  Tmp1 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp1)),
-
-  Tmp2 = <<?W:1, ?X:1, 255:64,
-    1253464563455:?WORD_LENGTH,
-    32654563455:?WORD_LENGTH,
-    3295465663455:?WORD_LENGTH,
-    32537435634585:?WORD_LENGTH,
-    3253464896636345:?WORD_LENGTH,
-    32534642368975:?WORD_LENGTH,
-    14604563455:?WORD_LENGTH,
-    853664563455:?WORD_LENGTH
-  >>,
-  Tmp2 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp2)),
-
-  Tmp3 = <<?W:1, ?X:1, (1 bsl 63 + 1):64,
-    35834556575746:?WORD_LENGTH,
-    1234567895746:?WORD_LENGTH
-  >>,
-  Tmp3 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp3)),
-
-  Tmp4 = <<?W:1, ?X:1, (42 bsl 30):64,
-    985483584:?WORD_LENGTH,
-    6456745674564:?WORD_LENGTH,
-    45789479575:?WORD_LENGTH
-  >>,
-  Tmp4 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp4)),
-
-  Tmp5 = <<?W:1, ?X:1, (2#1010101010101 bsl 10):64,
-    5345345:?WORD_LENGTH,
-    99645604:?WORD_LENGTH,
-    9349534636:?WORD_LENGTH,
-    124791582:?WORD_LENGTH,
-    97534636:?WORD_LENGTH,
-    84584700:?WORD_LENGTH,
-    111111111:?WORD_LENGTH
-  >>,
-  Tmp5 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp5)),
-
-  Tmp6 = <<?W:1, ?XX:1, 3:64, 2:64,
-    123123:?WORD_LENGTH
-  >>,
-  Tmp6 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp6)),
-
-  Tmp7 = <<?W:1, ?XX:1, 255:64, 53:64,
-    555353:?WORD_LENGTH,
-    123456789:?WORD_LENGTH,
-    9876543:?WORD_LENGTH,
-    696969:?WORD_LENGTH
-  >>,
-  Tmp7 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp7)),
-
-  Tmp8 = <<?W:1, ?XX:1, 2#111010101001:64, 2#110010100000:64,
-    54564564:?WORD_LENGTH,
-    89567957:?WORD_LENGTH,
-    9586565:?WORD_LENGTH
-  >>,
-  Tmp8 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp8)),
-
-  Tmp9 = <<?W:1, ?XX:1, 2#101100111111111:64, 2#111111111:64,
-    77868678:?WORD_LENGTH,
-    7292718:?WORD_LENGTH,
-    471998:?WORD_LENGTH
-  >>,
-  Tmp9 = ecomet_bitmap:compress(ecomet_bitmap:decompress(Tmp9)),
-
+  ComplexGenerator = bucket_generator(BucketNumber, true),
+  [
+    begin
+      Bucket = <<?W:1, ?XX:1, Hword:64, FullWord:64, Payload/bitstring>>,
+      Bucket = ecomet_bitmap:compress(ecomet_bitmap:decompress(Bucket))
+    end
+    || {Hword, FullWord, Payload} <- ComplexGenerator
+  ],
+  ct:pal("RANDOM very cool thing, Part 2"),
   ok.
 
 
