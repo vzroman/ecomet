@@ -212,7 +212,7 @@ auto_value(#{default:=Default, autoincrement:=Increment, type := Type}, Key)->
       case Increment of
         true ->
           ID = ecomet_schema:local_increment(Key),
-          Value = ID bsl 16 + ecomet_node:get_unique_id(),
+          Value = (ID bsl 16) + ecomet_node:get_unique_id(),
           case ecomet_types:parse_safe(Type, Value) of
             {ok, ParsedValue} ->
               ParsedValue;
@@ -389,16 +389,16 @@ on_edit(Object)->
   {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
   IsEmpty = ecomet_pattern:is_empty(PatternID),
 
-  Changes=[
-    check_name(Object,IsEmpty),
-    check_folder(Object,IsEmpty),
-    check_storage(Object,IsEmpty),
-    check_type(Object,IsEmpty),
-    check_index(Object,IsEmpty),
-    check_default(Object,IsEmpty)
-  ],
+  check_name(Object,IsEmpty),
+  check_folder(Object,IsEmpty),
+  check_storage(Object,IsEmpty),
+  check_type(Object,IsEmpty),
+  check_index(Object,IsEmpty),
+  check_default(Object,IsEmpty),
 
-  case [ true || true <- Changes] of
+  Changes=[ A || A <- maps:keys(?DEFAULT_DESCRIPTION), none=/=ecomet:field_changes(Object,?A2B(A)) ],
+
+  case Changes of
     []->
       % No real schema changes
       ok;
