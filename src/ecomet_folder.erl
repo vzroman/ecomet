@@ -72,7 +72,8 @@ path2oid(<<"/root">>)->
   {ok, {?FOLDER_PATTERN,?ROOT_FOLDER} };
 %%Search object by path
 path2oid(<<"/root",_/binary>> = Path)->
-  { MountPath, FolderID } = ecomet_schema:get_mounted_folder(Path),
+  Folder = path_folder(Path),
+  { MountPath, FolderID } = ecomet_schema:get_mounted_folder(<<Folder/binary,"/">>),
   HeadSize = size(MountPath),
   <<MountPath:HeadSize/binary,Tail/binary>> = Path,
   Tokens = string:tokens(unicode:characters_to_list(Tail),"/"),
@@ -87,6 +88,15 @@ path2oid(FolderID,[Name|Tail])->
   end;
 path2oid(OID,[])->
   {ok,OID}.
+
+path_folder(Path) when is_binary(Path)->
+  Tokens = string:tokens(unicode:characters_to_list(Path),"/"),
+  path_folder(Tokens);
+path_folder([_])->
+  <<>>;
+path_folder([F|Rest])->
+  <<"/",(unicode:characters_to_binary(F))/binary,(path_folder(Rest))/binary >>.
+
 
 find_object(FolderID,Name)->
   DB = get_db_name(FolderID),
