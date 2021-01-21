@@ -199,14 +199,19 @@ append_field(Pattern,Field,Config)->
     case Map of
       #{ Field:=_ }->
         % The field is updated. Check if it conflicts with the parent
-        ParentID = get_parent(Pattern),
-        % Get the parent's map (see THE TRICK below)
-        case get_map(ParentID) of
-          #{Field := Parent} ->
-            ecomet_field:check_parent(Config,Parent);
-          _->
-            % The field is not defined in the parent
-            ok
+        case { ?OID(Pattern), get_parent(Pattern) } of
+          { Same, Same }->
+            % Protection from infinite loop for the .object
+            ok;
+          { _, ParentID}->
+            % Get the parent's map (see THE TRICK below)
+            case get_map(ParentID) of
+              #{Field := Parent} ->
+                ecomet_field:check_parent(Config,Parent);
+              _->
+                % The field is not defined in the parent
+                ok
+            end
         end;
       _->
         % The field didn't exist, it is either inherit process or
@@ -236,10 +241,14 @@ remove_field(Pattern,Field)->
   wrap_transaction(?OID(Pattern),fun(Map)->
 
     % Check if the field is defined in the parent
-    ParentID = get_parent(Pattern),
-    case get_map(ParentID) of
-      #{Field:=_} -> ?ERROR(parent_field);
-      _->ok
+    case { ?OID(Pattern), get_parent(Pattern) } of
+      { Same, Same }->
+        ok;
+      { _, ParentID }->
+        case get_map(ParentID) of
+          #{Field:=_} -> ?ERROR(parent_field);
+          _->ok
+        end
     end,
 
     % Update the map

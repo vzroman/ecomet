@@ -388,18 +388,27 @@ on_create(Object)->
 on_edit(Object)->
   {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
   IsEmpty = ecomet_pattern:is_empty(PatternID),
-  check_name(Object,IsEmpty),
-  check_folder(Object,IsEmpty),
-  check_storage(Object,IsEmpty),
-  check_type(Object,IsEmpty),
-  check_index(Object,IsEmpty),
-  check_default(Object,IsEmpty),
 
-  % Append the field to the schema
-  { ok, Name }=ecomet:read_field(Object, <<".name">>),
-  { ok, PatternID } = ecomet:read_field(Object, <<".folder">>),
-  Config = to_schema(Object),
-  ok = ecomet_pattern:append_field(PatternID, Name, Config).
+  Changes=[
+    check_name(Object,IsEmpty),
+    check_folder(Object,IsEmpty),
+    check_storage(Object,IsEmpty),
+    check_type(Object,IsEmpty),
+    check_index(Object,IsEmpty),
+    check_default(Object,IsEmpty)
+  ],
+
+  case [ true || true <- Changes] of
+    []->
+      % No real schema changes
+      ok;
+    _->
+      % Append the field to the schema
+      { ok, Name }=ecomet:read_field(Object, <<".name">>),
+      { ok, PatternID } = ecomet:read_field(Object, <<".folder">>),
+      Config = to_schema(Object),
+      ok = ecomet_pattern:append_field(PatternID, Name, Config)
+  end.
 
 on_delete(Object)->
   {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
@@ -422,7 +431,7 @@ on_delete(Object)->
 
 check_name(Object,IsEmpty)->
   case ecomet:field_changes(Object,<<".name">>) of
-    none->ok;
+    none->false;
     { _NewName, _OldName } when not IsEmpty->
       % Cannot rename a field if there are already objects created with the schema
       ?ERROR(has_objects);
@@ -438,22 +447,23 @@ check_name(Object,IsEmpty)->
             true -> ok
           end;
         _->?ERROR(invalid_name)
-      end
+      end,
+      true
   end.
 
 check_folder(Object, _IsEmpty)->
   case ecomet:field_changes(Object,<<".folder">>) of
-    none -> ok;
+    none -> false;
     { _NewFolder, none }->
       % Create procedure
-      ok;
+      true;
     { _NewFolder, _OldFolder }->
       ?ERROR(cannot_change_pattern)
   end.
 
 check_storage(Object,IsEmpty)->
   case ecomet:field_changes(Object,<<"storage">>) of
-    none->ok;
+    none->false;
     { _NewStorage, _OldStorage } when not IsEmpty->
       % Cannot change the storage for the field if there are already objects created with the schema
       ?ERROR(has_objects);
@@ -465,13 +475,15 @@ check_storage(Object,IsEmpty)->
         PatternStorage=:=?RAMLOCAL; PatternStorage=:=?RAM ->
           ?ERROR(memory_only_pattern);
         true -> ok
-      end;
+      end,
+      true;
     { NewStorage, _OldStorage } ->
       % Just check for other supported types
       case lists:member( NewStorage, ecomet_backend:get_supported_types() ) of
         true->ok;
         _->?ERROR(invalid_storage_type)
-      end
+      end,
+      true
   end.
 
 check_type(Object,IsEmpty)->
@@ -480,7 +492,7 @@ check_type(Object,IsEmpty)->
       orelse
     ecomet:field_changes(Object,<<"subtype">>) =/=none,
   if
-    not IsChanged->ok;
+    not IsChanged->false;
     not IsEmpty ->
       % Cannot change the type of the field if there are already objects created with the schema
       ?ERROR(has_objects);
@@ -492,13 +504,14 @@ check_type(Object,IsEmpty)->
       case lists:member(Type,Supported) of
         true->ok;
         _->?ERROR(invalid_type)
-      end
+      end,
+      true
   end.
 
 check_index(Object,_IsEmpty)->
   case ecomet:field_changes(Object,<<"index">>) of
-    none->ok;
-    { none, _OldStorage }->ok;
+    none->false;
+    { none, _OldStorage }->true;
     { NewIndex, _OldStorage }->
       Supported = ecomet_index:get_supported_types(),
       % Remove duplicates
@@ -507,18 +520,20 @@ check_index(Object,_IsEmpty)->
         []->ok;
         _->?ERROR(invalid_index_type)
       end,
-      ecomet:edit_object(Object,#{<<"index">>=>Index})
+      ecomet:edit_object(Object,#{<<"index">>=>Index}),
+      true
   end.
 
 check_default(Object,_IsEmpty)->
   case ecomet:field_changes(Object,<<"default">>) of
-    none->ok;
-    {none,_Old}->ok;
+    none->false;
+    {none,_Old}->true;
     { NewDefault, _Old}->
       Type = get_type(to_schema(Object)),
       case ecomet_types:parse_safe(Type,NewDefault) of
         {ok,Parsed}->
           ok = ecomet:edit_object(Object,#{<<"default">>=>Parsed});
         _->?ERROR(invalid_default_value)
-      end
+      end,
+      true
   end.
