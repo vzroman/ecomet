@@ -103,7 +103,7 @@ handle(<<"create">>,_ID,#{<<"fields">>:=Fields})->
   Object = ecomet:create_object(Fields,#{ format=>fun ecomet:from_json/2 }),
   {ok, ?T2B(?OID(Object))};
 
-handle(<<"edit">>,_ID,#{<<"oid">>:=ID,<<"fields">>:=Fields})->
+handle(<<"update">>,_ID,#{<<"oid">>:=ID,<<"fields">>:=Fields})->
   ecomet:transaction(fun()->
     Object = ecomet:open(?OID(ID),write),
     ecomet:edit_object( Object , Fields, #{ format=>fun ecomet:from_json/2 }),
