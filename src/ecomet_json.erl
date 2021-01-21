@@ -101,20 +101,23 @@ handle(<<"query">>,_ID,#{<<"statement">>:=Statement})->
 %----------------------------------------------------------
 handle(<<"create">>,_ID,#{<<"fields">>:=Fields})->
   Object = ecomet:create_object(Fields,#{ format=>fun ecomet:from_json/2 }),
-  {ok, ?T2B(?OID(Object))};
+  OID=?OID(Object),
+  {ok, ?T2B(OID)};
 
 handle(<<"update">>,_ID,#{<<"oid">>:=ID,<<"fields">>:=Fields})->
   ecomet:transaction(fun()->
     Object = ecomet:open(?OID(ID),write),
     ecomet:edit_object( Object , Fields, #{ format=>fun ecomet:from_json/2 }),
-    ?OID(Object)
+    OID =?OID(Object),
+    ?T2B(OID)
   end);
 
 handle(<<"delete">>,_ID,#{<<"oid">>:=ID})->
   ecomet:transaction(fun()->
     Object = ecomet:open(?OID(ID),write),
     ecomet:delete_object( Object ),
-    ?OID(Object)
+    OID=?OID(Object),
+    ?T2B(OID)
   end);
 
 handle(_Action,_ID,_Params)->
