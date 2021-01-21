@@ -112,9 +112,11 @@ get_supported_types()->
 %% ====================================================================
 %% STRING FORMATTER
 %% ====================================================================
-from_string(string,<<>>)->
+from_string(_Any,<<>>)->
   none;
-from_string(string,<<"none">>)->
+from_string(_Any,<<"none">>)->
+  none;
+from_string(_Any,none)->
   none;
 %---------String-----------------------
 from_string(string,Value)
