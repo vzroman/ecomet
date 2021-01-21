@@ -560,8 +560,22 @@ compress_decompress_test(_Config) ->
   ct:pal("RANDOM very cool thing, Part 2"),
   ok.
 
+% %
+t(0) ->
+  ok;
+t(TestNumber) ->
+  NumberOfBuckets = 10,
+  Bucket = generate_buckets(NumberOfBuckets),
+  BitMap = merge_buckets(Bucket),
+  FirstBucketsNumber = rand:uniform(NumberOfBuckets),
+  Tail = merge_buckets(lists:sublist(Bucket, FirstBucketsNumber + 1, 10000000)),
+  Tail = ecomet_bitmap:tail(BitMap, FirstBucketsNumber),
+  t(TestNumber - 1).
 
 tail_test(_Config) ->
+  TestNumber = 100,
+  ok = t(TestNumber),
+
   <<>> = ecomet_bitmap:tail(<<>>, <<(1 bsl 16):64>>),
   <<42:8>> = ecomet_bitmap:tail(<<42:8>>, -1),
   <<1:1, 1:1, 0:1, 30:5, 65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 31:5, 65>>, 1),
@@ -569,9 +583,57 @@ tail_test(_Config) ->
   <<>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 193>>, 17),
   ok.
 
+%This function generates list.
+% Each element in list is bucket %
+generate_buckets(0) ->
+  [];
+generate_buckets(BucketNumbers) ->
+  Xbit = rand:uniform(10) rem 2,
+  Bucket = if Xbit =:= 0 ->
+    HWord = rand:uniform(1 bsl 64 - 1),
+    Payload = payload_generator(bit_count(HWord), 1 bsl 64 - 1),
+    <<?W:1, ?X:1, HWord:64, Payload/bitstring>>;
+  true ->
+    HWord = 1 bsl 64 - 1,
+    FullWord = rand:uniform(1 bsl 64 - 1),
+    Payload = payload_generator(64 - bit_count(FullWord), 1 bsl 64 - 1),
+    <<?W:1, ?XX:1, HWord:64, FullWord:64, Payload/bitstring>>
+  end,
+  [Bucket | generate_buckets(BucketNumbers - 1)].
+
+
+% Merging list of buckets into bitmap %
+merge_buckets([]) ->
+  <<>>;
+merge_buckets([Bucket | []]) ->
+  Bucket;
+merge_buckets([Bucket | ListOfBuckets]) ->
+  Tail = merge_buckets(ListOfBuckets),
+  <<Bucket/bitstring, Tail/bitstring>>.
+
+% Generate bitmap, then extract first bucket from it,
+% and compare result with ecomet_bitmap:first%
+f(0) ->
+  ok;
+f(TestNumber) ->
+  BucketNumbers = rand:uniform(100),
+  Buckets = generate_buckets(BucketNumbers),
+  [Head | Tail] = Buckets,
+  MergedTail = merge_buckets(Tail),
+  {Head, MergedTail} = ecomet_bitmap:first(merge_buckets(Buckets)),
+  f(TestNumber - 1).
+
+
 first_test(_Config) ->
-  {<<0:1, 0:1, 257:64, 32:128>>, <<1:1>>} = ecomet_bitmap:first(<<0:1, 0:1, 257:64, 65:129>>),
-  {<<0:1, 1:1, 257:64, 256:64, 0:64>>, <<65:64>>} = ecomet_bitmap:first(<<0:1, 1:1, 257:64, 256:64, 65:128>>),
+  BucketNumber = 1,
+  Buckets = generate_buckets(BucketNumber),
+  [Head | Tail] = Buckets,
+  MergedTail = merge_buckets(Tail),
+  {Head, MergedTail} = ecomet_bitmap:first(merge_buckets(Buckets)),
+
+  TestNumber = 100,
+  ok = f(TestNumber),
+  ct:pal("I am fck genius"),
   ok.
 
 split_test(_Config) ->
