@@ -526,12 +526,6 @@ compress_decompress_test(_Config) ->
 tail_test(_Config) ->
   TestNumber = 100,
   ok = t(TestNumber),
-
-  <<>> = ecomet_bitmap:tail(<<>>, <<(1 bsl 16):64>>),
-  <<42:8>> = ecomet_bitmap:tail(<<42:8>>, -1),
-  <<1:1, 1:1, 0:1, 30:5, 65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 31:5, 65>>, 1),
-  <<65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 65>>, 16),
-  <<>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 193>>, 17),
   ok.
 
 first_test(_Config) ->
@@ -572,25 +566,36 @@ data_or_test(_Config) ->
 bit_and_test(_Config) ->
   A = rand:uniform(1 bsl 4096 - 1),
   B = rand:uniform(1 bsl 4096 - 1),
-
   Bucket1 = data_to_bucket(<<A:4096>>),
   Bucket2= data_to_bucket(<<B:4096>>),
-
-
   Result = data_to_bucket(<<(A band B):4096>>),
   Result = ecomet_bitmap:bit_and(Bucket1, Bucket2),
+
   Bucket1 = ecomet_bitmap:bit_and(Bucket1, <<?F:1, 1:1, ?X:1, 1:?SHORT>>),
   Bucket2 = ecomet_bitmap:bit_and(<<?F:1, 1:1, ?X:1, 1:?SHORT>>, Bucket2),
-  ct:pal("AND_THEN_TO_BUCKET ~n~p~n", [Result]),
-  ct:pal("TO_BUCKET_TWO_DATA_THEN_BITAND ~n~p~n", [ecomet_bitmap:bit_and(Bucket1, Bucket2)]),
+  <<>> = ecomet_bitmap:bit_and(Bucket2, <<?F:1, 0:1, ?X:1, 1:?SHORT>>),
+  <<>> = ecomet_bitmap:bit_and(<<?F:1, 0:1, ?X:1, 1:?SHORT>>, Bucket1),
 
-  %data_to_bucket(<<1:4096>>)
-  %Result = ecomet_bitmap:bit_and(Bucket1, Bucket2),
-  %<<0:64>> = ecomet_bitmap:bit_and(<<0:64>>, <<255:64>>),
+
+  C = generate_list_of_random_data(7),
+  D = generate_list_of_random_data(10),
+  Bitmap1 = data_to_bitmap(C),
+  Bitmap2 = data_to_bitmap(D),
+  Result1 = data_to_bitmap(list_and(C, D)),
+  Result1 = ecomet_bitmap:bit_and(Bitmap1, Bitmap2),
+
+  TestNumber = 10,
+  BitAnd = fun(Bmap1, Bmap2) -> ecomet_bitmap:bit_and(Bmap1, Bmap2) end,
+  ListAnd = fun(L1, L2) -> list_and(L1, L2) end,
+  ok = check_bitwise_oper(TestNumber, BitAnd, ListAnd),
   ok.
 
 
 bit_or_test(_Config) ->
+  TestNumber = 10,
+  BitOr = fun(Bmap1, Bmap2) -> ecomet_bitmap:bit_or(Bmap1, Bmap2) end,
+  ListOr = fun(L1, L2) -> list_or(L1, L2) end,
+  ok = check_bitwise_oper(TestNumber, BitOr, ListOr),
   ok.
 %%=================================================================
 %% Helpers
@@ -721,3 +726,44 @@ data_to_bucket(Data) ->
     >>
   end,
   Bucket.
+
+% Each element of 'ListOfData' is 4096 bits
+% So len('ListOfData') == Number of Buckets
+% Function merges 'ListOfData' into bitmap%
+data_to_bitmap([]) ->
+  <<>>;
+data_to_bitmap(ListOfData) ->
+  [Head | Tail] = ListOfData,
+  Bucket = data_to_bucket(<<Head:4096>>),
+  <<Bucket/bitstring, (data_to_bitmap(Tail))/bitstring>>.
+
+% Function generate list of NumberOfBlock elements %
+generate_list_of_random_data(0) ->
+  [];
+generate_list_of_random_data(NumberOfBlock) ->
+  [rand:uniform(1 bsl 64 - 1) | generate_list_of_random_data(NumberOfBlock - 1)].
+
+list_and(_L1, []) ->
+  [];
+list_and([], _L2) ->
+  [];
+list_and([Head1 | Tail1], [Head2 | Tail2]) ->
+  [Head1 band Head2 | list_and(Tail1, Tail2)].
+
+list_or(L1, []) ->
+  L1;
+list_or([], L2) ->
+  L2;
+list_or([Head1 | Tail1], [Head2 | Tail2]) ->
+  [Head1 bor Head2 | list_or(Tail1, Tail2)].
+
+check_bitwise_oper(0, _BitWiseFunc, _ListWiseFunc) ->
+  ok;
+check_bitwise_oper(TestNumber, BitWiseFunc, ListWiseFunc) ->
+  A = generate_list_of_random_data(rand:uniform(20)),
+  B = generate_list_of_random_data(rand:uniform(20)),
+  Bitmap1 = data_to_bitmap(A),
+  Bitmap2 = data_to_bitmap(B),
+  Result = data_to_bitmap(ListWiseFunc(A, B)),
+  Result = BitWiseFunc(Bitmap1, Bitmap2),
+  check_bitwise_oper(TestNumber - 1, BitWiseFunc, ListWiseFunc).
