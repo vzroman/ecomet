@@ -48,7 +48,8 @@
   construct/1,
   edit/2,edit/3,
   copy/2,
-  read_field/2,read_field/3,read_fields/2,read_fields/3,read_all/1,read_all/2,
+  read_field/2,read_field/3,read_fields/2,read_fields/3,
+  read_all/1,read_all/2,
   field_changes/2,
   field_type/2,
   is_object/1,
@@ -306,7 +307,11 @@ read_all(Object,Params) when is_list(Params)->
   read_all(Object,maps:from_list(Params));
 read_all(#object{map=Map}=Object,Params) when is_map(Params)->
   Fields=maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map)),
-  read_fields(Object,Fields,Params).
+  Fields1=Fields#{
+    <<".oid">>=>none,
+    <<".path">>=>none
+  },
+  read_fields(Object,Fields1,Params).
 
 % Edit object
 edit(Object,Fields)->
