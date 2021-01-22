@@ -1291,6 +1291,24 @@ compile_function(ecomet_ql_util,sum,[Value])->
 compile_function(ecomet_ql_util,sum,_)->
   ?ERROR(wrong_sum_arguments);
 
+% Join
+compile_function(ecomet_ql_util,join,Arguments)->
+  case collect_deps(Arguments) of
+    []->none;
+    Deps ->
+      Map = values_map(Deps),
+      Fun =
+        fun(Values)->
+          ValueMap = Map(Values),
+
+          % Evaluate the arguments
+          ArgValues=[arg_value(A,ValueMap)||A<-Arguments],
+
+          ecomet_ql_util:join(ArgValues)
+        end,
+      { Fun, Deps }
+  end;
+
 %---------------Utility functions---------------------
 compile_function(Module,Function,Arguments)->
   case collect_deps(Arguments) of
