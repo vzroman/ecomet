@@ -353,7 +353,10 @@ field_changes(#object{oid=OID,map=Map},Field)->
   ecomet_field:field_changes(Map,Fields,OID,Field).
 
 field_type(#object{map=Map},Field)->
-  ecomet_field:get_type(Map,Field).
+  case ?SERVICE_FIELDS of
+    #{Field:=_}-> {ok, string};
+    _->ecomet_field:get_type(Map,Field)
+  end.
 
 is_object(#object{})->
   true;
