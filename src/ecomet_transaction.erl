@@ -326,7 +326,8 @@ on_commit(Fun) when is_function(Fun,0)->
     State->
       OnCommits=[Fun|State#state.oncommit],
       put(?TKEY,State#state{oncommit=OnCommits})
-  end;
+  end,
+  ok;
 on_commit(_Invalid)->
   ?ERROR(not_function).
 

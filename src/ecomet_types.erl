@@ -112,9 +112,11 @@ get_supported_types()->
 %% ====================================================================
 %% STRING FORMATTER
 %% ====================================================================
-from_string(string,<<>>)->
+from_string(_Any,<<>>)->
   none;
-from_string(string,<<"none">>)->
+from_string(_Any,<<"none">>)->
+  none;
+from_string(_Any,none)->
   none;
 %---------String-----------------------
 from_string(string,Value)
@@ -230,7 +232,7 @@ from_string({list,Type},Value) when is_binary(Value)->
   case string_to_term(Value) of
     {ok,List} when is_list(List)->
       from_string({list,Type},List);
-    _->?ERROR(invalid_list)
+    {ok,Term}->[from_string(Type,Term)]
   end;
 from_string({list,_Type},Invalid)->
   ?ERROR(Invalid).

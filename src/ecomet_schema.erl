@@ -268,9 +268,17 @@ get_mounted_db(OID)->
   end.
 
 get_mounted_folder(Path)->
-  Closest = #mntPath{k=MountedPat} = mnesia:dirty_prev(?SCHEMA,#mntPath{ k= Path }),
-  [#kv{value = FolderID}] = mnesia:dirty_read(?SCHEMA,Closest),
-  {MountedPat,FolderID}.
+  get_mounted_folder(Path, mnesia:dirty_prev(?SCHEMA,#mntPath{ k= Path }) ).
+
+get_mounted_folder(Path, #mntPath{k=MountedPath} = Closest)->
+  S = size(MountedPath),
+  case Path of
+    <<MountedPath:S/binary,_/binary>>->
+      [#kv{value = FolderID}] = mnesia:dirty_read(?SCHEMA,Closest),
+      {MountedPath,FolderID};
+    _->
+      get_mounted_folder(Path, mnesia:dirty_prev(?SCHEMA,Closest) )
+  end.
 
 get_registered_databases()->
   MS=[{
