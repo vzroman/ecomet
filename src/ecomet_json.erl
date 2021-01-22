@@ -155,6 +155,8 @@ export_query_cell(false)->
   false;
 export_query_cell(true)->
   true;
+export_query_cell(null)->
+  null;
 export_query_cell(Atom) when is_atom(Atom)->
   atom_to_binary(Atom,utf8);
 export_query_cell(Term)->
