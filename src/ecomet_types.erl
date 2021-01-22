@@ -281,7 +281,7 @@ to_json(bool,Value)->
 to_json(integer,Value)->
   Value;
 to_json(float,Value)->
-  Value(1.0*Value);
+  1.0*Value;
 to_json({list,Type},Value)->
   [ to_json(Type,Item) || Item <- Value ];
 % Other types are converted to a string
