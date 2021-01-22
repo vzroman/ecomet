@@ -71,13 +71,19 @@
   data_or/2,
   tail/2,
   first/1,
-  split/2
+  split/2,
+  bit_and/2,
+  bit_or/2
 ]).
 -endif.
 
 %%------------------------------------------------------------------------------------
 %%  SET
 %%------------------------------------------------------------------------------------
+set_bit( BitMap, [Bit|Rest] )->
+  set_bit( set_bit(BitMap,Bit), Rest );
+set_bit( BitMap, [] )->
+  BitMap;
 set_bit( none, Bit )->
   set_bit(<<>>, Bit);
 set_bit( Bitmap, Bit )->

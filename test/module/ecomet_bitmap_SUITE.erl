@@ -660,6 +660,55 @@ data_or_test(_Config) ->
   ok.
 
 
+% 4096 bit -> {HworddHeader, FullWordHeader, Payload}
+% BlockNumber 63, ..., 0 %
+transform(<<Head:?WORD_LENGTH, Rest/bitstring>>, BlockNumber) when Rest =:= <<>> ->
+  ct:pal("BlockNumber ~p~n", [BlockNumber]),
+  HWord = if Head =:= 0 -> 0; true -> 1 end,
+  FullWord = if Head =:= (1 bsl 64 - 1) -> 1; true -> 0 end,
+  Payload = if HWord =:= 0; FullWord =:= 1 -> <<>>; true -><<Head:?WORD_LENGTH>> end,
+
+  {HWord, FullWord, Payload};
+
+transform(<<Head:?WORD_LENGTH, Rest/bitstring>>, BlockNumber) ->
+  ct:pal("BlockNumber ~p~n", [BlockNumber]),
+  %Data = rand:uniform(1 bsl 4096 - 1) - 1,
+  HWord = if Head =:= 0 -> 0; true -> 1 end,
+  FullWord = if Head =:= (1 bsl 64 - 1) -> 1; true -> 0 end,
+  Payload = if HWord =:= 0; FullWord =:= 1 -> <<>>; true -><<Head:?WORD_LENGTH>> end,
+
+  {HW, FW, P} = transform(Rest, BlockNumber - 1),
+  {(HWord bsl BlockNumber) bxor HW, (FullWord bsl BlockNumber) bxor FW, <<Payload/bitstring,P/bitstring>>}.
+
+data_to_bucket(Data) ->
+  {Hword, FullWord, Payload} = transform(Data, 63),
+  Bucket = if FullWord =:= 0 ->
+    <<?W:1, ?X:1, Hword:?WORD_LENGTH,
+      Payload/bitstring
+    >>;
+  true ->
+    << ?W:1, ?X:1, Hword:?WORD_LENGTH,
+      FullWord:?WORD_LENGTH, Payload/bitstring
+    >>
+  end,
+  Bucket.
+
 bit_and_test(_Config) ->
+  A = rand:uniform(1 bsl 4096 - 1),
+  B = rand:uniform(1 bsl 4096 - 1),
+
+  Bucket1 = data_to_bucket(<<A:4096>>),
+  Bucket2= data_to_bucket(<<B:4096>>),
+
+
+  Result = data_to_bucket(<<(A band B):4096>>),
+  Result = ecomet_bitmap:bit_and(Bucket1, Bucket2),
+  Bucket1 = ecomet_bitmap:bit_and(Bucket1, <<?F:1, 1:1, ?X:1, 1:?SHORT>>),
+  Bucket2 = ecomet_bitmap:bit_and(<<?F:1, 1:1, ?X:1, 1:?SHORT>>, Bucket2),
+  ct:pal("AND_THEN_TO_BUCKET ~n~p~n", [Result]),
+  ct:pal("TO_BUCKET_TWO_DATA_THEN_BITAND ~n~p~n", [ecomet_bitmap:bit_and(Bucket1, Bucket2)]),
+
+  %data_to_bucket(<<1:4096>>)
+  %Result = ecomet_bitmap:bit_and(Bucket1, Bucket2),
   %<<0:64>> = ecomet_bitmap:bit_and(<<0:64>>, <<255:64>>),
   ok.
