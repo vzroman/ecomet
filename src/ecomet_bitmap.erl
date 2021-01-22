@@ -59,10 +59,31 @@
   foldr/4
 ]).
 
+%%====================================================================
+%%		Test API
+%%====================================================================
+-ifdef(TEST).
+-export([
+  decompress/1,
+  compress/1,
+  data_and/2,
+  data_andnot/2,
+  data_or/2,
+  tail/2,
+  first/1,
+  split/2,
+  bit_and/2,
+  bit_or/2
+]).
+-endif.
 
 %%------------------------------------------------------------------------------------
 %%  SET
 %%------------------------------------------------------------------------------------
+set_bit( BitMap, [Bit|Rest] )->
+  set_bit( set_bit(BitMap,Bit), Rest );
+set_bit( BitMap, [] )->
+  BitMap;
 set_bit( none, Bit )->
   set_bit(<<>>, Bit);
 set_bit( Bitmap, Bit )->
@@ -622,7 +643,7 @@ decompress(H,F,Data) when F rem 2 =:= 1->
   [?FULL|decompress(H bsr 1,F bsr 1,Data)];
 decompress(H,F,Data) when H rem 2=:=0->
   [0|decompress(H bsr 1,F bsr 1,Data)];
-decompress(H,F,<<Word:?WORD_LENGTH,Tail/bitstring>>)->
+  decompress(H,F,<<Word:?WORD_LENGTH,Tail/bitstring>>)->
   [Word|decompress(H bsr 1,F bsr 1,Tail)].
 
 compress(Data)->
@@ -634,6 +655,7 @@ compress([?FULL|Tail],High,Full,Bit,Acc)->
 compress([Word|Tail],High,Full,Bit,Acc)->
   compress(Tail, High bor Bit, Full, Bit bsl 1, <<Acc/bitstring,Word:?WORD_LENGTH>> );
 compress([],High,Full,_Bit,Data)->
+  %ct:pal("I am here"),
   if
     High =:=0 ->
       <<?F:1,0:1,?X:1,1:?SHORT>>;
