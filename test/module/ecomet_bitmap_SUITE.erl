@@ -55,7 +55,8 @@
   split_test/1,
   data_and_test/1,
   data_or_test/1,
-  bit_and_test/1
+  bit_and_test/1,
+  bit_or_test/1
 ]).
 
 
@@ -69,7 +70,8 @@ all()->
     split_test,
     data_and_test,
     data_or_test,
-    bit_and_test
+    bit_and_test,
+    bit_or_test
   ].
 
 groups()->
@@ -521,6 +523,17 @@ compress_decompress_test(_Config) ->
   ct:pal("RANDOM very cool thing, Part 2"),
   ok.
 
+tail_test(_Config) ->
+  TestNumber = 100,
+  ok = t(TestNumber),
+
+  <<>> = ecomet_bitmap:tail(<<>>, <<(1 bsl 16):64>>),
+  <<42:8>> = ecomet_bitmap:tail(<<42:8>>, -1),
+  <<1:1, 1:1, 0:1, 30:5, 65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 31:5, 65>>, 1),
+  <<65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 65>>, 16),
+  <<>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 193>>, 17),
+  ok.
+
 first_test(_Config) ->
   BucketNumber = 1,
   Buckets = generate_buckets(BucketNumber),
@@ -576,6 +589,9 @@ bit_and_test(_Config) ->
   %<<0:64>> = ecomet_bitmap:bit_and(<<0:64>>, <<255:64>>),
   ok.
 
+
+bit_or_test(_Config) ->
+  ok.
 %%=================================================================
 %% Helpers
 %%=================================================================
@@ -630,17 +646,6 @@ t(TestNumber) ->
   Tail = ecomet_bitmap:tail(BitMap, FirstBucketsNumber),
   t(TestNumber - 1).
 
-tail_test(_Config) ->
-  TestNumber = 100,
-  ok = t(TestNumber),
-
-  <<>> = ecomet_bitmap:tail(<<>>, <<(1 bsl 16):64>>),
-  <<42:8>> = ecomet_bitmap:tail(<<42:8>>, -1),
-  <<1:1, 1:1, 0:1, 30:5, 65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 31:5, 65>>, 1),
-  <<65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 65>>, 16),
-  <<>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 193>>, 17),
-  ok.
-
 %This function generates list.
 % Each element in list is bucket %
 generate_buckets(0) ->
@@ -658,7 +663,6 @@ generate_buckets(BucketNumbers) ->
     <<?W:1, ?XX:1, HWord:64, FullWord:64, Payload/bitstring>>
   end,
   [Bucket | generate_buckets(BucketNumbers - 1)].
-
 
 % Merging list of buckets into bitmap %
 merge_buckets([]) ->
@@ -681,7 +685,10 @@ f(TestNumber) ->
   {Head, MergedTail} = ecomet_bitmap:first(merge_buckets(Buckets)),
   f(TestNumber - 1).
 
-% 4096 bit -> {HworddHeader, FullWordHeader, Payload}
+% 4096 bit -> {HwordHeader, FullWordHeader, Payload}
+% We divide 4096 bits into blocks. Each block contain 64 bits.
+% if block[i] == 0, then HwordHeader i-th bit is 0, else 1
+% if block[i] == 2^64 - 1, then FullWordHeader i-th bit is 1, else 0
 % BlockNumber 63, ..., 0 %
 transform(<<Head:?WORD_LENGTH, Rest/bitstring>>, BlockNumber) when Rest =:= <<>> ->
   ct:pal("BlockNumber ~p~n", [BlockNumber]),
@@ -701,6 +708,7 @@ transform(<<Head:?WORD_LENGTH, Rest/bitstring>>, BlockNumber) ->
   {HW, FW, P} = transform(Rest, BlockNumber - 1),
   {(HWord bsl BlockNumber) bxor HW, (FullWord bsl BlockNumber) bxor FW, <<Payload/bitstring,P/bitstring>>}.
 
+% Data is 4096 bit. We compress Data and obtain bucket %
 data_to_bucket(Data) ->
   {Hword, FullWord, Payload} = transform(Data, 63),
   Bucket = if FullWord =:= 0 ->
