@@ -24,6 +24,7 @@
 %%=================================================================
 -export([
   on_request/1,
+  handle/3,
   on_subscription/4
 ]).
 
@@ -42,7 +43,7 @@ on_request(Msg)->
   case try from_json(Msg) catch
     _:_->{error,invalid_format}
   end of
-    {error,Error}->reply_error(<<"none">>,Error);
+    {error,Error}->reply_error(none,Error);
     #{
       <<"id">>:=ID,
       <<"action">>:=Action,
@@ -72,7 +73,7 @@ reply_ok(ID,Result)->
 reply_error(ID,{error,Error})->
   reply_error(ID,Error);
 reply_error(ID,Error)->
-  reply(ID,<<"error">>,?T2B(Error)).
+  reply(ID,error,?T2B(Error)).
 
 reply(ID,Type,Result)->
   to_json(#{
@@ -95,20 +96,29 @@ handle(<<"query">>,_ID,#{<<"statement">>:=Statement})->
       {ok, JSONResult}
   end;
 
-handle(<<"application">>,ID,#{
-  <<"module">>:=Module,
-  <<"function">>:=Function,
-  <<"function_params">>:=Params
-})->
-  case ecomet_lib:is_exported(?B2A(Module),?B2A(Function),2) of
-    {ok,Fun}->
-      try
-        Fun(ID,Params)
-      catch
-        _Class:Reason->{error,Reason}
-      end;
-    {error,Error}->{error,Error}
-  end;
+%-----------------------------------------------------------
+% Object level actions
+%----------------------------------------------------------
+handle(<<"create">>,_ID,#{<<"fields">>:=Fields})->
+  Object = ecomet:create_object(Fields,#{ format=>fun ecomet:from_json/2 }),
+  OID=?OID(Object),
+  {ok, ?T2B(OID)};
+
+handle(<<"update">>,_ID,#{<<"oid">>:=ID,<<"fields">>:=Fields})->
+  ecomet:transaction(fun()->
+    Object = ecomet:open(?OID(ID),write),
+    ecomet:edit_object( Object , Fields, #{ format=>fun ecomet:from_json/2 }),
+    OID =?OID(Object),
+    ?T2B(OID)
+  end);
+
+handle(<<"delete">>,_ID,#{<<"oid">>:=ID})->
+  ecomet:transaction(fun()->
+    Object = ecomet:open(?OID(ID),write),
+    ecomet:delete_object( Object ),
+    OID=?OID(Object),
+    ?T2B(OID)
+  end);
 
 handle(_Action,_ID,_Params)->
   {error,invalid_request}.

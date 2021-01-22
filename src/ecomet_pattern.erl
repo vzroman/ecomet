@@ -159,14 +159,14 @@ get_children(Pattern)->
   ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
     {<<".pattern">>,':=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
     {<<"parent_pattern">>,'=',OID}
-  ]}).
+  ]})--[OID].
 
 get_children_recursive(Pattern)->
   OID=?OID(Pattern),
   ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
     {<<".pattern">>,':=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
     {<<"parents">>,'=',OID}
-  ]}).
+  ]})--[OID].
 
 get_fields(Pattern)->
   Map = get_map(Pattern),
@@ -199,14 +199,19 @@ append_field(Pattern,Field,Config)->
     case Map of
       #{ Field:=_ }->
         % The field is updated. Check if it conflicts with the parent
-        ParentID = get_parent(Pattern),
-        % Get the parent's map (see THE TRICK below)
-        case get_map(ParentID) of
-          #{Field := Parent} ->
-            ecomet_field:check_parent(Config,Parent);
-          _->
-            % The field is not defined in the parent
-            ok
+        case { ?OID(Pattern), get_parent(Pattern) } of
+          { Same, Same }->
+            % Protection from infinite loop for the .object
+            ok;
+          { _, ParentID}->
+            % Get the parent's map (see THE TRICK below)
+            case get_map(ParentID) of
+              #{Field := Parent} ->
+                ecomet_field:check_parent(Config,Parent);
+              _->
+                % The field is not defined in the parent
+                ok
+            end
         end;
       _->
         % The field didn't exist, it is either inherit process or
@@ -236,10 +241,14 @@ remove_field(Pattern,Field)->
   wrap_transaction(?OID(Pattern),fun(Map)->
 
     % Check if the field is defined in the parent
-    ParentID = get_parent(Pattern),
-    case get_map(ParentID) of
-      #{Field:=_} -> ?ERROR(parent_field);
-      _->ok
+    case { ?OID(Pattern), get_parent(Pattern) } of
+      { Same, Same }->
+        ok;
+      { _, ParentID }->
+        case get_map(ParentID) of
+          #{Field:=_} -> ?ERROR(parent_field);
+          _->ok
+        end
     end,
 
     % Update the map
@@ -305,10 +314,15 @@ check_handler(Object)->
   end.
 
 update_behaviour(Object)->
-  ParentID=get_parent(Object),
-  ParentHandlers=get_behaviours(ParentID),
-  update_behaviour(Object,ParentHandlers),
-  ok.
+  case { ?OID(Object), get_parent(Object) } of
+    { Same, Same }->
+      % Protection from loops
+      ok;
+    { _, ParentID }->
+      ParentHandlers=get_behaviours(ParentID),
+      update_behaviour(Object,ParentHandlers),
+      ok
+  end.
 
 
 check_handler_module(Module)->
@@ -365,7 +379,7 @@ inherit_fields(PatternID,ParentFields)->
        Child2 = ecomet_field:from_schema(Child1),
        % Edit object
        {ok, FieldID} =ecomet_folder:find_object(PatternID, Name),
-       {ok, Field} = ecomet:open(FieldID,write),
+       Field = ecomet:open(FieldID,write),
        ok = ecomet:edit_object(Field,Child2);
      _->
        % CASE 2. The field is not defined in the child yet, create a new one

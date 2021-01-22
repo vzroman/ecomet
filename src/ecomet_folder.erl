@@ -88,6 +88,7 @@ path2oid(FolderID,[Name|Tail])->
 path2oid(OID,[])->
   {ok,OID}.
 
+
 find_object(FolderID,Name)->
   DB = get_db_name(FolderID),
   case ecomet_query:get([DB],[<<".oid">>],{'AND',[
