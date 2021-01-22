@@ -882,9 +882,9 @@ map_reduce_plan(#{aggregate:=false}=Params)->
   MergeTrees=
     fun([InitTree|Results])->
       lists:foldr(fun(GroupsTree,Acc)->
-        merge_trees(length(TraverseGroups),GroupsTree,fun(RowList,GroupAcc)->
+        merge_trees(length(TraverseGroups),GroupsTree,Acc,fun(RowList,GroupAcc)->
           RowList++GroupAcc
-        end,Acc)
+        end)
       end,InitTree,Results)
      end,
   %-------Fun to reduce results--------------

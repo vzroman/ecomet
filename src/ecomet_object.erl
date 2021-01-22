@@ -305,11 +305,10 @@ read_all(Object)->
   read_all(Object,#{}).
 read_all(Object,Params) when is_list(Params)->
   read_all(Object,maps:from_list(Params));
-read_all(#object{map=Map}=Object,Params) when is_map(Params)->
+read_all(#object{map=Map,oid = OID}=Object,Params) when is_map(Params)->
   Fields=maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map)),
   Fields1=Fields#{
-    <<".oid">>=>none,
-    <<".path">>=>none
+    <<".oid">>=>OID
   },
   read_fields(Object,Fields1,Params).
 
