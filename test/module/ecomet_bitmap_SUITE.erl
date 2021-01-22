@@ -499,6 +499,86 @@ bit_sparse_full(_Config) ->
 
   ok.
 
+compress_decompress_test(_Config) ->
+  ct:pal("Checking random generator ~n~p~n", [payload_generator(5, 10)]),
+  BucketNumber = 1000,
+  Generator =  bucket_generator(BucketNumber, false),
+  [begin
+     Bucket = <<?W:1, ?X:1, Hword:64, Payload/bitstring>>,
+     Bucket = ecomet_bitmap:compress(ecomet_bitmap:decompress(Bucket))
+   end
+    || {Hword, Payload} <-Generator
+  ],
+  ct:pal("RANDOM very cool thing"),
+  ComplexGenerator = bucket_generator(BucketNumber, true),
+  [
+    begin
+      Bucket = <<?W:1, ?XX:1, Hword:64, FullWord:64, Payload/bitstring>>,
+      Bucket = ecomet_bitmap:compress(ecomet_bitmap:decompress(Bucket))
+    end
+    || {Hword, FullWord, Payload} <- ComplexGenerator
+  ],
+  ct:pal("RANDOM very cool thing, Part 2"),
+  ok.
+
+first_test(_Config) ->
+  BucketNumber = 1,
+  Buckets = generate_buckets(BucketNumber),
+  [Head | Tail] = Buckets,
+  MergedTail = merge_buckets(Tail),
+  {Head, MergedTail} = ecomet_bitmap:first(merge_buckets(Buckets)),
+
+  TestNumber = 100,
+  ok = f(TestNumber),
+  ct:pal("I am fck genius"),
+  ok.
+
+split_test(_Config) ->
+  {<<1:1, 0:1, 0:1, 30:5>> ,<<>>} = ecomet_bitmap:split(<<>>, 30),
+  {<<1:1, 0:1, 1:1, 33:29>> ,<<>>} = ecomet_bitmap:split(<<>>, 33),
+  {<<1:1, 1:1, 0:1, 16:5>>, <<1:1, 1:1, 0:1, 14:5, 29>>} = ecomet_bitmap:split(<<1:1, 1:1, 0:1, 30:5, 29>>, 16),
+  {<<1:1, 0:1, 0:1, 30:5>>, <<29>>} = ecomet_bitmap:split(<<1:1, 0:1, 0:1, 30:5, 29>>, 30),
+  {<<1:1, 0:1, 0:1, 30:5, 1:1, 1:1, 0:1, 1:5>>, <<>>} = ecomet_bitmap:split(<<1:1, 0:1, 0:1, 30:5, 193>>, 31),
+
+  ok.
+
+data_and_test(_Config) ->
+  [] = ecomet_bitmap:data_and([], [1, 2, 3]),
+  [] = ecomet_bitmap:data_and([1, 2, 3], []),
+  [1, 2] = ecomet_bitmap:data_and([5, 2, 3], [3, 6]),
+  [1, 2] = ecomet_bitmap:data_and([3, 6], [5, 2, 3]),
+  ok.
+
+data_or_test(_Config) ->
+  [1, 2, 3] = ecomet_bitmap:data_or([1, 2, 3], []),
+  [1, 2, 3] = ecomet_bitmap:data_or([], [1, 2, 3]),
+  [3, 2, 3] = ecomet_bitmap:data_or([1, 2, 3], [2, 0]),
+  [3, 2, 3] = ecomet_bitmap:data_or([2, 0], [1, 2, 3]),
+  ok.
+
+bit_and_test(_Config) ->
+  A = rand:uniform(1 bsl 4096 - 1),
+  B = rand:uniform(1 bsl 4096 - 1),
+
+  Bucket1 = data_to_bucket(<<A:4096>>),
+  Bucket2= data_to_bucket(<<B:4096>>),
+
+
+  Result = data_to_bucket(<<(A band B):4096>>),
+  Result = ecomet_bitmap:bit_and(Bucket1, Bucket2),
+  Bucket1 = ecomet_bitmap:bit_and(Bucket1, <<?F:1, 1:1, ?X:1, 1:?SHORT>>),
+  Bucket2 = ecomet_bitmap:bit_and(<<?F:1, 1:1, ?X:1, 1:?SHORT>>, Bucket2),
+  ct:pal("AND_THEN_TO_BUCKET ~n~p~n", [Result]),
+  ct:pal("TO_BUCKET_TWO_DATA_THEN_BITAND ~n~p~n", [ecomet_bitmap:bit_and(Bucket1, Bucket2)]),
+
+  %data_to_bucket(<<1:4096>>)
+  %Result = ecomet_bitmap:bit_and(Bucket1, Bucket2),
+  %<<0:64>> = ecomet_bitmap:bit_and(<<0:64>>, <<255:64>>),
+  ok.
+
+%%=================================================================
+%% Helpers
+%%=================================================================
 bit_count(Value)->
   bit_count(Value,0).
 bit_count(0,Acc)->
@@ -538,28 +618,6 @@ bucket_generator(TestNumber, true) ->
   Payload = payload_generator(BitN, 1 bsl 64 - 1),
   [{Hword, FullWord, Payload} | bucket_generator(TestNumber - 1, true)].
 
-compress_decompress_test(_Config) ->
-  ct:pal("Checking random generator ~n~p~n", [payload_generator(5, 10)]),
-  BucketNumber = 1000,
-  Generator =  bucket_generator(BucketNumber, false),
-  [begin
-    Bucket = <<?W:1, ?X:1, Hword:64, Payload/bitstring>>,
-    Bucket = ecomet_bitmap:compress(ecomet_bitmap:decompress(Bucket))
-   end
-    || {Hword, Payload} <-Generator
-  ],
-  ct:pal("RANDOM very cool thing"),
-  ComplexGenerator = bucket_generator(BucketNumber, true),
-  [
-    begin
-      Bucket = <<?W:1, ?XX:1, Hword:64, FullWord:64, Payload/bitstring>>,
-      Bucket = ecomet_bitmap:compress(ecomet_bitmap:decompress(Bucket))
-    end
-    || {Hword, FullWord, Payload} <- ComplexGenerator
-  ],
-  ct:pal("RANDOM very cool thing, Part 2"),
-  ok.
-
 % %
 t(0) ->
   ok;
@@ -593,12 +651,12 @@ generate_buckets(BucketNumbers) ->
     HWord = rand:uniform(1 bsl 64 - 1),
     Payload = payload_generator(bit_count(HWord), 1 bsl 64 - 1),
     <<?W:1, ?X:1, HWord:64, Payload/bitstring>>;
-  true ->
-    HWord = 1 bsl 64 - 1,
-    FullWord = rand:uniform(1 bsl 64 - 1),
-    Payload = payload_generator(64 - bit_count(FullWord), 1 bsl 64 - 1),
-    <<?W:1, ?XX:1, HWord:64, FullWord:64, Payload/bitstring>>
-  end,
+             true ->
+               HWord = 1 bsl 64 - 1,
+               FullWord = rand:uniform(1 bsl 64 - 1),
+               Payload = payload_generator(64 - bit_count(FullWord), 1 bsl 64 - 1),
+               <<?W:1, ?XX:1, HWord:64, FullWord:64, Payload/bitstring>>
+           end,
   [Bucket | generate_buckets(BucketNumbers - 1)].
 
 
@@ -622,43 +680,6 @@ f(TestNumber) ->
   MergedTail = merge_buckets(Tail),
   {Head, MergedTail} = ecomet_bitmap:first(merge_buckets(Buckets)),
   f(TestNumber - 1).
-
-
-first_test(_Config) ->
-  BucketNumber = 1,
-  Buckets = generate_buckets(BucketNumber),
-  [Head | Tail] = Buckets,
-  MergedTail = merge_buckets(Tail),
-  {Head, MergedTail} = ecomet_bitmap:first(merge_buckets(Buckets)),
-
-  TestNumber = 100,
-  ok = f(TestNumber),
-  ct:pal("I am fck genius"),
-  ok.
-
-split_test(_Config) ->
-  {<<1:1, 0:1, 0:1, 30:5>> ,<<>>} = ecomet_bitmap:split(<<>>, 30),
-  {<<1:1, 0:1, 1:1, 33:29>> ,<<>>} = ecomet_bitmap:split(<<>>, 33),
-  {<<1:1, 1:1, 0:1, 16:5>>, <<1:1, 1:1, 0:1, 14:5, 29>>} = ecomet_bitmap:split(<<1:1, 1:1, 0:1, 30:5, 29>>, 16),
-  {<<1:1, 0:1, 0:1, 30:5>>, <<29>>} = ecomet_bitmap:split(<<1:1, 0:1, 0:1, 30:5, 29>>, 30),
-  {<<1:1, 0:1, 0:1, 30:5, 1:1, 1:1, 0:1, 1:5>>, <<>>} = ecomet_bitmap:split(<<1:1, 0:1, 0:1, 30:5, 193>>, 31),
-
-  ok.
-
-data_and_test(_Config) ->
-  [] = ecomet_bitmap:data_and([], [1, 2, 3]),
-  [] = ecomet_bitmap:data_and([1, 2, 3], []),
-  [1, 2] = ecomet_bitmap:data_and([5, 2, 3], [3, 6]),
-  [1, 2] = ecomet_bitmap:data_and([3, 6], [5, 2, 3]),
-  ok.
-
-data_or_test(_Config) ->
-  [1, 2, 3] = ecomet_bitmap:data_or([1, 2, 3], []),
-  [1, 2, 3] = ecomet_bitmap:data_or([], [1, 2, 3]),
-  [3, 2, 3] = ecomet_bitmap:data_or([1, 2, 3], [2, 0]),
-  [3, 2, 3] = ecomet_bitmap:data_or([2, 0], [1, 2, 3]),
-  ok.
-
 
 % 4096 bit -> {HworddHeader, FullWordHeader, Payload}
 % BlockNumber 63, ..., 0 %
@@ -686,29 +707,9 @@ data_to_bucket(Data) ->
     <<?W:1, ?X:1, Hword:?WORD_LENGTH,
       Payload/bitstring
     >>;
-  true ->
-    << ?W:1, ?X:1, Hword:?WORD_LENGTH,
-      FullWord:?WORD_LENGTH, Payload/bitstring
-    >>
-  end,
+             true ->
+               << ?W:1, ?X:1, Hword:?WORD_LENGTH,
+                 FullWord:?WORD_LENGTH, Payload/bitstring
+               >>
+           end,
   Bucket.
-
-bit_and_test(_Config) ->
-  A = rand:uniform(1 bsl 4096 - 1),
-  B = rand:uniform(1 bsl 4096 - 1),
-
-  Bucket1 = data_to_bucket(<<A:4096>>),
-  Bucket2= data_to_bucket(<<B:4096>>),
-
-
-  Result = data_to_bucket(<<(A band B):4096>>),
-  Result = ecomet_bitmap:bit_and(Bucket1, Bucket2),
-  Bucket1 = ecomet_bitmap:bit_and(Bucket1, <<?F:1, 1:1, ?X:1, 1:?SHORT>>),
-  Bucket2 = ecomet_bitmap:bit_and(<<?F:1, 1:1, ?X:1, 1:?SHORT>>, Bucket2),
-  ct:pal("AND_THEN_TO_BUCKET ~n~p~n", [Result]),
-  ct:pal("TO_BUCKET_TWO_DATA_THEN_BITAND ~n~p~n", [ecomet_bitmap:bit_and(Bucket1, Bucket2)]),
-
-  %data_to_bucket(<<1:4096>>)
-  %Result = ecomet_bitmap:bit_and(Bucket1, Bucket2),
-  %<<0:64>> = ecomet_bitmap:bit_and(<<0:64>>, <<255:64>>),
-  ok.
