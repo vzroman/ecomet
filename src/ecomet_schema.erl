@@ -424,11 +424,17 @@ handle_cast(Request,State)->
 handle_info(on_cycle,#state{cycle = Cycle}=State)->
   timer:send_after(Cycle,on_cycle),
 
-  % synchronize nodes configuration
-  ecomet_node:sync(),
+  try
+    % synchronize nodes configuration
+    ecomet_node:sync(),
 
-  % synchronize database configuration
-  ecomet_db:sync(),
+    % synchronize database configuration
+    ecomet_db:sync(),
+    ok
+  catch
+    _:Error->
+      ?LOGERROR("Error on schema synchronizaton ~p",[Error])
+  end,
 
   {noreply,State};
 
