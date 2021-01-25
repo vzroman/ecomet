@@ -73,7 +73,8 @@
   first/1,
   split/2,
   bit_and/2,
-  bit_or/2
+  bit_or/2,
+  bit_andnot/2
 ]).
 -endif.
 

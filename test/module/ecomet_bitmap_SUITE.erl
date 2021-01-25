@@ -56,7 +56,8 @@
   data_and_test/1,
   data_or_test/1,
   bit_and_test/1,
-  bit_or_test/1
+  bit_or_test/1,
+  bit_andnot_test/1
 ]).
 
 
@@ -71,7 +72,8 @@ all()->
     data_and_test,
     data_or_test,
     bit_and_test,
-    bit_or_test
+    bit_or_test,
+    bit_andnot_test
   ].
 
 groups()->
@@ -597,6 +599,15 @@ bit_or_test(_Config) ->
   ListOr = fun(L1, L2) -> list_or(L1, L2) end,
   ok = check_bitwise_oper(TestNumber, BitOr, ListOr),
   ok.
+
+
+bit_andnot_test(_Config) ->
+  TestNumber = 10,
+  BitAndNot = fun(Bmap1, Bmap2) -> ecomet_bitmap:bit_andnot(Bmap1, Bmap2) end,
+  ListAndNot = fun(L1, L2) -> list_andnot(L1, L2) end,
+  ok = check_bitwise_oper(TestNumber, BitAndNot, ListAndNot),
+  ok.
+
 %%=================================================================
 %% Helpers
 %%=================================================================
@@ -756,6 +767,13 @@ list_or([], L2) ->
   L2;
 list_or([Head1 | Tail1], [Head2 | Tail2]) ->
   [Head1 bor Head2 | list_or(Tail1, Tail2)].
+
+list_andnot( [Head1 | Tail1], [Head2 | Tail2] )->
+  [ Head1 band (Head1 bxor Head2) | list_andnot(Tail1, Tail2) ];
+list_andnot( [], _T2 )->
+  [];
+list_andnot( T1, [] )->
+  T1.
 
 check_bitwise_oper(0, _BitWiseFunc, _ListWiseFunc) ->
   ok;
