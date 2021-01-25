@@ -175,7 +175,6 @@ check_db_test(_Config) ->
 
   ok = ecomet:edit_object(TestObject, #{<<".folder">> => ?OID(Folder2)}),
 
-  % TODO. Create a real database and mount it to some folder.
   % then try to move the object to this new folder
   ?assertError({different_database, _}, ecomet:edit_object(TestObject, #{<<".folder">> => ?OID(Folder3)})),
   ecomet:delete_object(Folder1),
