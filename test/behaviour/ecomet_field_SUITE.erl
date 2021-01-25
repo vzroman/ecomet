@@ -80,9 +80,9 @@ check_name_test(_Config) ->
   %% #{<<".name">> => {<<"Old">>, <<"New">>}, <<".folder">> => 12},
   IsEmptyTrue = true,
   IsEmptyFalse = false,
-  % We are not changing name, should return ok %
-  ok = ecomet_field:check_name(#{<<".folder">> => 12}, IsEmptyTrue),
-  ok = ecomet_field:check_name(#{<<".notname">> => <<"whysohard">>}, IsEmptyFalse),
+  % We are not changing name, should return false %
+  false = ecomet_field:check_name(#{<<".folder">> => {2, 1}}, IsEmptyTrue),
+  false = ecomet_field:check_name(#{<<".notname">> => <<"whysohard">>}, IsEmptyFalse),
 
   % We are trying to change name, while is_empty == false, error should occur%
   ?assertError(has_objects, ecomet_field:check_name(#{<<".name">> => {<<"new">>, <<"old">>}}, IsEmptyFalse)),
@@ -94,8 +94,8 @@ check_name_test(_Config) ->
   ?assertError(invalid_name, ecomet_field:check_name(#{<<".name">> => {<<".Not.valid">>, none}}, IsEmptyTrue)),
 
   % We change name on valid %
-  ok = ecomet_field:check_name(#{<<".name">> => {<<".H-a_R--r9y">>, none}, <<".folder">> => 12}, IsEmptyTrue),
-  ok = ecomet_field:check_name(#{<<".name">> => {<<"._-_-_-_-">>, <<"Alucard">>}, <<".folder">> => 1998}, IsEmptyTrue),
+  true = ecomet_field:check_name(#{<<".name">> => {<<".H-a_R--r9y">>, none}, <<".folder">> => 12}, IsEmptyTrue),
+  true = ecomet_field:check_name(#{<<".name">> => {<<"._-_-_-_-">>, <<"Alucard">>}, <<".folder">> => 1998}, IsEmptyTrue),
 
 
   meck:unload(ecomet),
@@ -110,13 +110,13 @@ check_folder_test(_Config) ->
 
   IsEmptyTrue = true,
   IsEmptyFalse = false,
-  % We are not changing pattern, should return ok%
-  ok = ecomet_field:check_folder(#{<<".notfolder">> => okey}, IsEmptyTrue),
-  ok = ecomet_field:check_folder(#{<<"Uchiha">> => <<"Itachi">>}, IsEmptyFalse),
+  % We are not changing pattern, should return false%
+  false = ecomet_field:check_folder(#{<<".notfolder">> => okey}, IsEmptyTrue),
+  false = ecomet_field:check_folder(#{<<"Uchiha">> => <<"Itachi">>}, IsEmptyFalse),
 
-  % We are creating smth(object), should return ok %
-  ok = ecomet_field:check_folder(#{<<".folder">> => {{1, 2}, none}}, IsEmptyTrue),
-  ok = ecomet_field:check_folder(#{<<".folder">> => {{4, 3}, none}, <<"Linkin">> => <<"Park">>}, IsEmptyFalse),
+  % We are creating smth(object), should return true %
+  true = ecomet_field:check_folder(#{<<".folder">> => {{1, 2}, none}}, IsEmptyTrue),
+  true = ecomet_field:check_folder(#{<<".folder">> => {{4, 3}, none}, <<"Linkin">> => <<"Park">>}, IsEmptyFalse),
 
   % We trying to change folder or pattern, error should occur %
   ?assertError(cannot_change_pattern, ecomet_field:check_folder(#{<<".folder">> => {{1, 2}, {3, 4}}}, IsEmptyFalse)),
@@ -134,9 +134,9 @@ check_storage_test(_Config) ->
 
   IsEmptyTrue = true,
   IsEmptyFalse = false,
-  % We are not changing storage, should return ok %
-  ok = ecomet_field:check_storage(#{<<"singer">> => {<<"avril">>, <<"lavigne">>}}, IsEmptyFalse),
-  ok = ecomet_field:check_storage(#{1 => 2}, IsEmptyTrue),
+  % We are not changing storage, should return false %
+  false = ecomet_field:check_storage(#{<<"singer">> => {<<"avril">>, <<"lavigne">>}}, IsEmptyFalse),
+  false = ecomet_field:check_storage(#{1 => 2}, IsEmptyTrue),
 
   % Object or smth not empty, error should occur %
   ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}}, IsEmptyFalse)),
@@ -156,12 +156,12 @@ check_storage_test(_Config) ->
   ?assertError(memory_only_pattern, ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}, <<".folder">> => ?RAMLOCAL}, IsEmptyTrue)),
   ?assertError(memory_only_pattern, ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}, <<".folder">> => ?RAM}, IsEmptyTrue)),
 
-  ok = ecomet_field:check_storage(#{<<"storage">> => {?RAMDISC, none}, <<".folder">> => ?RAMDISC}, IsEmptyTrue),
-  ok = ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}, <<".folder">> => ?DISC}, IsEmptyTrue),
+  true = ecomet_field:check_storage(#{<<"storage">> => {?RAMDISC, none}, <<".folder">> => ?RAMDISC}, IsEmptyTrue),
+  true = ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}, <<".folder">> => ?DISC}, IsEmptyTrue),
 
   % NewStorage != RAMDISC and NewStorage != ?DISC %
-  ok = ecomet_field:check_storage(#{<<"storage">> => {?RAM, ?RAMLOCAL}, <<".folder">> => ?RAMLOCAL}, IsEmptyTrue),
-  ok = ecomet_field:check_storage(#{<<"storage">> => {?RAMLOCAL, ?DISC}, <<".folder">> => <<"MyFolder">>},IsEmptyTrue),
+  true = ecomet_field:check_storage(#{<<"storage">> => {?RAM, ?RAMLOCAL}, <<".folder">> => ?RAMLOCAL}, IsEmptyTrue),
+  true = ecomet_field:check_storage(#{<<"storage">> => {?RAMLOCAL, ?DISC}, <<".folder">> => <<"MyFolder">>},IsEmptyTrue),
   ?assertError(invalid_storage_type, ecomet_field:check_storage(#{<<"storage">> => {<<"HDFS">>, <<"SSD">>}, <<"Green">> => <<"Day">>}, IsEmptyTrue)),
   ?assertError(invalid_storage_type, ecomet_field:check_storage(#{<<"storage">> => {<<"Cloud">>, ?RAM}}, IsEmptyTrue)),
 
@@ -220,10 +220,10 @@ check_type_test(_Config) ->
 
   IsEmptyTrue = true,
   IsEmptyFalse = false,
-  % We are not changing type and subtype, should return ok %
-  ok = ecomet_field:check_type(#{ <<"Johnny">> => <<"Depp">>}, IsEmptyTrue),
-  ok = ecomet_field:check_type(#{<<"Cyber">> => <<"Punc">>}, IsEmptyFalse),
-  ok = ecomet_field:check_type(#{}, IsEmptyTrue),
+  % We are not changing type and subtype, should return false %
+  false = ecomet_field:check_type(#{ <<"Johnny">> => <<"Depp">>}, IsEmptyTrue),
+  false = ecomet_field:check_type(#{<<"Cyber">> => <<"Punc">>}, IsEmptyFalse),
+  false = ecomet_field:check_type(#{}, IsEmptyTrue),
 
   % We are trying to change type or subtype, but there already created object with the schema %
   ?assertError(has_objects, ecomet_field:check_type(#{<<"type">> => {bool, atom}, <<"subtype">> => {new, old}}, IsEmptyFalse)),
@@ -233,10 +233,10 @@ check_type_test(_Config) ->
   % is_empty == true %
   % We are trying to change type or subtype or we have valid types %
   % If the type is not a list then it doesn't matter what is a subtype
-  ok = ecomet_field:check_type(#{<<"type">> => term, <<"subtype">> => {new, old}}, IsEmptyTrue),
-  ok = ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => binary} ,IsEmptyTrue),
-  ok = ecomet_field:check_type(#{<<"type">> => atom}, IsEmptyTrue),
-  ok = ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => link} ,IsEmptyTrue),
+  true = ecomet_field:check_type(#{<<"type">> => term, <<"subtype">> => {new, old}}, IsEmptyTrue),
+  true = ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => binary} ,IsEmptyTrue),
+  true = ecomet_field:check_type(#{<<"type">> => atom}, IsEmptyTrue),
+  true = ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => link} ,IsEmptyTrue),
 
   % We have unsupported types, error should occur %
   ?assertError(invalid_type, ecomet_field:check_type(#{<<"type">> => qweasd, <<"subtype">> => link} ,IsEmptyTrue)),
@@ -254,13 +254,13 @@ check_index_test(_Config) ->
 
   IsEmptyTrue = true,
   IsEmptyFalse = false,
-  % We are not changing index, should return ok %
-  ok = ecomet_field:check_index(#{ <<"Album">> => <<"Meteora">>}, IsEmptyTrue),
-  ok = ecomet_field:check_index(#{<<"Album">> => <<"Meteora">>, <<"Crypto">> => <<"RSA">>}, IsEmptyFalse),
+  % We are not changing index, should return false %
+  false = ecomet_field:check_index(#{ <<"Album">> => <<"Meteora">>}, IsEmptyTrue),
+  false = ecomet_field:check_index(#{<<"Album">> => <<"Meteora">>, <<"Crypto">> => <<"RSA">>}, IsEmptyFalse),
 
   % %
-  ok = ecomet_field:check_index(#{<<"index">> => {none, [simple]}, <<"Album">> => <<"Meteora">>}, IsEmptyTrue),
-  ok = ecomet_field:check_index(#{<<"index">> => {none, ['3gram']}, <<"Album">> => <<"Meteora">>}, IsEmptyFalse),
+  true = ecomet_field:check_index(#{<<"index">> => {none, [simple]}, <<"Album">> => <<"Meteora">>}, IsEmptyTrue),
+  true = ecomet_field:check_index(#{<<"index">> => {none, ['3gram']}, <<"Album">> => <<"Meteora">>}, IsEmptyFalse),
 
   %supported types %
 %%  [
@@ -268,10 +268,10 @@ check_index_test(_Config) ->
 %%    '3gram',
 %%    datetime
 %%  ],
-  % New indexes contain only supported types, should return ok%
-  ok = ecomet_field:check_index(#{<<"index">> => {[simple, '3gram'], [datetime]}, <<"Album">> => <<"Meteora">>}, IsEmptyFalse),
-  ok = ecomet_field:check_index(#{<<"index">> => {[datetime, '3gram', datetime], none}, <<"Album">> => <<"FolkLore">>},IsEmptyTrue),
-  ok = ecomet_field:check_index(#{<<"index">> => {[datetime, datetime, datetime], none}, <<"Album">> => <<"Divide">>}, IsEmptyTrue),
+  % New indexes contain only supported types, should return true%
+  true = ecomet_field:check_index(#{<<"index">> => {[simple, '3gram'], [datetime]}, <<"Album">> => <<"Meteora">>}, IsEmptyFalse),
+  true = ecomet_field:check_index(#{<<"index">> => {[datetime, '3gram', datetime], none}, <<"Album">> => <<"FolkLore">>},IsEmptyTrue),
+  true = ecomet_field:check_index(#{<<"index">> => {[datetime, datetime, datetime], none}, <<"Album">> => <<"Divide">>}, IsEmptyTrue),
 
   % New indexes contain not supported types, error should occur %
   ?assertError(invalid_index_type, ecomet_field:check_index(#{<<"index">> => {[notvalidtype], [simple]} }, IsEmptyTrue)),
@@ -288,13 +288,13 @@ check_default_test(_Config) ->
 
   IsEmptyTrue = true,
   IsEmptyFalse = false,
-  % We are not changing default field, should return ok %
-  ok = ecomet_field:check_default(#{<<"STALKER">> => <<"SOC">>}, IsEmptyTrue),
-  ok = ecomet_field:check_default(#{}, IsEmptyFalse),
+  % We are not changing default field, should return false %
+  false = ecomet_field:check_default(#{<<"STALKER">> => <<"SOC">>}, IsEmptyTrue),
+  false = ecomet_field:check_default(#{}, IsEmptyFalse),
 
-  % We are changing default field to none, should return ok %
-  ok = ecomet_field:check_default(#{<<"default">> => {none, <<"notnone">>}}, IsEmptyTrue),
-  ok = ecomet_field:check_default(#{<<"default">> => {none, <<"qwe">>}}, IsEmptyFalse),
+  % We are changing default field to none, should return true %
+  true = ecomet_field:check_default(#{<<"default">> => {none, <<"notnone">>}}, IsEmptyTrue),
+  true = ecomet_field:check_default(#{<<"default">> => {none, <<"qwe">>}}, IsEmptyFalse),
 
 %%  #{
 %%    type => string,
@@ -307,28 +307,28 @@ check_default_test(_Config) ->
 %%  })
 
   % We are changing default field with valid default_field value, should return ok %
-  ok = ecomet_field:check_default(#{
+  true = ecomet_field:check_default(#{
     <<"default">> => {1, old},
     <<"type">> => string,
     <<"subtype">> => none
   }, IsEmptyFalse),
   <<"1">> = get(default),
 
-  ok = ecomet_field:check_default(#{
+  true = ecomet_field:check_default(#{
     <<"default">> => {<<"123">>, old},
     <<"type">> => integer,
     <<"subtype">> => none
   }, IsEmptyTrue),
   123 = get(default),
 
-  ok = ecomet_field:check_default(#{
+  true = ecomet_field:check_default(#{
     <<"default">> => {new, old},
     <<"type">> => atom,
     <<"subtype">> => none
   }, IsEmptyFalse),
   new = get(default),
 
-  ok = ecomet_field:check_default(#{
+  true = ecomet_field:check_default(#{
     <<"default">> => {1, old},
     <<"type">> => term,
     <<"subtype">> => none

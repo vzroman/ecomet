@@ -30,7 +30,8 @@
   check_database_test/1,
   inherit_rights_test/1,
   recursive_rights_test/1,
-  apply_rigths_test/1,
+  rights_changes_test/1,
+  apply_rights_test/1,
   apply_recursion_test/1,
   on_create_test/1,
   on_edit_test/1,
@@ -42,7 +43,8 @@ all() ->
     check_database_test,
     inherit_rights_test,
     recursive_rights_test,
-    apply_rigths_test,
+    rights_changes_test,
+    apply_rights_test,
     apply_recursion_test,
     on_create_test,
     on_edit_test,
@@ -84,7 +86,7 @@ check_database_test(_Config) ->
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
   % We are trying to change database(unmount old and mount new),
-  % but unmount onlt allowed when folder is empty
+  % but unmount only allowed when folder is empty
   ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<"database">> => none})),
   ecomet:delete_object(Folder2),
   ecomet:edit_object(Folder1, #{<<"database">> => none}),
@@ -154,12 +156,27 @@ inherit_rights_test(_Config) ->
 
 
 recursive_rights_test(_Config) ->
-
-
   ok
 .
 
-apply_rigths_test(_Config) ->
+rights_changes_test(_Config) ->
+  meck:new(ecomet),
+  meck:expect(ecomet, field_changes, fun(Object, Field) -> maps:get(Field, Object, none) end),
+%%  #{
+%%    <<".readgroups">> => {[]},
+%%    <<".writegroups">> => []
+%%  },
+  none = ecomet_folder:rights_changes(#{ <<".writegroups">> => {[{1, 2}], none}}, <<".readgroups">>),
+  none = ecomet_folder:rights_changes(#{<<".readgroups">> => {none, none}}, <<".readgroups">>),
+  {[{1, 5}, {3, 4}],[]} = ecomet_folder:rights_changes(#{
+    <<".readgroups">> => {[{3, 4}, {1, 5}, {3, 4}], none}}, <<".readgroups">>),
+
+  {[], [{1, 5}, {3, 4}]} = ecomet_folder:rights_changes(#{
+    <<".readgroups">> => {none, [{3, 4}, {1, 5}, {3, 4}]}}, <<".readgroups">>),
+  meck:unload(ecomet),
+  ok.
+
+apply_rights_test(_Config) ->
   meck:new([ecomet]),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object, none)} end),
   meck:expect(ecomet, edit_object, fun(_Object, Fields) -> put(edit, Fields), ok end),
@@ -264,7 +281,8 @@ on_edit_test(_Config) ->
   ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<"database">> => ?OID(NotSoUseless)})) ,
 
   ecomet:delete_object(Folder2),
-  % Folder2 deleted and here Folder1 is empty  %
+  % Folder2 deleted and here Folder1 is empty
+  % So we can change <<database>> field %
   ecomet:edit_object(Folder1, #{<<"database">> => ?OID(NotSoUseless)}),
   'NotSoUseless' = ecomet_schema:get_mounted_db(?OID(Folder1)),
 
@@ -314,6 +332,8 @@ on_delete_test(_Config) ->
   ?OID(<<"/root/Chester/Arthas/Illidan">>),
   ct:pal("After OID"),
 %  ecomet:delete_object(Folder2),
+  % We delete Folder1
+  % Because Folder1 contain other Folders, other Folders will be deleted with Folder1%
   ecomet:delete_object(Folder1),
   ?assertError({badmatch,{error,invalid_path}}, ?OID(<<"/root/Chester">>)),
   ?assertError({badmatch,{error,invalid_path}}, ?OID(<<"/root/Chester/LightBringer">>)),

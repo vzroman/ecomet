@@ -142,19 +142,46 @@ edit_rights_test(_Config) ->
 
 check_db_test(_Config) ->
   ecomet_user:on_init_state(),
-  Object = ecomet:create_object(#{
+  Folder1 = ecomet:create_object(#{
     <<".name">> => <<"Forest">>,
-    <<".folder">> => {2, 1},
-    <<".pattern">> => {3, 2},
-    <<".writegroups">> => [],
-    <<".readgroups">> => []
+    <<".folder">> => ?OID(<<"/root">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
-  ok = ecomet:edit_object(Object, #{<<".folder">> => {2, 2}}),
+  Folder2 = ecomet:create_object(#{
+    <<".name">> => <<"Folder1">>,
+    <<".folder">> => ?OID(<<"/root">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>)
+  }),
+  RealDB = ecomet:create_object(#{
+    <<".name">> => <<"RealDB">>,
+    <<".folder">> => ?OID(<<"/root/.databases">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.database">>)
+  }),
+  Folder3 = ecomet:create_object(#{
+    <<".name">> => <<"Folder2">>,
+    <<".folder">> => ?OID(<<"/root">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<"database">> => ?OID(RealDB)
+  }),
+  'RealDB' = ecomet_schema:get_mounted_db(?OID(Folder3)),
+  ct:pal("RealDB ID ~n~p~n",[ecomet_schema:get_db_id('RealDB')]),
+  ct:pal("Folder3 dbID ~n~p~n",[ecomet_folder:get_db_id(?OID(Folder3))]),
+  ct:pal("FOlder2 dbID ~n~p~n",[ecomet_folder:get_db_id(?OID(Folder2))]),
+  TestObject = ecomet:create_object(#{
+    <<".name">> => <<"Test">>,
+    <<".folder">> => ?OID(Folder1),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.object">>)
+  }),
+
+  ok = ecomet:edit_object(TestObject, #{<<".folder">> => ?OID(Folder2)}),
 
   % TODO. Create a real database and mount it to some folder.
   % then try to move the object to this new folder
-  ?assertError({different_database, _}, ecomet:edit_object(Object, #{<<".folder">> => {2, 70000}})),
-  ecomet:delete_object(Object),
+  ?assertError({different_database, _}, ecomet:edit_object(TestObject, #{<<".folder">> => ?OID(Folder3)})),
+  ecomet:delete_object(Folder1),
+  ecomet:delete_object(Folder2),
+  ecomet:delete_object(Folder3),
+  ecomet:delete_object(RealDB),
   ok
 .
 
