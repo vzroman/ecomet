@@ -162,7 +162,7 @@ from_string(float,Invalid)->
 from_string(bool,true)->
   true;
 from_string(bool,false)->
-  true;
+  false;
 from_string(bool,<<"true">>)->
   true;
 from_string(bool,<<"false">>)->
