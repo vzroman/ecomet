@@ -1119,9 +1119,13 @@ read_fun(FieldName,Formatter) when is_binary(FieldName)->
     if
       is_function(Formatter,2) ->
         fun(Object)->
-          Value = maps:get(FieldName,Object),
-          {ok,Type}=ecomet_object:field_type(maps:get(object,Object),FieldName),
-          Formatter(Type,Value)
+          case maps:get(FieldName,Object) of
+            undefined_field->
+              Formatter(string,undefined_field);
+            Value->
+              {ok,Type}=ecomet_object:field_type(maps:get(object,Object),FieldName),
+              Formatter(Type,Value)
+          end
         end;
       true ->
         fun(Object)->maps:get(FieldName,Object) end
