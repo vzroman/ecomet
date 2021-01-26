@@ -85,7 +85,7 @@ reply(ID,Type,Result)->
 handle(<<"login">>,_ID,#{<<"login">>:=Login,<<"pass">>:=Pass})->
   case ecomet_user:login(Login,Pass) of
     ok->{ok,ok};
-    {error,Error}->{error,Error}
+    error->{error,invalid_credentials}
   end;
 
 handle(<<"query">>,_ID,#{<<"statement">>:=Statement})->

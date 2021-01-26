@@ -257,15 +257,19 @@ read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Field
   ToLoad = maps:merge(Project,?SERVICE_FIELDS),
   Storage=
     maps:fold(fun(F,_,Acc)->
-      {ok,S}=ecomet_field:get_storage(Map,F),
-
-      case Acc of
-        #{S:=_}->Acc;
+      case ecomet_field:get_storage(Map,F) of
+        {ok,S}->
+          case Acc of
+            #{S:=_}->Acc;
+            _->
+              case load_storage(OID,S) of
+                Values when is_map(Values)-> Acc#{S=>Values};
+                _-> Acc#{S=>#{}}
+              end
+          end;
         _->
-          case load_storage(OID,S) of
-            Values when is_map(Values)-> Acc#{S=>Values};
-            _-> Acc#{S=>#{}}
-          end
+          % undefined_field
+          Acc
       end
     end,#{},maps:without(maps:keys(ToLoad),Fields)),
 
@@ -291,12 +295,22 @@ read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Field
               New;
             _->
               % Look up the field in the storage
-              {ok,S}=ecomet_field:get_storage(Map,Name),
-              #{S:=Values} = Storage,
-              maps:get(Name,Values,Default)
+              case ecomet_field:get_storage(Map,Name) of
+                {ok,S}->
+                  #{S:=Values} = Storage,
+                  maps:get(Name,Values,Default);
+                _->
+                  % undefined_field
+                  undefined_field
+              end
           end,
-        {ok,Type}=ecomet_field:get_type(Map,Name),
-        Formatter(Type,Value)
+        if
+          Value=/=undefined_field ->
+            {ok,Type}=ecomet_field:get_type(Map,Name),
+            Formatter(Type,Value);
+          true ->
+            Formatter(string,undefined_field)
+        end
     end
   end,Fields).
 
