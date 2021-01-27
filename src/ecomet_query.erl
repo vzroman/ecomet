@@ -344,12 +344,12 @@ compile_subscribe_read(['*'],Formatter)->
     if
       is_function(Formatter,2) ->
         fun(Object,Field)->
-          Value = maps:get(Field,Object),
+          Value = maps:get(Field,Object,none),
           {ok,Type}=ecomet_object:field_type(maps:get(object,Object),Field),
           Formatter(Type,Value)
         end;
       true ->
-        fun(Object,Field)->maps:get(Field,Object) end
+        fun(Object,Field)->maps:get(Field,Object,none) end
     end,
 
   Params=
@@ -1119,7 +1119,7 @@ read_fun(FieldName,Formatter) when is_binary(FieldName)->
     if
       is_function(Formatter,2) ->
         fun(Object)->
-          case maps:get(FieldName,Object) of
+          case maps:get(FieldName,Object,none) of
             undefined_field->
               Formatter(string,undefined_field);
             Value->
