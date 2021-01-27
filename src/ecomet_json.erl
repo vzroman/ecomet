@@ -62,7 +62,7 @@ on_request(Msg)->
 on_subscription(ID,Action,OID,Fields)->
   reply_ok(ID,#{
     <<"oid">>=> ecomet_types:term_to_string(OID),
-    <<"fields">>=>export_query_cell(Fields),
+    <<"fields">>=>ecomet_types:to_json(Fields),
     <<"action">>=>Action
   }).
 
