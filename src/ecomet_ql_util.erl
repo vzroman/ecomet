@@ -30,6 +30,7 @@
   concat/2,concat/1,
   string/1,
   term/1,
+  atom/1,
   to_base64/1,
   from_base64/1
 ]).
@@ -91,6 +92,11 @@ term(String) when is_binary(String)->
   Term;
 term(Term)->
   Term.
+
+atom(List) when is_list(List)->
+  [atom(I)||I<-List];
+atom(String)->
+  ecomet_types:from_string(atom,String).
 
 to_base64(Value) when is_binary(Value)->
   base64:encode(Value);
