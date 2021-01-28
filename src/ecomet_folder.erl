@@ -95,8 +95,8 @@ find_object(FolderID,Name)->
     { <<".folder">>,'=',FolderID},
     { <<".name">>,'=',Name }
   ]}) of
-    []->{ error, not_found };
-    [OID|_]-> { ok, OID }
+    [OID|_]-> { ok, OID };
+    _->{ error, not_found }
   end.
 find_object_system(FolderID,Name)->
   DB = get_db_name(FolderID),
@@ -104,8 +104,8 @@ find_object_system(FolderID,Name)->
     {<<".folder">>,'=',FolderID},
     { <<".name">>,'=',Name}
   ]}) of
-    []->{ error, not_found };
-    [OID|_]-> { ok, OID }
+    [OID|_]-> { ok, OID };
+    _->{ error, not_found }
   end.
 
 get_content(Folder)->
