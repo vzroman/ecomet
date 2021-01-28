@@ -3,13 +3,13 @@
 ######################################################################
 
 ## Name of the node
-##-name nonode@nohost
+##-name ecomet@host.domain
 
 ## Cookie for distributed erlang
 -setcookie ecomet
 
 ## folder for database
--mnesia dir '"DB_ecomet_common_SUITE"'
+-mnesia dir '"DB"'
 
 ## Sets the maximum number of simultaneously existing processes for this system.
 +P 2097152

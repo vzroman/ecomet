@@ -685,14 +685,19 @@ reduce_remote(WaitList,ReadyResult)->
 %% 3. Search IDLOW. Match all conditions against IDLOW level index. Search only within defined on step 2 IDHIGHs
 execute_local(DB,InConditions,Map,{Oper,RS})->
 
-	% Patterns search
-	Conditions=search_patterns(InConditions,DB,element(3,InConditions)),
+	% ServiceID search
+	InitPatterns=
+		case element(3,InConditions) of
+			{ExtPatterns,_}->ExtPatterns;
+			_->'UNDEFINED'
+		end,
+	Conditions=search_patterns(InConditions,DB,InitPatterns),
 
-	{Patterns,_} = element(3,Conditions),
+	{ServiveIDs,_} = element(3,Conditions),
 
 	DB_RS=get_db_branch(DB,RS),
 	% Patterns cycle
-	RunPatterns=if Oper=='ANDNOT'->Patterns; true->bitmap_oper(Oper,Patterns,get_branch([],DB_RS)) end,
+	RunPatterns=if Oper=='ANDNOT'->ServiveIDs; true->bitmap_oper(Oper,ServiveIDs,get_branch([],DB_RS)) end,
 
 	ResultRS=
 		element(2,ecomet_bitmap:foldr(fun(IDP,{IDPBits,IDPMap})->
