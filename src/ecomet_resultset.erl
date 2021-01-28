@@ -683,36 +683,37 @@ reduce_remote(WaitList,ReadyResult)->
 %% 		only if patterns not explicitly defined in conditions.
 %% 2. Search IDHIGHs. Match all conditions against IDHIGH level index.
 %% 3. Search IDLOW. Match all conditions against IDLOW level index. Search only within defined on step 2 IDHIGHs
-execute_local(DB,Conditions,Map,{Oper,RS})->
-  case element(3,Conditions) of
-    'UNDEFINED'->
-			% Patterns search
-			Patterned=search_patterns(Conditions,DB,'UNDEFINED'),
-      execute_local(DB,Patterned,Map,{Oper,RS});
-		{Patterns,_}->
-			DB_RS=get_db_branch(DB,RS),
-      % Patterns cycle
-			RunPatterns=if Oper=='ANDNOT'->Patterns; true->bitmap_oper(Oper,Patterns,get_branch([],DB_RS)) end,
-			ResultRS=
-      	element(2,ecomet_bitmap:foldr(fun(IDP,{IDPBits,IDPMap})->
-					% IDHIGH search
-					{HBits,Conditions1}=seacrh_idhs(Conditions,DB,IDP),
-					RunHBits=if Oper=='ANDNOT'->HBits; true->bitmap_oper(Oper,HBits,get_branch([IDP],DB_RS)) end,
-					% IDH cycle
-					case element(2,ecomet_bitmap:foldr(fun(IDH,{IDHBits,IDHMap})->
-						% IDLOW search
-						LBits=search_idls(Conditions1,DB,IDP,IDH),
-						case bitmap_oper(Oper,LBits,get_branch([IDP,IDH],DB_RS)) of
-							none->{IDHBits,IDHMap};
-							ResIDLs->{ecomet_bitmap:set_bit(IDHBits,IDH),maps:put(IDH,ResIDLs,IDHMap)}
-						end
-					end,new_branch(),RunHBits,{none,none})) of
-						{none,_}->{IDPBits,IDPMap};
-						{IDHBits,IDHMap}->{ecomet_bitmap:set_bit(IDPBits,IDP),maps:put(IDP,{IDHBits,IDHMap},IDPMap)}
-					end
-				end,new_branch(),RunPatterns,{none,none})),
-			Map([{DB,ResultRS}])
-	end.
+execute_local(DB,InConditions,Map,{Oper,RS})->
+
+	% Patterns search
+	Conditions=search_patterns(InConditions,DB,element(3,InConditions)),
+
+	{Patterns,_} = element(3,Conditions),
+
+	DB_RS=get_db_branch(DB,RS),
+	% Patterns cycle
+	RunPatterns=if Oper=='ANDNOT'->Patterns; true->bitmap_oper(Oper,Patterns,get_branch([],DB_RS)) end,
+
+	ResultRS=
+		element(2,ecomet_bitmap:foldr(fun(IDP,{IDPBits,IDPMap})->
+			% IDHIGH search
+			{HBits,Conditions1}=seacrh_idhs(Conditions,DB,IDP),
+			RunHBits=if Oper=='ANDNOT'->HBits; true->bitmap_oper(Oper,HBits,get_branch([IDP],DB_RS)) end,
+			% IDH cycle
+			case element(2,ecomet_bitmap:foldr(fun(IDH,{IDHBits,IDHMap})->
+				% IDLOW search
+				LBits=search_idls(Conditions1,DB,IDP,IDH),
+				case bitmap_oper(Oper,LBits,get_branch([IDP,IDH],DB_RS)) of
+					none->{IDHBits,IDHMap};
+					ResIDLs->{ecomet_bitmap:set_bit(IDHBits,IDH),maps:put(IDH,ResIDLs,IDHMap)}
+				end
+			end,new_branch(),RunHBits,{none,none})) of
+				{none,_}->{IDPBits,IDPMap};
+				{IDHBits,IDHMap}->{ecomet_bitmap:set_bit(IDPBits,IDP),maps:put(IDP,{IDHBits,IDHMap},IDPMap)}
+			end
+		end,new_branch(),RunPatterns,{none,none})),
+	Map([{DB,ResultRS}]).
+
 %%
 %% Search patterns
 %%
@@ -747,11 +748,12 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 search_patterns({'AND',Conditions,'UNDEFINED'},DB,ExtBits)->
 	{ResPatterns,ResConditions}=
 		lists:foldr(fun(Condition,{AccPatterns,AccCond})->
-			PatternedCond=search_patterns(Condition,DB,AccPatterns),
+			Acc = if AccPatterns=:='UNDEFINED'->ExtBits; true->AccPatterns end,
+			PatternedCond=search_patterns(Condition,DB,Acc),
 			% If one branch can be true only for PATTERNS1, then hole AND can be true only for PATTERNS1
 			{CBits,_}=element(3,PatternedCond),
 			{bitmap_oper('AND',AccPatterns,CBits),[PatternedCond|AccCond]}
-		end,{ExtBits,[]},Conditions),
+		end,{'UNDEFINED',[]},Conditions),
 	% 'UNDEFINED' only if AND contains no real tags.
 	% !!! EMPTY {'AND',[]} MAY KILL ALL RESULTS
 	Config=if ResPatterns=='UNDEFINED'->{none,[]}; true->{ResPatterns,[]} end,
