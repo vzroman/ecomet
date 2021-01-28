@@ -246,9 +246,9 @@ bit_and(_Bitmap1,<<>>)->
   <<>>;
 % Short empty
 bit_and(<<?F:1,0:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
-  bit_and(Tail1,tail(Bitamp2,L));
+  <<?F:1,0:1,?X:1,L:?SHORT,(bit_and(Tail1,tail(Bitamp2,L)))/bitstring>>;
 bit_and(Bitamp1,<<?F:1,0:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
-  bit_and(tail(Bitamp1,L),Tail2);
+  <<?F:1,0:1,?X:1,L:?SHORT,(bit_and(tail(Bitamp1,L),Tail2))/bitstring>>;
 % Short full
 bit_and(<<?F:1,1:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
   { Head2, Tail2 } = split( Bitamp2, L),
@@ -258,9 +258,9 @@ bit_and(Bitamp1,<<?F:1,1:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
   <<Head1/bitstring,(bit_and(Tail1,Tail2))/bitstring>>;
 % Long empty
 bit_and(<<?F:1,0:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
-  bit_and(Tail1,tail(Bitamp2,L));
+  <<?F:1,0:1,?XX:1,L:?LONG,(bit_and(Tail1,tail(Bitamp2,L)))/bitstring>>;
 bit_and(Bitamp1,<<?F:1,0:1,?XX:1,L:?LONG,Tail2/bitstring>>)->
-  bit_and(tail(Bitamp1,L),Tail2);
+  <<?F:1,0:1,?XX:1,L:?LONG,(bit_and(tail(Bitamp1,L),Tail2))/bitstring>>;
 % Long full
 bit_and(<<?F:1,1:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
   { Head2, Tail2 } = split( Bitamp2, L),
