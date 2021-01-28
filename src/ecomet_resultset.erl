@@ -310,7 +310,7 @@ build_conditions({'ANDNOT',{Condition1,Condition2},IntBits},ExtBits)->
 build_tag_config(Patterns,Field)->
 	% If patterns are defined, then we can define available storages for the tag
 	element(2,ecomet_bitmap:foldl(fun(ID,{AccPatterns,AccStorages})->
-		Map=ecomet_pattern:get_map({?PATTERN_PATTERN,ID}),
+		Map=ecomet_pattern:get_map(ecomet_object:get_pattern_oid(ID)),
 		case ecomet_field:get_storage(Map,Field) of
 			% TAG is actual for the Pattern, add storage for the Field
 			{ok,Storage}->
@@ -726,7 +726,7 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 				Field=element(1,Tag),
 				FoundStorages=
 					element(2,ecomet_bitmap:foldl(fun(ID,AccStorages)->
-						Map=ecomet_pattern:get_map({?PATTERN_PATTERN,ID}),
+						Map=ecomet_pattern:get_map(ecomet_object:get_pattern_oid(ID)),
 						case ecomet_field:get_storage(Map,Field) of
 							{ok,Storage}->ordsets:add_element(Storage,AccStorages);
 							{error,undefined_field}->AccStorages

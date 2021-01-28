@@ -768,6 +768,8 @@ get_id(?ObjectID(_,ObjectID))->
 get_pattern_oid(#object{oid=OID})->
   get_pattern_oid(OID);
 get_pattern_oid(?ObjectID(ServiceID,_))->
+  get_pattern_oid(ServiceID);
+get_pattern_oid(ServiceID)->
   IDH = ServiceID div (1 bsl (?NODE_ID_LENGTH + ?DB_ID_LENGTH + ?PATTERN_IDL_LENGTH)),
   IDL = ServiceID rem (1 bsl ?PATTERN_IDL_LENGTH),
   PatternID = IDH * (1 bsl ?PATTERN_IDL_LENGTH) + IDL,
