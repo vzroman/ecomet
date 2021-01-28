@@ -324,7 +324,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
                   TagsResult =:= add,RightsResult=:=del->false ;
                   TagsResult =:= del,RightsResult=:=add->false ;
                   TagsResult =:= add;RightsResult=:=add ->
-                    Self!?SUBSCRIPTION(ID,create,OID,Read(Deps,Object));
+                    Self!?SUBSCRIPTION(ID,create,OID,Read(ReadDeps,Object));
                   TagsResult =:= del;RightsResult=:=del ->
                     Self!?SUBSCRIPTION(ID,delete,OID,#{});
                   true ->

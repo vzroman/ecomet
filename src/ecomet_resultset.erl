@@ -60,7 +60,7 @@
 
 -export([
 	define_patterns/1,
-	build_conditions/2,
+	build_conditions/1,
 	optimize/1,
 	search_patterns/3,
 	seacrh_idhs/3,
@@ -88,13 +88,13 @@
 %% 		through all storages (index include top layer on pattern).
 prepare(Conditions)->
 	Patterned=define_patterns(Conditions),
-	{Built,Direct}=build_conditions(Patterned,element(3,Patterned)),
-	if
-		% Query contains direct conditions, we must use normal form of the query
-		Direct->
+	Built=build_conditions(Patterned),
+	case has_direct(Built) of
+		true->
 			Normal=normalize(Built),
 			optimize(Normal);
-		true->Built
+		_->
+			Built
 	end.
 
 %%=====================================================================
@@ -112,7 +112,7 @@ subscription_prepare(Conditions)->
 
 	% Standard preparation procedure
 	Patterned=define_patterns(Conditions),
-	{Built,_Direct}=build_conditions(Patterned,element(3,Patterned)),
+	Built=build_conditions(Patterned),
 
 	% Normalization
 	{'OR',Normal,_}=normalize(Built),
@@ -239,44 +239,28 @@ direct_or([],_Fields)->
 %% Define conditions on patterns
 %%
 define_patterns({<<".pattern">>,':=',PatternID})->
-	ID=ecomet_object:get_id(PatternID),
-	Bit=ecomet_bitmap:set_bit(none,ID),
-	{'LEAF',{'=',<<".pattern">>,PatternID},Bit};
+	{'LEAF',{'=',<<".pattern">>,PatternID}};
 define_patterns({<<".pattern">>,'=',PatternID})->
 	Patterns = [PatternID|ecomet_pattern:get_children(PatternID)],
 	define_patterns({'OR',[{<<".pattern">>,':=',P}||P<-Patterns]});
 % Leaf condition
 define_patterns({Field,Oper,Value}) when is_binary(Field)->
-	{'LEAF',{Oper,Field,Value},'UNDEFINED'};
+	{'LEAF',{Oper,Field,Value}};
 % Intersect or union patterns
 define_patterns({Oper,List}) when (Oper=='AND') or (Oper=='OR')->
-	Start=if Oper=='AND'->'UNDEFINED'; true->none end,
-	{PatternBits,ConditionList}=
-	lists:foldl(fun(Condition,{Bits,ResultList})->
-		ReadyCondition=define_patterns(Condition),
-		CBits=element(3,ReadyCondition),
-		ResultBits=bitmap_oper(Oper,Bits,CBits),
-		{ResultBits,[ReadyCondition|ResultList]}
-	end,{Start,[]},List),
-	{Oper,lists:reverse(ConditionList),PatternBits};
+	{ Oper, [ define_patterns(C) || C <-List ] };
 define_patterns({'ANDNOT',Condition1,Condition2})->
 	C1=define_patterns(Condition1),
-	C1Bits=element(3,C1),
 	C2=define_patterns(Condition2),
-	{'ANDNOT',{C1,C2},C1Bits}.
+	{'ANDNOT',{C1,C2}}.
+
 %%
 %% Building conditions
 %%
-build_conditions({'LEAF',{Oper,Field,Value},IntBits},ExtBits)
+build_conditions({'LEAF',{Oper,Field,Value}})
 	when (Oper=='=');(Oper=='LIKE');(Oper=='DATETIME')->
-	Config=
-	case bitmap_oper('AND',IntBits,ExtBits) of
-		'UNDEFINED'->'UNDEFINED';
-		Patterns->
-			build_tag_config(Patterns,Field)
-	end,
-	build_leaf({Oper,Field,Value},Config);
-build_conditions({'LEAF',Condition,_},_)->
+	build_leaf({Oper,Field,Value});
+build_conditions({'LEAF',Condition})->
 	case element(1,Condition) of
 		':='->ok;
 		':>'->ok;
@@ -287,96 +271,80 @@ build_conditions({'LEAF',Condition,_},_)->
 		':<>'->ok;
 		Oper->?ERROR({invalid_operation,Oper})
 	end,
-	{{'DIRECT',Condition,'UNDEFINED'},true};
-build_conditions({Oper,ConditionList,IntBits},ExtBits) when (Oper=='AND') or (Oper=='OR')->
-	XBits=bitmap_oper('AND',ExtBits,IntBits),
-	{ResConditons,ResDirect}=
-	lists:foldr(fun(C,{AccConditions,AccDirect})->
-		{Condition,CDirect}=build_conditions(C,XBits),
-		{[Condition|AccConditions],CDirect or AccDirect}
-	end,{[],false},ConditionList),
-	% nothing can be added to XBits
-	Config=if XBits=='UNDEFINED'->'UNDEFINED'; true->{XBits,[]} end,
-	{{Oper,ResConditons,Config},ResDirect};
-build_conditions({'ANDNOT',{Condition1,Condition2},IntBits},ExtBits)->
-	XBits=bitmap_oper('AND',IntBits,ExtBits),
-	{C1,C1Direct}=build_conditions(Condition1,XBits),
-	{C2,C2Direct}=build_conditions(Condition2,XBits),
-	Config=if XBits=='UNDEFINED'->'UNDEFINED'; true->{XBits,[]} end,
-	{{'ANDNOT',{C1,C2},Config},C1Direct or C2Direct}.
+	{'DIRECT',Condition,'UNDEFINED'};
+build_conditions({Oper,Conditions}) when (Oper=='AND') or (Oper=='OR')->
+	{Oper, [ build_conditions(C) || C<-Conditions], 'UNDEFINED'};
+build_conditions({'ANDNOT',{Condition1,Condition2}})->
+	C1=build_conditions(Condition1),
+	C2=build_conditions(Condition2),
+	{'ANDNOT',{C1,C2},'UNDEFINED'}.
+
+%%
+%% Check if conditions have DIRECT leafs
+%%
+has_direct({'DIRECT',_,_})->
+	true;
+has_direct({ Oper , Conditions ,_}) when (Oper=='AND') or (Oper=='OR')->
+	has_direct(Conditions);
+has_direct({ 'ANDNOT' , {C1, C2} ,_})->
+	has_direct(C1) or has_direct(C2);
+has_direct([C|Tail])->
+	has_direct(C) or has_direct(Tail);
+has_direct(_Other)->
+	false.
+
 %%
 %%	Build helpers
 %%
-build_tag_config(Patterns,Field)->
-	% If patterns are defined, then we can define available storages for the tag
-	element(2,ecomet_bitmap:foldl(fun(ID,{AccPatterns,AccStorages})->
-		Map=ecomet_pattern:get_map(ecomet_object:get_pattern_oid(ID)),
-		case ecomet_field:get_storage(Map,Field) of
-			% TAG is actual for the Pattern, add storage for the Field
-			{ok,Storage}->
-				StorageBits=
-					case lists:keyfind(Storage,1,AccStorages) of
-						false->none;
-						{_,DefinedPatterns,_}->DefinedPatterns
-					end,
-				{ecomet_bitmap:set_bit(AccPatterns,ID),[{Storage,ecomet_bitmap:set_bit(StorageBits,ID),[]}|proplists:delete(Storage,AccStorages)]};
-			% TAG a priory is empty for the Pattern,
-			{error,undefined_field}->{AccPatterns,AccStorages}
-		end
-	end,{none,[]},Patterns,{none,none})).
-
 %------------Service fields-----------------------------------
-build_leaf({'=',<<".path">>,Value},Config)->
+build_leaf({'=',<<".path">>,Value})->
 	case re:run(Value,"(?<F>.*)/(?<N>[^/]+)",[{capture,['F','N'],binary}]) of
 		{match,[Folder,Name]}->
 			case ecomet_folder:path2oid(Folder) of
 				{ok,FolderID}->
-					ANDConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
-					{{'AND',[
-						{'TAG',{<<".folder">>,FolderID,'simple'},Config},
-						{'TAG',{<<".name">>,Name,'simple'},Config}
-					],ANDConfig},false};
+					{'AND',[
+						{'TAG',{<<".folder">>,FolderID,'simple'},'UNDEFINED'},
+						{'TAG',{<<".name">>,Name,'simple'},'UNDEFINED'}
+					],'UNDEFINED'};
 				_->
 					?ERROR({invalid_path,Value})
 			end;
 		_->
 			?ERROR({invalid_path,Value})
 	end;
-build_leaf({'=',<<".oid">>,Value},Config)->
+build_leaf({'=',<<".oid">>,Value})->
 	Object = ecomet_object:construct(Value),
 	#{
 		<<".name">>:=Name,
 		<<".folder">>:=Folder
 	} = ecomet:read_fields(Object,[<<".name">>,<<".folder">>]),
 
-	ANDConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
-	{{'AND',[
-		{'TAG',{<<".folder">>,Folder,'simple'},Config},
-		{'TAG',{<<".name">>,Name,'simple'},Config}
-	],ANDConfig},false};
+	{'AND',[
+		{'TAG',{<<".folder">>,Folder,'simple'},'UNDEFINED'},
+		{'TAG',{<<".name">>,Name,'simple'},'UNDEFINED'}
+	],'UNDEFINED'};
 
 %-----------------Simple index search-------------------------
-build_leaf({'=',Field,Value},Config)->
-	{{'TAG',{Field,Value,simple},Config},false};
+build_leaf({'=',Field,Value})->
+	{'TAG',{Field,Value,simple},'UNDEFINED'};
 %----------------3gram index search---------------------------
-build_leaf({'LIKE',Field,Value},Config)->
-	ANDConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
+build_leaf({'LIKE',Field,Value})->
 	% We drop first and last 3grams, it's ^start, end$
 	case ecomet_index:build_3gram([Value],[]) of
 		% String is too short, use direct analog
-		[]->{{'DIRECT',{':LIKE',Field,Value},'UNDEFINED'},true};
+		[]->{'DIRECT',{':LIKE',Field,Value},'UNDEFINED'};
 		[_PhraseEnd|NGrams]->
-			{{'AND',[{'TAG',{Field,Gram,'3gram'},Config}||Gram<-lists:droplast(NGrams)],ANDConfig},false}
+			{'AND',[{'TAG',{Field,Gram,'3gram'},'UNDEFINED'}||Gram<-lists:droplast(NGrams)],'UNDEFINED'}
 	end;
 %-------------datetime index search---------------------------
-build_leaf({'DATETIME',Field,[From,To]},Config)->
+build_leaf({'DATETIME',Field,[From,To]})->
 
 	% Build an index on the time points
 	FromIndex = ecomet_index:build_dt([From],[]),
 	ToIndex = ecomet_index:build_dt([To],[]),
 
 	% Building the query
-	dt_query(Field,FromIndex,ToIndex,Config).
+	dt_query(Field,FromIndex,ToIndex).
 
 
 bitmap_oper('AND',X1,X2)->
@@ -686,14 +654,13 @@ reduce_remote(WaitList,ReadyResult)->
 execute_local(DB,InConditions,Map,{Oper,RS})->
 
 	% ServiceID search
-	InitPatterns=
+	Conditions=
 		case element(3,InConditions) of
-			{ExtPatterns,_}->ExtPatterns;
-			_->'UNDEFINED'
+			{ExtPatterns,_}->search_patterns(setelement(3,InConditions,'UNDEFINED'),DB,ExtPatterns);
+			_->search_patterns(InConditions,DB,'UNDEFINED')
 		end,
-	Conditions=search_patterns(InConditions,DB,InitPatterns),
 
-	{ServiveIDs,_} = element(3,Conditions),
+	{ ServiveIDs, _ } = element(3,Conditions),
 
 	DB_RS=get_db_branch(DB,RS),
 	% Patterns cycle
@@ -1042,7 +1009,7 @@ get_branch([],Value)->
 %%=====================================================================
 %%	Datetime range conditions
 %%=====================================================================
-dt_query(Field,I1,I2,Config)->
+dt_query(Field,I1,I2)->
 	Cap=get_cap(I1,I2,[]),
 	Trapezoid =
 		if
@@ -1058,7 +1025,7 @@ dt_query(Field,I1,I2,Config)->
 						[triangle_right(EdgeRight,{L,V2})]
 				}]
 		end,
-	{ set_query_field({'AND',Cap++Trapezoid},Field,Config), _Direct = false}.
+	set_query_field({'AND',Cap++Trapezoid},Field).
 
 get_cap([V|T1],[V|T2],Acc)->
 	get_cap(T1,T2,[V|Acc]);
@@ -1180,15 +1147,12 @@ level_min(h)->0;
 level_min(mi)->0;
 level_min(s)->0.
 
-set_query_field({'AND',Items},Field,Config)->
-	GroupConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
-	{'AND',[set_query_field(I,Field,Config)||I<-Items],GroupConfig};
-set_query_field({'OR',Items},Field,Config)->
-	GroupConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
-	{'OR',[set_query_field(I,Field,Config)||I<-Items],GroupConfig};
-set_query_field({'ANDNOT',Item1,Item2},Field,Config)->
-	GroupConfig=case Config of 'UNDEFINED'->'UNDEFINED'; {Patterns,_}->{Patterns,[]} end,
-	{'ANDNOT',{set_query_field(Item1,Field,Config),set_query_field(Item2,Field,Config)},GroupConfig};
-set_query_field(Item,Field,Config)->
-	{'TAG',{Field,Item,datetime},Config}.
+set_query_field({'AND',Items},Field)->
+	{'AND',[set_query_field(I,Field)||I<-Items],'UNDEFINED'};
+set_query_field({'OR',Items},Field)->
+	{'OR',[set_query_field(I,Field)||I<-Items],'UNDEFINED'};
+set_query_field({'ANDNOT',Item1,Item2},Field)->
+	{'ANDNOT',{set_query_field(Item1,Field),set_query_field(Item2,Field)},'UNDEFINED'};
+set_query_field(Item,Field)->
+	{'TAG',{Field,Item,datetime},'UNDEFINED'}.
 
