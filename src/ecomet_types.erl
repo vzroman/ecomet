@@ -302,6 +302,8 @@ to_json(String) when is_binary(String)->
   String;
 to_json(Number) when is_number(Number)->
   Number;
+to_json(none)->
+  null;
 to_json(false)->
   false;
 to_json(true)->
