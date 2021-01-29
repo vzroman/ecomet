@@ -1119,7 +1119,7 @@ read_fun(FieldName,Formatter) when is_binary(FieldName)->
     if
       is_function(Formatter,2) ->
         fun(Object)->
-          case maps:get(FieldName,Object,none) of
+          case maps:get(FieldName,Object,undefined_field) of
             undefined_field->
               Formatter(string,undefined_field);
             Value->
