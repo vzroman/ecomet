@@ -654,25 +654,20 @@ reduce_remote(WaitList,ReadyResult)->
 execute_local(DB,InConditions,Map,{Oper,RS})->
 
 	% ServiceID search
-	Conditions=
-		case element(3,InConditions) of
-			{ExtPatterns,_}->search_patterns(setelement(3,InConditions,'UNDEFINED'),DB,ExtPatterns);
-			_->search_patterns(InConditions,DB,'UNDEFINED')
-		end,
-
+	Conditions = search_patterns(InConditions,DB,'UNDEFINED'),
 	{ ServiveIDs, _ } = element(3,Conditions),
 
 	DB_RS=get_db_branch(DB,RS),
-	% Patterns cycle
 	RunPatterns=if Oper=='ANDNOT'->ServiveIDs; true->bitmap_oper(Oper,ServiveIDs,get_branch([],DB_RS)) end,
 
+	% ServiceID cycle
 	ResultRS=
-		element(2,ecomet_bitmap:foldr(fun(IDP,{IDPBits,IDPMap})->
+		element(2,ecomet_bitmap:foldl(fun(IDP,{IDPBits,IDPMap})->
 			% IDHIGH search
 			{HBits,Conditions1}=seacrh_idhs(Conditions,DB,IDP),
 			RunHBits=if Oper=='ANDNOT'->HBits; true->bitmap_oper(Oper,HBits,get_branch([IDP],DB_RS)) end,
 			% IDH cycle
-			case element(2,ecomet_bitmap:foldr(fun(IDH,{IDHBits,IDHMap})->
+			case element(2,ecomet_bitmap:foldl(fun(IDH,{IDHBits,IDHMap})->
 				% IDLOW search
 				LBits=search_idls(Conditions1,DB,IDP,IDH),
 				case bitmap_oper(Oper,LBits,get_branch([IDP,IDH],DB_RS)) of
@@ -944,8 +939,8 @@ direct_like(String,Pattern) when (is_binary(Pattern) and is_binary(String))->
 %%=====================================================================
 count(RS)->
 	lists:foldr(fun({_DB,DB_RS},RSAcc)->
-		element(2,ecomet_bitmap:foldr(fun(IDP,PatternAcc)->
-			element(2,ecomet_bitmap:foldr(fun(IDH,Acc)->
+		element(2,ecomet_bitmap:foldl(fun(IDP,PatternAcc)->
+			element(2,ecomet_bitmap:foldl(fun(IDH,Acc)->
 				Acc+ecomet_bitmap:count(get_branch([IDP,IDH],DB_RS))
 			end,PatternAcc,get_branch([IDP],DB_RS),{none,none}))
 		end,RSAcc,get_branch([],DB_RS),{none,none}))

@@ -48,6 +48,7 @@
 
 -export([
   bit_sparse/1,
+  bit_hardly_sparse/1,
   bit_sparse_full/1,
   compress_decompress_test/1,
   tail_test/1,
@@ -64,6 +65,7 @@
 all()->
   [
     bit_sparse,
+    bit_hardly_sparse,
     bit_sparse_full,
     compress_decompress_test,
     tail_test,
@@ -284,6 +286,16 @@ bit_sparse(_Config) ->
 
   false = ecomet_bitmap:get_bit(R1,17),
   6 = ecomet_bitmap:count(R1),
+
+  ok.
+
+bit_hardly_sparse(_Config) ->
+
+  Bits = [50331686,33554482,33554470],
+
+  Bucket = lists:foldl(fun(Bit,Acc)->ecomet_bitmap:set_bit(Acc,Bit) end,<<>>,Bits),
+
+  {3,Bits} = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],Bucket,{none,none}),
 
   ok.
 

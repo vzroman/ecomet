@@ -345,7 +345,7 @@ bit_andnot( Bitmap1, <<>> )->
   Bitmap1;
 % Short empty
 bit_andnot(<<?F:1,0:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
-  bit_andnot(Tail1,tail(Bitamp2,L));
+  <<?F:1,0:1,?X:1,L:?SHORT,(bit_andnot(Tail1,tail(Bitamp2,L)))/bitstring>>;
 bit_andnot(Bitamp1,<<?F:1,0:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
   { Head1, Tail1 } = split(Bitamp1,L),
   <<Head1/bitstring,(bit_andnot(Tail1,Tail2))/bitstring>>;
@@ -357,7 +357,7 @@ bit_andnot(Bitamp1,<<?F:1,1:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
   <<?F:1,0:1,?X:1,L:?SHORT,(bit_andnot(tail(Bitamp1,L),Tail2))/bitstring>>;
 % Long empty
 bit_andnot(<<?F:1,0:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
-  bit_andnot(Tail1,tail(Bitamp2,L));
+  <<?F:1,0:1,?XX:1,L:?LONG,(bit_andnot(Tail1,tail(Bitamp2,L)))/bitstring>>;
 bit_andnot(Bitamp1,<<?F:1,0:1,?XX:1,L:?LONG,Tail2/bitstring>>)->
   { Head1, Tail1 } = split(Bitamp1,L),
   <<Head1/bitstring,(bit_andnot(Tail1,Tail2))/bitstring>>;
@@ -607,7 +607,7 @@ split(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N,Head) when N < L->
 split(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N,Head) when N =:= L->
   { <<Head/bitstring,?F:1,V:1,?XX:1,L:?LONG>>, Tail };
 split(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N, Head) when N > L->
-  split(Tail,N-L,<<Head/bitstring,?F:1,V:1,?X:1,L:?SHORT>>);
+  split(Tail,N-L,<<Head/bitstring,?F:1,V:1,?XX:1,L:?LONG>>);
 % Sparse
 split(Bitmap, N, Head)->
   { Bucket, Tail } = first(Bitmap),
