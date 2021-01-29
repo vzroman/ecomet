@@ -31,6 +31,7 @@
 
 -define(SHORT,5).
 -define(LONG,29).
+-define(MAX_LONG,536870912).  % 1 bsl 29
 
 %%------------------------------------------------------------------------------------
 %%  BITS API
@@ -680,9 +681,12 @@ fill(_,0)->
   <<>>;
 fill(V,Length) when Length<(1 bsl 5)->
   <<?F:1,V:1,?X:1,Length:?SHORT>>;
+fill(V,Length) when Length < ?MAX_LONG->
+  <<?F:1,V:1,?XX:1,Length:?LONG>>;
 fill(V,Length)->
-  % Max length 1073741824
-  <<?F:1,V:1,?XX:1,Length:?LONG>>.
+  % The length is bigger than the max
+  <<?F:1,V:1,?XX:1,(?MAX_LONG-1):?LONG,(fill(V,Length - ?MAX_LONG + 1 ))/bitstring>>.
+
 
 bit_count(Value)->
   bit_count(Value,0).

@@ -587,8 +587,8 @@ bit_and_test(_Config) ->
 
   Bucket1 = ecomet_bitmap:bit_and(Bucket1, <<?F:1, 1:1, ?X:1, 1:?SHORT>>),
   Bucket2 = ecomet_bitmap:bit_and(<<?F:1, 1:1, ?X:1, 1:?SHORT>>, Bucket2),
-  <<>> = ecomet_bitmap:bit_and(Bucket2, <<?F:1, 0:1, ?X:1, 1:?SHORT>>),
-  <<>> = ecomet_bitmap:bit_and(<<?F:1, 0:1, ?X:1, 1:?SHORT>>, Bucket1),
+  <<>> = ecomet_bitmap:zip(ecomet_bitmap:bit_and(Bucket2, <<?F:1, 0:1, ?X:1, 1:?SHORT>>)),
+  <<>> = ecomet_bitmap:zip(ecomet_bitmap:bit_and(<<?F:1, 0:1, ?X:1, 1:?SHORT>>, Bucket1)),
 
 
   C = generate_list_of_random_data(7),

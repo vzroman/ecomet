@@ -61,6 +61,7 @@
 -export([
 	define_patterns/1,
 	build_conditions/1,
+	has_direct/1,
 	optimize/1,
 	search_patterns/3,
 	seacrh_idhs/3,
@@ -720,6 +721,7 @@ search_patterns({'AND',Conditions,'UNDEFINED'},DB,ExtBits)->
 			{CBits,_}=element(3,PatternedCond),
 			{bitmap_oper('AND',AccPatterns,CBits),[PatternedCond|AccCond]}
 		end,{ExtBits,[]},Conditions),
+
 	% 'UNDEFINED' only if AND contains no real tags.
 	% !!! EMPTY {'AND',[]} MAY KILL ALL RESULTS
 	Config=if ResPatterns=='UNDEFINED'->{none,[]}; true->{ResPatterns,[]} end,
@@ -744,11 +746,9 @@ search_patterns({'NORM',{{AND,ANDNOT},Direct},'UNDEFINED'},DB,ExtBits)->
 	{ANDBits,_}=element(3,ResAND),
 	ResANDNOT=search_patterns(ANDNOT,DB,ANDBits),
 	{'NORM',{{ResAND,ResANDNOT},Direct},{ANDBits,[]}};
-search_patterns({Oper,Conditions,{IntBits,IDHList}},_DB,ExtBits)->
-	XBits=bitmap_oper('AND',ExtBits,IntBits),
-	{Oper,Conditions,{XBits,IDHList}};
 % Strict operations
 search_patterns(Condition,_DB,_ExtBits)->Condition.
+
 
 %%
 %% 	Search IDHs
