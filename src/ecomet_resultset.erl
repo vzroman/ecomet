@@ -715,12 +715,11 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 search_patterns({'AND',Conditions,'UNDEFINED'},DB,ExtBits)->
 	{ResPatterns,ResConditions}=
 		lists:foldr(fun(Condition,{AccPatterns,AccCond})->
-			Acc = if AccPatterns=:='UNDEFINED'->ExtBits; true->AccPatterns end,
-			PatternedCond=search_patterns(Condition,DB,Acc),
+			PatternedCond=search_patterns(Condition,DB,AccPatterns),
 			% If one branch can be true only for PATTERNS1, then hole AND can be true only for PATTERNS1
 			{CBits,_}=element(3,PatternedCond),
 			{bitmap_oper('AND',AccPatterns,CBits),[PatternedCond|AccCond]}
-		end,{'UNDEFINED',[]},Conditions),
+		end,{ExtBits,[]},Conditions),
 	% 'UNDEFINED' only if AND contains no real tags.
 	% !!! EMPTY {'AND',[]} MAY KILL ALL RESULTS
 	Config=if ResPatterns=='UNDEFINED'->{none,[]}; true->{ResPatterns,[]} end,
