@@ -55,7 +55,8 @@
   is_object/1,
   is_oid/1,
   get_oid/1,
-  check_rights/1
+  check_rights/1,
+  get_behaviours/1
 ]).
 %%====================================================================
 %%		Test API
@@ -415,6 +416,9 @@ check_rights(Read,Write)->
         _->write
       end
   end.
+
+get_behaviours(#object{map=Map})->
+  ecomet_pattern:get_behaviours(Map).
 
 %%=================================================================
 %%	Service API

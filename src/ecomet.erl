@@ -99,6 +99,7 @@
 %%	Utilities
 %%=================================================================
 -export([
+  object_behaviours/1,
   ts/0,
   stop/0
 ]).
@@ -325,6 +326,9 @@ from_json(Type,Value)->
 %%=================================================================
 %%	Utilities
 %%=================================================================
+object_behaviours(ID)->
+  ecomet_object:get_behaviours(open(ID)).
+
 ts()->
   ecomet_lib:ts().
 
