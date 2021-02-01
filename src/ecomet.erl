@@ -81,7 +81,8 @@
   to_path/1,
   is_object/1,
   is_oid/1,
-  get_pattern_oid/1
+  get_pattern_oid/1,
+  object_behaviours/1
 ]).
 
 %%=================================================================
@@ -99,7 +100,6 @@
 %%	Utilities
 %%=================================================================
 -export([
-  object_behaviours/1,
   ts/0,
   stop/0
 ]).
@@ -308,6 +308,9 @@ is_oid(Value)->
 get_pattern_oid(ID)->
   ecomet_object:get_pattern_oid(ID).
 
+object_behaviours(ID)->
+  ecomet_object:get_behaviours(open(ID)).
+
 %%=================================================================
 %%	Formatters
 %%=================================================================
@@ -326,9 +329,6 @@ from_json(Type,Value)->
 %%=================================================================
 %%	Utilities
 %%=================================================================
-object_behaviours(ID)->
-  ecomet_object:get_behaviours(open(ID)).
-
 ts()->
   ecomet_lib:ts().
 
