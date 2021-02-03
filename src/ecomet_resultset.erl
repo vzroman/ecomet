@@ -242,7 +242,7 @@ direct_or([],_Fields)->
 define_patterns({<<".pattern">>,':=',PatternID})->
 	{'LEAF',{'=',<<".pattern">>,PatternID}};
 define_patterns({<<".pattern">>,'=',PatternID})->
-	Patterns = [PatternID|ecomet_pattern:get_children(PatternID)],
+	Patterns = [PatternID|ecomet_pattern:get_children_recursive(PatternID)],
 	define_patterns({'OR',[{<<".pattern">>,':=',P}||P<-Patterns]});
 % Leaf condition
 define_patterns({Field,Oper,Value}) when is_binary(Field)->
