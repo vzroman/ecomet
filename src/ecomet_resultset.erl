@@ -300,7 +300,7 @@ has_direct(_Other)->
 %------------Service fields-----------------------------------
 build_leaf({'=',<<".path">>,<<"/root">>})->
 	{'AND',[
-		{'TAG',{<<".folder">>, {?FOLDER_PATTERN,?ROOT_FOLDER} ,'simple'},'UNDEFINED'},
+		{'TAG',{<<".folder">>, {?FOLDER_PATTERN, 0 } ,'simple'},'UNDEFINED'},
 		{'TAG',{<<".name">>,<<"root">>,'simple'},'UNDEFINED'}
 	],'UNDEFINED'};
 build_leaf({'=',<<".path">>,Value})->
