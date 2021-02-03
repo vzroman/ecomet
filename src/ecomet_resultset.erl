@@ -298,6 +298,11 @@ has_direct(_Other)->
 %%	Build helpers
 %%
 %------------Service fields-----------------------------------
+build_leaf({'=',<<".path">>,<<"/root">>})->
+	{'AND',[
+		{'TAG',{<<".folder">>, {?FOLDER_PATTERN,?ROOT_FOLDER} ,'simple'},'UNDEFINED'},
+		{'TAG',{<<".name">>,<<"root">>,'simple'},'UNDEFINED'}
+	],'UNDEFINED'};
 build_leaf({'=',<<".path">>,Value})->
 	case re:run(Value,"(?<F>.*)/(?<N>[^/]+)",[{capture,['F','N'],binary}]) of
 		{match,[Folder,Name]}->
