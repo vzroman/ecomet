@@ -1,0 +1,24 @@
+#ecometmain{
+	background-color: MediumSeaGreen;
+}
+#pathbar *[name="pathtext"]{
+    text-align: left;
+    width:79%;
+    height: 1em;
+    padding-top: .4em;
+   	padding-bottom: .4em;
+    display: inline-block;
+    cursor:inherit;
+    background-color: Silver;
+}
+#pathbar *[name="pathbuttons"]{
+    text-align: right;
+    width:20%;
+    display: inline-block;
+}
+#ctrlbar,#pathbar{
+	background-color: Silver;
+}
+.ctrlbtn{
+    display: inline-block;
+}

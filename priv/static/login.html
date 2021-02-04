@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title></title>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <link rel="stylesheet" type="text/css" media="screen" href="css/smoothness/jquery-ui-1.10.3.custom.min.css"/>
+        
+        <link rel="stylesheet" href="css/ErlComet/login.css">
+        <script src="js/jquery-1.7.2.min.js" type="text/javascript"></script>
+        <script src="js/jquery-ui-1.10.3.custom.min.js" type="text/javascript"></script>
+         <script src="js/json2.js" type="text/javascript"></script>
+        <script type="text/javascript">
+            $(function() {
+                //<link rel="stylesheet" href="css/smoothness/jquery-ui-1.8.20.custom.css">
+                $('#noscript').toggleClass('hidden');
+                $('#login').toggleClass('hidden').dialog({
+                    draggable: false,
+                    resizable: false,
+                    modal: true,
+                    width: 340,
+                    buttons:{
+                        "Вход":submit
+                    }
+                });
+                $('.ui-dialog-titlebar-close').hide();
+                $('#nonick').dialog({
+                    autoOpen: false,
+                    draggable: false,
+                    resizable: false,
+                    modal: true});
+                $('#nick').focus();
+                $ctrls=$('.ui-button, .ctrl');
+                $('#nick, #pass').keypress(function(event){
+                    if(event.which==13){
+                        $this=$(this);
+                        if($this.val()==''){
+                            $dlg=$("#nonick");
+                            if ($this.attr("id")=='nick'){
+                                $dlg.text('Вы не ввели имя пользователя');
+                            }
+                            if ($this.attr("id")=='pass'){
+                                $dlg.text('Вы не ввели пароль');
+                            }
+                            $dlg.dialog("option",{
+                                close: function(){
+                                    $this.focus();
+                                }
+                            }).dialog("open");
+                        }
+                        $ctrls[$ctrls.index(this)+1].focus();
+                        event.preventDefault();
+                    }
+                });
+                function submit(){
+                    if ($('#nick').val()==''){
+                        $("#nonick").text('Вы не ввели имя пользователя');
+                        $("#nonick").dialog("option",{
+                            close: function(){$('#nick').focus();}}).dialog("open");
+                        return;
+                    }
+                    if ($('#pass').val()==''){
+                        $("#nonick").text('Вы не ввели пароль');
+                        $("#nonick").dialog("option",{
+                            close: function(){$('#pass').focus();}}).dialog("open");
+                        return;
+                    }
+                    req=JSON.stringify({
+                        "nick": $('#nick').val(),
+                        "pass": ($('#pass').val())
+                    });
+                    $.post("/login",{"json":req},recv)
+                };
+                function recv(data){
+                    if(data=="logged"){
+                        location="/main.html";
+                    }
+                    if(data=="error"){
+                        $('#nick, #pass').val('');
+                        $("#nonick").text('Ошибка авторизации');
+                        $("#nonick").dialog("option",{
+                            close: function(){$('#nick').focus();}}).dialog("open");
+                    }
+                }
+            });
+        </script>   
+    </head>
+    <body>
+        <div id="noscript">
+            <div class="ui-state-error ui-corner-all">
+                <div class="ui-icon-alert ui-icon"></div>
+                <div class="errtext">В Вашем браузере отключена поддержка JavaScript. Без поддержки JavaScript работа приложения не возможна</div>
+            </div>
+        </div>
+            
+        <div id="nonick" title="Внимание!"></div>
+        <div id="login" title="Регистрация" class="hidden">
+            <FORM ACTION="../login" METHOD=POST>
+                <div>
+                    <span>Имя пользователя: </span>
+                    <span><INPUT id="nick" TYPE=TEXT NAME="nick" class="ctrl"></span>
+                </div>
+                <div>
+                    <span>Пароль: </span>
+                    <span><INPUT id="pass" TYPE=PASSWORD NAME="pass" class="ctrl"></span>
+                </div>
+            </FORM> 
+        </div>
+    </body>
+</html>

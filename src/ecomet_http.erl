@@ -72,9 +72,9 @@ listener(https,Params)->
 dispatch_rules() ->
   cowboy_router:compile([{'_',[
     {"/", ecomet_http, []},
-    {"/ui/[...]", cowboy_static, {priv_dir, ecomet, "UI"}},
+    {"/static/[...]", cowboy_static, {priv_dir, ecomet, "static"}},
     {"/websocket", ecomet_ws, []},
-    {"/favicon.ico",  cowboy_static, {priv_file, ecomet, "UI/favicon.ico"}}
+    {"/favicon.ico",  cowboy_static, {priv_file, ecomet, "static/favicon.ico"}}
   ]}]).
 
 %%=================================================================
