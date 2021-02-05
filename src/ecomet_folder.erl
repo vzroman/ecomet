@@ -299,7 +299,7 @@ apply_recursion(Object)->
           end);
         true -> ok
       end,
-      ok = ecomet:edit_object(Object,[{<<"recursive_rights">>,false}]);
+      ok = ecomet:edit_object(Object,#{<<"recursive_rights">> => false});
     true ->ok
   end.
 
