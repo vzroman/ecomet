@@ -132,9 +132,9 @@ from_json(Item)->
   jsx:decode(Item,[return_maps]).
 
 
-query_result({Count,{Header,Rows}})->
+query_result({Count,{Header,Rows}}) when is_integer(Count),is_list(Header),is_list(Rows)->
   #{<<"count">>=>Count,<<"result">>=>[Header|ecomet_types:to_json(Rows)] };
-query_result({Header,Rows})->
+query_result({Header,Rows}) when is_list(Header),is_list(Rows)->
   [Header|ecomet_types:to_json(Rows)];
 query_result(ResultList) when is_list(ResultList)->
   [query_result(R)||R<-ResultList];
