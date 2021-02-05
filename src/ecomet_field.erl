@@ -288,9 +288,9 @@ merge_storages([{Storage,Fields}|Rest],PreLoaded,OID,{Merged,Changes})->
     end,
   StorageChanges=
     maps:fold(fun(Field,Value,ChangesList)->
-      case maps:find(Field,OldFields) of
+      case maps:get(Field,OldFields,none) of
         % Value not changed
-        {ok,Value}->ChangesList;
+        Value->ChangesList;
         % Really changed
         _->[{Field,Value}|ChangesList]
       end
