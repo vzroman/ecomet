@@ -2,7 +2,7 @@ define(["ecomet_req","app/dialogid","app/errordlg","app/types"],
 function(ecomet,dialogid,errordlg,types) { 
     return function (){
         var dialogId=dialogid();
-        var subscriptionId="none";
+        var subscriptionId=null;
         $('body').append('<div id="dlg'+dialogId+'"></div>');
         $('#dlg'+dialogId).dialog({
             modal: false,
@@ -10,7 +10,7 @@ function(ecomet,dialogid,errordlg,types) {
             title:"Query",
             buttons:{
                "Close":function(){
-                    if (subscriptionId!="none"){
+                    if (subscriptionId!=null){
                         ecomet.unsubscribe(subscriptionId);
                     }
                     $('#grid'+dialogId).jqGrid('clearGridData',true);
@@ -30,9 +30,9 @@ function(ecomet,dialogid,errordlg,types) {
 
         $queryrun.button();
         $queryrun.click(function(){
-            if (subscriptionId!="none"){
+            if (subscriptionId!=null){
                 ecomet.unsubscribe(subscriptionId);
-                subscriptionId="none";
+                subscriptionId=null;
             }
             $('#grid'+dialogId).jqGrid('clearGridData',true);
             $('#grid'+dialogId).jqGrid('GridDestroy');
@@ -57,11 +57,11 @@ function(ecomet,dialogid,errordlg,types) {
                     function(ErrorText){errordlg(ErrorText);}
                 );
             } else if(query.type=="SUBSCRIBE"){
-                var gridColumns="none";
+                var gridColumns=null;
                 var $grid;
                 subscriptionId=ecomet.subscribe(query.text,
                     function(createObject){
-                        if (gridColumns="none"){
+                        if (gridColumns=null){
                             gridColumns=buildGrid(createObject.fields);
                             $grid=$('#grid'+dialogId);
                         }
@@ -81,7 +81,7 @@ function(ecomet,dialogid,errordlg,types) {
                     },
                     function(Error){
                         ecomet.unsubscribe(subscriptionId);
-                        subscriptionId="none";
+                        subscriptionId=null;
                         errordlg(Error);
                     }
                 );

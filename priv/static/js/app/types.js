@@ -3,7 +3,7 @@ function(ecomet,dialogid,selectpath,editlist,errordlg) {
     function getvalue(value){
         if (value=="undefined_field"){
             return "undefined";
-        } else if (value=="none"){
+        } else if (value==null){
             return "";
         } else if (Array.isArray(value)){
             var valueArray="";
@@ -155,7 +155,7 @@ function(ecomet,dialogid,selectpath,editlist,errordlg) {
     function readValueString($dialog){
         var value=$dialog.children("*[name='value']").val();
         if (value==""){
-            return "none";
+            return null;
         } else{
             return value;
         }
@@ -164,12 +164,12 @@ function(ecomet,dialogid,selectpath,editlist,errordlg) {
     function readValueInteger($dialog){
         var value=$dialog.children("*[name='value']").val();
         if (value==""){
-            return "none";
+            return null;
         } else{
             value=parseInt(value);
             if (isNaN(value)){
                 errordlg("Invalid integer");
-                return "none";
+                return null;
             }else{
                 return value;
             }
@@ -179,12 +179,12 @@ function(ecomet,dialogid,selectpath,editlist,errordlg) {
     function readValueFloat($dialog){
         var value=$dialog.children("*[name='value']").val();
         if (value==""){
-            return "none";
+            return null;
         } else{
             value=parseFloat(value);
             if (isNaN(value)){
                 errordlg("Invalid float");
-                return "none";
+                return null;
             }else{
                 return value;
             }
@@ -200,7 +200,7 @@ function(ecomet,dialogid,selectpath,editlist,errordlg) {
     function readValueBinary($dialog){
         var value=$dialog.children("*[name='value']").val();
         if (value==""){
-            return "none";
+            return null;
         } else{
             return value;
         }
@@ -209,7 +209,7 @@ function(ecomet,dialogid,selectpath,editlist,errordlg) {
     function readValueLink($dialog){
         var value=$dialog.find("*[name='value']").val();
         if (value==""){
-            return "none";
+            return null;
         } else{
             return value;
         }
@@ -219,12 +219,12 @@ function(ecomet,dialogid,selectpath,editlist,errordlg) {
         var value=$dialog[0]["ListValue"].value;
         if (Array.isArray(value)){
             if (value.length==0){
-                return "none";
+                return null;
             } else{
                 return value;
             }
         } else{
-            return "none";
+            return null;
         }
     }
 

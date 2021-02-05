@@ -73,13 +73,12 @@ requirejs([
                         } else if (name == ".pattern") {
                             ObjectFields[".pattern"]["value"] = Pattern;
                         } else {
-                            ObjectFields[name]["value"] = PatternFields[name]["default_value"];
+                            ObjectFields[name]["value"] = PatternFields[name]["default"];
                         }
                         ObjectFields[name]["type"] = PatternFields[name]["type"];
                         ObjectFields[name]["subtype"] = PatternFields[name]["subtype"];
-                        ObjectFields[name]["final"] = PatternFields[name]["final"];
                         ObjectFields[name]["required"] = PatternFields[name]["required"];
-                        ObjectFields[name]["default_value"] = PatternFields[name]["default_value"];
+                        ObjectFields[name]["default"] = PatternFields[name]["default"];
                     }
                     properties("", "create", ObjectFields, function (filledProperties) {
                         var fields = { ".folder": Folder, ".pattern": Pattern };
@@ -113,9 +112,8 @@ requirejs([
                             ObjectFields[name]["value"] = objectProperties[name];
                             ObjectFields[name]["type"] = PatternFields[name]["type"];
                             ObjectFields[name]["subtype"] = PatternFields[name]["subtype"];
-                            ObjectFields[name]["final"] = PatternFields[name]["final"];
                             ObjectFields[name]["required"] = PatternFields[name]["required"];
-                            ObjectFields[name]["default_value"] = PatternFields[name]["default_value"];
+                            ObjectFields[name]["default"] = PatternFields[name]["default"];
                         }
                         properties(Object.oid, "edit", ObjectFields, function (editedProperties) {
                             var fields = {};
@@ -147,16 +145,15 @@ requirejs([
             ecomet.find("GET .oid from * WHERE .path='" + PatternPath + "'",
                 function (result) {
                     var PatternFolder = result.set.pop().oid;
-                    ecomet.find("GET .name,type,subtype,final,required,default_value from * WHERE .folder=$oid('" + PatternFolder + "')",
+                    ecomet.find("GET .name,type,subtype,required,default from * WHERE .folder=$oid('" + PatternFolder + "')",
                         function (result) {
                             var PatternFields = {};
                             for (var i in result.set) {
                                 PatternFields[result.set[i].fields[".name"]] = {
                                     "type": result.set[i].fields["type"],
                                     "subtype": result.set[i].fields["subtype"],
-                                    "final": result.set[i].fields["final"],
                                     "required": result.set[i].fields["required"],
-                                    "default_value": result.set[i].fields["default_value"],
+                                    "default": result.set[i].fields["default"],
                                 }
                             }
                             OnResult(PatternFields);
