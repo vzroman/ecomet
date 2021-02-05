@@ -1139,7 +1139,7 @@ read_fun(FieldName,Formatter) when is_binary(FieldName)->
           end
         end;
       true ->
-        fun(Object)->maps:get(FieldName,Object) end
+        GetValue
     end,
   #get{
     value = Fun,
