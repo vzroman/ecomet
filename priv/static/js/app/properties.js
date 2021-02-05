@@ -5,7 +5,7 @@ function(ecomet,errordlg,dialogid,types) {
         var editedProperties={};
         var dialogId=dialogid();
         var $btnMonitor;
-        var subscriptionId="none";
+        var subscriptionId=null;
 
         showDialog();
         for (var name in Properties){
@@ -29,7 +29,7 @@ function(ecomet,errordlg,dialogid,types) {
                     {"name":"value","index":"value","formatter":valueformatter}
                 ],
                 "ondblClickRow":function(rowid,iRow,iCol,e){
-                    if (subscriptionId=="none"){
+                    if (subscriptionId==null){
                         editProperty(rowid,Properties[rowid]);
                     }
                 }
@@ -60,25 +60,17 @@ function(ecomet,errordlg,dialogid,types) {
 
         function valueformatter(value,options,rowObject){
             if (Operation=="create"){
-                if (Properties[options.rowId]["default_value"]==".autoincrement"){
+                if (Properties[options.rowId]["default"]==".autoincrement"){
                     return ".autoincrement";
                 }
             } 
-            if (value.value=="none"){
-                return types.getvalue(Properties[options.rowId]["default_value"]);
+            if (value.value==null){
+                return types.getvalue(Properties[options.rowId]["default"]);
             }
             return types.getvalue(value.value);
         }
 
         function editProperty(Name,Value){
-            if (Operation=="edit"){
-                if (Properties[Name]["final"]=="true"){
-                    if (Properties[Name].value!="none"){
-                        errordlg("Property is final");
-                        return;
-                    }
-                }
-            }
             types.setvalue(Name,Value,function(NewValue){
                 Properties[Name]["value"]=NewValue;
                 editedProperties[Name]=Properties[Name];
@@ -89,7 +81,7 @@ function(ecomet,errordlg,dialogid,types) {
 
         function saveChanges(){
             if (checkRequired()=="ok"){
-                if (subscriptionId!="none"){
+                if (subscriptionId!=null){
                     ecomet.unsubscribe(subscriptionId);
                 }
                 OnSave(editedProperties);
@@ -105,14 +97,14 @@ function(ecomet,errordlg,dialogid,types) {
                 if (Properties[name].required=="true"){
                     if (editedProperties[name]==undefined){
                         if (Operation=="create"){
-                            if (Properties[name].value!="none"){
+                            if (Properties[name].value!=null){
                                 editedProperties[name]=Properties[name];
                             } else{
                                 result="error";
                                 break;
                             }
                         }
-                    } else if(editedProperties[name].value=="none"){
+                    } else if(editedProperties[name].value==null){
                         result="error";
                         break;
                     }
@@ -126,7 +118,7 @@ function(ecomet,errordlg,dialogid,types) {
 
         function cancelChanges(){
             delete editedProperties;
-            if (subscriptionId!="none"){
+            if (subscriptionId!=null){
                 ecomet.unsubscribe(subscriptionId);
             }
             $('#dlg'+dialogId).dialog("close");
@@ -134,7 +126,7 @@ function(ecomet,errordlg,dialogid,types) {
         }
 
         function monitor(){
-            if (subscriptionId=="none"){
+            if (subscriptionId==null){
                 var shureDialogId=dialogid();
                 $('body').append('<div id="dlg'+shureDialogId+'"><div>All changes will be lost</div></div>');
                 $('#dlg'+shureDialogId).dialog({
@@ -162,7 +154,7 @@ function(ecomet,errordlg,dialogid,types) {
                                 },
                                 function(Error){
                                     ecomet.unsubscribe(subscriptionId);
-                                    subscriptionId="none";
+                                    subscriptionId=null;
                                     errordlg(Error);
                                 }
                             );
@@ -180,7 +172,7 @@ function(ecomet,errordlg,dialogid,types) {
             } else{
                 $btnMonitor.text("Monitor");
                 ecomet.unsubscribe(subscriptionId);
-                subscriptionId="none";
+                subscriptionId=null;
             }
             
         }

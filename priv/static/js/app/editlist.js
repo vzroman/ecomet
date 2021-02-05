@@ -50,7 +50,7 @@ function() {
             },
         };
         $('#grid'+dialogId).jqGrid(gridparams);
-        if ($dialog[0]["ListValue"].value!="none"){
+        if ($dialog[0]["ListValue"].value!=null){
             for (var i in $dialog[0]["ListValue"].value){
                 $('#grid'+dialogId).jqGrid('addRowData',i,{"values":$dialog[0]["ListValue"].value[i]});
             }
@@ -62,8 +62,8 @@ function() {
         }
 
         function addElement(){
-            types.setvalue("+",{"type":$dialog[0]["ListValue"].subtype,"value":"none"},function(NewValue){
-                if ($dialog[0]["ListValue"].value=="none"){
+            types.setvalue("+",{"type":$dialog[0]["ListValue"].subtype,"value":null},function(NewValue){
+                if ($dialog[0]["ListValue"].value==null){
                     $dialog[0]["ListValue"].value=[];
                 }
                 var nextId=$dialog[0]["ListValue"].value.length;
