@@ -1115,11 +1115,22 @@ read_fun({Fun,Arguments},_Formatter) when is_function(Fun,1)->
     args = lists:foldl(fun(#get{args=Args},Acc)->ordsets:union(Args,Acc) end,[],ArgumentList)
   };
 read_fun(FieldName,Formatter) when is_binary(FieldName)->
+  GetValue =
+    fun(Fields)->
+      case Fields of
+        #{FieldName:=Value}->Value;
+        #{object:=Object}->
+          case ecomet_object:field_type(Object,FieldName) of
+            {ok,_}->none;
+            _->undefined_field
+          end
+      end
+    end,
   Fun =
     if
       is_function(Formatter,2) ->
         fun(Object)->
-          case maps:get(FieldName,Object,undefined_field) of
+          case GetValue(Object) of
             undefined_field->
               Formatter(string,undefined_field);
             Value->
