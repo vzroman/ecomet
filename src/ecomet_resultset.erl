@@ -936,7 +936,9 @@ direct_like(String,Pattern) when (is_binary(Pattern) and is_binary(String))->
 				 nomatch->false;
 				 _->true
 			 end
-	end.
+	end;
+direct_like(_String,_Pattern)->
+	false.
 
 %%=====================================================================
 %%	ResultSet iterator
