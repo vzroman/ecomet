@@ -259,7 +259,10 @@ to_string(atom,Value)->
 to_string(binary,Value)->
   base64:encode(Value);
 to_string(link,Value)->
-  ecomet_folder:oid2path(Value);
+  try ecomet_folder:oid2path(Value)
+  catch
+    _:_->term_to_string({invalid_oid,Value})
+  end;
 to_string(term,Value)->
   term_to_string(Value);
 to_string({list,Type},Value)->
