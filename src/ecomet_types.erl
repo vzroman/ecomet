@@ -244,6 +244,8 @@ to_string(_Type,none)->
   <<"none">>;
 to_string(_Type,undefined_field)->
   <<"undefined_field">>;
+to_string(_Type,{undefined_field,_})->
+  <<"undefined_field">>;
 to_string(string,Value)->
   Value;
 to_string(integer,Value)->

@@ -703,7 +703,7 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 						Map=ecomet_pattern:get_map(ecomet_object:get_pattern_oid(ID)),
 						case ecomet_field:get_storage(Map,Field) of
 							{ok,Storage}->ordsets:add_element(Storage,AccStorages);
-							{error,undefined_field}->AccStorages
+							{error,{undefined_field,_}}->AccStorages
 						end
 					end,[],ExtBits,{none,none})),
 				% Order is [ramlocal,ram,ramdisc,disc]
