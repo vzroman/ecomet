@@ -81,12 +81,12 @@ path2oid(<<"/root",_/binary>> = Path)->
   Tokens = string:tokens(unicode:characters_to_list(Tail),"/"),
   Path1= [ unicode:characters_to_binary(Name) || Name <- Tokens],
   path2oid(FolderID,Path1);
-path2oid(_Path)->
-  {error,invalid_path}.
+path2oid(Path)->
+  {error,{invalid_path,Path}}.
 path2oid(FolderID,[Name|Tail])->
   case find_object_system(FolderID,Name) of
     {ok,ItemID} -> path2oid(ItemID,Tail);
-    _->{ error, invalid_path }
+    _->{ error, {invalid_path , <<(oid2path(FolderID))/binary,"/",Name/binary>> } }
   end;
 path2oid(OID,[])->
   {ok,OID}.
