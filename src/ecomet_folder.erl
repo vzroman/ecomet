@@ -178,7 +178,8 @@ on_delete(Object)->
       Item = ecomet:open(ItemID,_Lock=none),
       ok = ecomet:delete_object(Item)
     catch
-      _:object_deleted->ok
+      _:object_deleted->ok;
+      _:OtherError->throw(OtherError)
     end || ItemID <- get_content_system(?OID(Object)) ],
 
   % Unmount a database if some is mounted
