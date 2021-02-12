@@ -174,9 +174,11 @@ on_delete(Object)->
   % IMPORTANT! The search is under admin rights (system), but the remove
   % is in the user context. If the user does not have rights for the object the whole
   % transaction will throw
-  [ begin
+  [ try
       Item = ecomet:open(ItemID,_Lock=none),
       ok = ecomet:delete_object(Item)
+    catch
+      _:object_deleted->ok
     end || ItemID <- get_content_system(?OID(Object)) ],
 
   % Unmount a database if some is mounted
