@@ -102,7 +102,8 @@
 %%=================================================================
 -export([
   ts/0,
-  stop/0
+  stop/0,
+  get_storage_name/3
 ]).
 
 % @edoc ecomet object denotes map where each key is field_key()
@@ -339,4 +340,7 @@ ts()->
 stop()->
   application:stop(ecomet),
   dlss:stop().
+
+get_storage_name(Name,Storage,Type)->
+  ecomet_backend:get_storage_name(Name,Storage,Type).
 
