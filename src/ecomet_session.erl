@@ -21,6 +21,7 @@
 
 -behaviour(gen_server).
 
+-define(TIMEOUT,30000).
 %%=================================================================
 %%	Service API
 %%=================================================================
@@ -75,7 +76,7 @@ on_start_node(Node)->
 register_subscription(Params)->
   case ecomet_user:get_session() of
     {ok,PID}->
-      gen_server:call(PID,{register_subscription,Params});
+      gen_server:call(PID,{register_subscription,Params},?TIMEOUT);
     {error,Error}->
       ?ERROR(Error)
   end.

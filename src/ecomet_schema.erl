@@ -100,18 +100,18 @@
   <<"database">> =>#{ type => link, index=> [simple] }
 }).
 -define(PATTERN_SCHEMA,?FOLDER_SCHEMA#{
-  <<"behaviour_module">>=>#{ type => atom },
+  <<"behaviour_module">>=>#{ type => atom , index=> [simple] },
   <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
   <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
 }).
 -define(FIELD_SCHEMA,?OBJECT_SCHEMA#{
-  <<"type">>=>#{ type => atom, required => true },
-  <<"subtype">>=>#{ type => atom },
-  <<"index">>=>#{ type => list, subtype => atom },
-  <<"required">>=>#{ type => bool },
+  <<"type">>=>#{ type => atom, required => true, index=> [simple] },
+  <<"subtype">>=>#{ type => atom, index=> [simple] },
+  <<"index">>=>#{ type => list, subtype => atom, index=> [simple] },
+  <<"required">>=>#{ type => bool, index=> [simple] },
   <<"default">> =>#{ type => term },
-  <<"storage">>=>#{ type => atom, default_value => disc  },
-  <<"autoincrement">>=>#{ type => bool }
+  <<"storage">>=>#{ type => atom, default_value => disc, index=> [simple]  },
+  <<"autoincrement">>=>#{ type => bool, index=> [simple] }
 }).
 %-------------STORAGE PATTERNS--------------------------------------------
 -define(DATABASE_SCHEMA,#{
@@ -424,11 +424,17 @@ handle_cast(Request,State)->
 handle_info(on_cycle,#state{cycle = Cycle}=State)->
   timer:send_after(Cycle,on_cycle),
 
-  % synchronize nodes configuration
-  ecomet_node:sync(),
+  try
+    % synchronize nodes configuration
+    ecomet_node:sync(),
 
-  % synchronize database configuration
-  ecomet_db:sync(),
+    % synchronize database configuration
+    ecomet_db:sync(),
+    ok
+  catch
+    _:Error->
+      ?LOGERROR("Error on schema synchronizaton ~p",[Error])
+  end,
 
   {noreply,State};
 

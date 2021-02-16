@@ -142,7 +142,7 @@ sync_storage(DB,Storage,Type)->
     ToRemove->
       ecomet:delete(get_databases(),{'AND',[
         {<<".folder">>,'=',StorageID},
-        {'OR',[ {<<".name">>,'=',N} || N <-ToRemove ]}
+        {'OR',[ {<<".name">>,'=',atom_to_binary(N,utf8) } || N <-ToRemove ]}
       ]})
   end,
 

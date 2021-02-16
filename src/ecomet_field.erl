@@ -169,7 +169,7 @@ get_storage(Map,Name)->
   % because the map is handled by the pattern
   case Map of
     #{Name := #{storage :=Storage }}-> {ok,Storage};
-    _->{error,undefined_field}
+    _->{error,{undefined_field,Name}}
   end.
 
 % Build fields structure on object creation
@@ -201,7 +201,7 @@ merge(Map,Project,NewFields)->
           {error,Error}->?ERROR({Name,Error})
         end,
         OutProject#{Name=>Value};
-      _->?ERROR(undefined_field)
+      _->?ERROR({undefined_field,Name})
     end
   end,Project,NewFields).
 
@@ -243,14 +243,14 @@ get_type(#{type:=Type})->
 get_type(Map,Name)->
   case Map of
     #{ Name:= Config } -> {ok, get_type(Config)};
-    _->{error,undefined_field}
+    _->{error,{undefined_field,Name}}
   end.
 
 % Get field indexes
 get_index(Map,Name)->
   case Map of
     #{Name := #{index := Index } }->{ ok, Index };
-    _->{error,undefined_field}
+    _->{error,{undefined_field,Name}}
   end.
 
 % Return list of fields storages for object
@@ -288,9 +288,9 @@ merge_storages([{Storage,Fields}|Rest],PreLoaded,OID,{Merged,Changes})->
     end,
   StorageChanges=
     maps:fold(fun(Field,Value,ChangesList)->
-      case maps:find(Field,OldFields) of
+      case maps:get(Field,OldFields,none) of
         % Value not changed
-        {ok,Value}->ChangesList;
+        Value->ChangesList;
         % Really changed
         _->[{Field,Value}|ChangesList]
       end
@@ -322,7 +322,7 @@ is_required(Description, FieldName) ->
     Spec when is_map(Spec) ->
       {ok, maps:get(required, Spec)};
     _ ->
-      {error, undefined_field}
+      {error, {undefined_field,FieldName}}
   end.
 
 %%=================================================================

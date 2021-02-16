@@ -48,6 +48,7 @@
 
 -export([
   bit_sparse/1,
+  bit_hardly_sparse/1,
   bit_sparse_full/1,
   compress_decompress_test/1,
   tail_test/1,
@@ -55,13 +56,16 @@
   split_test/1,
   data_and_test/1,
   data_or_test/1,
-  bit_and_test/1
+  bit_and_test/1,
+  bit_or_test/1,
+  bit_andnot_test/1
 ]).
 
 
 all()->
   [
     bit_sparse,
+    bit_hardly_sparse,
     bit_sparse_full,
     compress_decompress_test,
     tail_test,
@@ -69,7 +73,9 @@ all()->
     split_test,
     data_and_test,
     data_or_test,
-    bit_and_test
+    bit_and_test,
+    bit_or_test,
+    bit_andnot_test
   ].
 
 groups()->
@@ -280,6 +286,16 @@ bit_sparse(_Config) ->
 
   false = ecomet_bitmap:get_bit(R1,17),
   6 = ecomet_bitmap:count(R1),
+
+  ok.
+
+bit_hardly_sparse(_Config) ->
+
+  Bits = [50331686,33554482,33554470],
+
+  Bucket = lists:foldl(fun(Bit,Acc)->ecomet_bitmap:set_bit(Acc,Bit) end,<<>>,Bits),
+
+  {3,Bits} = ecomet_bitmap:foldl(fun(N,Acc)->[N|Acc] end,[],Bucket,{none,none}),
 
   ok.
 
@@ -521,6 +537,11 @@ compress_decompress_test(_Config) ->
   ct:pal("RANDOM very cool thing, Part 2"),
   ok.
 
+tail_test(_Config) ->
+  TestNumber = 100,
+  ok = t(TestNumber),
+  ok.
+
 first_test(_Config) ->
   BucketNumber = 1,
   Buckets = generate_buckets(BucketNumber),
@@ -559,21 +580,44 @@ data_or_test(_Config) ->
 bit_and_test(_Config) ->
   A = rand:uniform(1 bsl 4096 - 1),
   B = rand:uniform(1 bsl 4096 - 1),
-
   Bucket1 = data_to_bucket(<<A:4096>>),
   Bucket2= data_to_bucket(<<B:4096>>),
-
-
   Result = data_to_bucket(<<(A band B):4096>>),
   Result = ecomet_bitmap:bit_and(Bucket1, Bucket2),
+
   Bucket1 = ecomet_bitmap:bit_and(Bucket1, <<?F:1, 1:1, ?X:1, 1:?SHORT>>),
   Bucket2 = ecomet_bitmap:bit_and(<<?F:1, 1:1, ?X:1, 1:?SHORT>>, Bucket2),
-  ct:pal("AND_THEN_TO_BUCKET ~n~p~n", [Result]),
-  ct:pal("TO_BUCKET_TWO_DATA_THEN_BITAND ~n~p~n", [ecomet_bitmap:bit_and(Bucket1, Bucket2)]),
+  <<>> = ecomet_bitmap:zip(ecomet_bitmap:bit_and(Bucket2, <<?F:1, 0:1, ?X:1, 1:?SHORT>>)),
+  <<>> = ecomet_bitmap:zip(ecomet_bitmap:bit_and(<<?F:1, 0:1, ?X:1, 1:?SHORT>>, Bucket1)),
 
-  %data_to_bucket(<<1:4096>>)
-  %Result = ecomet_bitmap:bit_and(Bucket1, Bucket2),
-  %<<0:64>> = ecomet_bitmap:bit_and(<<0:64>>, <<255:64>>),
+
+  C = generate_list_of_random_data(7),
+  D = generate_list_of_random_data(10),
+  Bitmap1 = data_to_bitmap(C),
+  Bitmap2 = data_to_bitmap(D),
+  Result1 = data_to_bitmap(list_and(C, D)),
+  Result1 = ecomet_bitmap:bit_and(Bitmap1, Bitmap2),
+
+  TestNumber = 10,
+  BitAnd = fun(Bmap1, Bmap2) -> ecomet_bitmap:bit_and(Bmap1, Bmap2) end,
+  ListAnd = fun(L1, L2) -> list_and(L1, L2) end,
+  ok = check_bitwise_oper(TestNumber, BitAnd, ListAnd),
+  ok.
+
+
+bit_or_test(_Config) ->
+  TestNumber = 10,
+  BitOr = fun(Bmap1, Bmap2) -> ecomet_bitmap:bit_or(Bmap1, Bmap2) end,
+  ListOr = fun(L1, L2) -> list_or(L1, L2) end,
+  ok = check_bitwise_oper(TestNumber, BitOr, ListOr),
+  ok.
+
+
+bit_andnot_test(_Config) ->
+  TestNumber = 10,
+  BitAndNot = fun(Bmap1, Bmap2) -> ecomet_bitmap:bit_andnot(Bmap1, Bmap2) end,
+  ListAndNot = fun(L1, L2) -> list_andnot(L1, L2) end,
+  ok = check_bitwise_oper(TestNumber, BitAndNot, ListAndNot),
   ok.
 
 %%=================================================================
@@ -630,17 +674,6 @@ t(TestNumber) ->
   Tail = ecomet_bitmap:tail(BitMap, FirstBucketsNumber),
   t(TestNumber - 1).
 
-tail_test(_Config) ->
-  TestNumber = 100,
-  ok = t(TestNumber),
-
-  <<>> = ecomet_bitmap:tail(<<>>, <<(1 bsl 16):64>>),
-  <<42:8>> = ecomet_bitmap:tail(<<42:8>>, -1),
-  <<1:1, 1:1, 0:1, 30:5, 65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 31:5, 65>>, 1),
-  <<65>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 65>>, 16),
-  <<>> = ecomet_bitmap:tail(<<1:1, 1:1, 0:1, 16:5, 193>>, 17),
-  ok.
-
 %This function generates list.
 % Each element in list is bucket %
 generate_buckets(0) ->
@@ -651,14 +684,13 @@ generate_buckets(BucketNumbers) ->
     HWord = rand:uniform(1 bsl 64 - 1),
     Payload = payload_generator(bit_count(HWord), 1 bsl 64 - 1),
     <<?W:1, ?X:1, HWord:64, Payload/bitstring>>;
-             true ->
-               HWord = 1 bsl 64 - 1,
-               FullWord = rand:uniform(1 bsl 64 - 1),
-               Payload = payload_generator(64 - bit_count(FullWord), 1 bsl 64 - 1),
-               <<?W:1, ?XX:1, HWord:64, FullWord:64, Payload/bitstring>>
-           end,
+  true ->
+    HWord = 1 bsl 64 - 1,
+    FullWord = rand:uniform(1 bsl 64 - 1),
+    Payload = payload_generator(64 - bit_count(FullWord), 1 bsl 64 - 1),
+    <<?W:1, ?XX:1, HWord:64, FullWord:64, Payload/bitstring>>
+  end,
   [Bucket | generate_buckets(BucketNumbers - 1)].
-
 
 % Merging list of buckets into bitmap %
 merge_buckets([]) ->
@@ -681,7 +713,10 @@ f(TestNumber) ->
   {Head, MergedTail} = ecomet_bitmap:first(merge_buckets(Buckets)),
   f(TestNumber - 1).
 
-% 4096 bit -> {HworddHeader, FullWordHeader, Payload}
+% 4096 bit -> {HwordHeader, FullWordHeader, Payload}
+% We divide 4096 bits into blocks. Each block contain 64 bits.
+% if block[i] == 0, then HwordHeader i-th bit is 0, else 1
+% if block[i] == 2^64 - 1, then FullWordHeader i-th bit is 1, else 0
 % BlockNumber 63, ..., 0 %
 transform(<<Head:?WORD_LENGTH, Rest/bitstring>>, BlockNumber) when Rest =:= <<>> ->
   ct:pal("BlockNumber ~p~n", [BlockNumber]),
@@ -701,15 +736,64 @@ transform(<<Head:?WORD_LENGTH, Rest/bitstring>>, BlockNumber) ->
   {HW, FW, P} = transform(Rest, BlockNumber - 1),
   {(HWord bsl BlockNumber) bxor HW, (FullWord bsl BlockNumber) bxor FW, <<Payload/bitstring,P/bitstring>>}.
 
+% Data is 4096 bit. We compress Data and obtain bucket %
 data_to_bucket(Data) ->
   {Hword, FullWord, Payload} = transform(Data, 63),
   Bucket = if FullWord =:= 0 ->
     <<?W:1, ?X:1, Hword:?WORD_LENGTH,
       Payload/bitstring
     >>;
-             true ->
-               << ?W:1, ?X:1, Hword:?WORD_LENGTH,
-                 FullWord:?WORD_LENGTH, Payload/bitstring
-               >>
-           end,
+  true ->
+    << ?W:1, ?X:1, Hword:?WORD_LENGTH,
+      FullWord:?WORD_LENGTH, Payload/bitstring
+    >>
+  end,
   Bucket.
+
+% Each element of 'ListOfData' is 4096 bits
+% So len('ListOfData') == Number of Buckets
+% Function merges 'ListOfData' into bitmap%
+data_to_bitmap([]) ->
+  <<>>;
+data_to_bitmap(ListOfData) ->
+  [Head | Tail] = ListOfData,
+  Bucket = data_to_bucket(<<Head:4096>>),
+  <<Bucket/bitstring, (data_to_bitmap(Tail))/bitstring>>.
+
+% Function generate list of NumberOfBlock elements %
+generate_list_of_random_data(0) ->
+  [];
+generate_list_of_random_data(NumberOfBlock) ->
+  [rand:uniform(1 bsl 64 - 1) | generate_list_of_random_data(NumberOfBlock - 1)].
+
+list_and(_L1, []) ->
+  [];
+list_and([], _L2) ->
+  [];
+list_and([Head1 | Tail1], [Head2 | Tail2]) ->
+  [Head1 band Head2 | list_and(Tail1, Tail2)].
+
+list_or(L1, []) ->
+  L1;
+list_or([], L2) ->
+  L2;
+list_or([Head1 | Tail1], [Head2 | Tail2]) ->
+  [Head1 bor Head2 | list_or(Tail1, Tail2)].
+
+list_andnot( [Head1 | Tail1], [Head2 | Tail2] )->
+  [ Head1 band (Head1 bxor Head2) | list_andnot(Tail1, Tail2) ];
+list_andnot( [], _T2 )->
+  [];
+list_andnot( T1, [] )->
+  T1.
+
+check_bitwise_oper(0, _BitWiseFunc, _ListWiseFunc) ->
+  ok;
+check_bitwise_oper(TestNumber, BitWiseFunc, ListWiseFunc) ->
+  A = generate_list_of_random_data(rand:uniform(20)),
+  B = generate_list_of_random_data(rand:uniform(20)),
+  Bitmap1 = data_to_bitmap(A),
+  Bitmap2 = data_to_bitmap(B),
+  Result = data_to_bitmap(ListWiseFunc(A, B)),
+  Result = BitWiseFunc(Bitmap1, Bitmap2),
+  check_bitwise_oper(TestNumber - 1, BitWiseFunc, ListWiseFunc).

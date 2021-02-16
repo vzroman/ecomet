@@ -62,7 +62,7 @@ on_request(Msg)->
 on_subscription(ID,Action,OID,Fields)->
   reply_ok(ID,#{
     <<"oid">>=> ecomet_types:term_to_string(OID),
-    <<"fields">>=>export_query_cell(Fields),
+    <<"fields">>=>ecomet_types:to_json(Fields),
     <<"action">>=>Action
   }).
 
@@ -85,7 +85,7 @@ reply(ID,Type,Result)->
 handle(<<"login">>,_ID,#{<<"login">>:=Login,<<"pass">>:=Pass})->
   case ecomet_user:login(Login,Pass) of
     ok->{ok,ok};
-    {error,Error}->{error,Error}
+    error->{error,invalid_credentials}
   end;
 
 handle(<<"query">>,_ID,#{<<"statement">>:=Statement})->
@@ -132,32 +132,15 @@ from_json(Item)->
   jsx:decode(Item,[return_maps]).
 
 
-query_result({Count,{Header,Rows}})->
-  #{<<"count">>=>Count,<<"result">>=>[Header|export_query_cell(Rows)] };
-query_result({Header,Rows})->
-  [Header|export_query_cell(Rows)];
+query_result({Count,{Header,Rows}}) when is_integer(Count),is_list(Header),is_list(Rows)->
+  #{<<"count">>=>Count,<<"result">>=>[Header|ecomet_types:to_json(Rows)] };
+query_result({Header,Rows}) when is_list(Header),is_list(Rows)->
+  [Header|ecomet_types:to_json(Rows)];
 query_result(ResultList) when is_list(ResultList)->
   [query_result(R)||R<-ResultList];
 query_result(Other)->
-  export_query_cell(Other).
+  ecomet_types:to_json(Other).
 
-export_query_cell(ItemsList) when is_list(ItemsList)->
-  [export_query_cell(I)||I<-ItemsList];
-export_query_cell(ItemsMap) when is_map(ItemsMap)->
-  maps:fold(fun(K,V,Acc)->
-    Acc#{ export_query_cell(K)=>export_query_cell(V) }
-  end,#{},ItemsMap);
-export_query_cell(String) when is_binary(String)->
-  String;
-export_query_cell(Number) when is_number(Number)->
-  Number;
-export_query_cell(false)->
-  false;
-export_query_cell(true)->
-  true;
-export_query_cell(Atom) when is_atom(Atom)->
-  atom_to_binary(Atom,utf8);
-export_query_cell(Term)->
-  ecomet_types:term_to_string(Term).
+
 
 

@@ -25,6 +25,7 @@
 -export([
   create_db/1,
   remove_db/1,
+  get_storage_name/3,
   get_storages/0,
   get_segments/1,get_segments/3,
   get_root_segment/1,get_root_segment/3,
@@ -67,6 +68,9 @@ remove_db(Name)->
   [ dlss:remove_storage( ?NAME(Name,?DATA,Type) ) || { Type, _ } <- ?DB ],
   [ dlss:remove_storage( ?NAME(Name,?INDEX,Type) ) || { Type, _ } <- ?DB ],
   ok.
+
+get_storage_name(Name,Storage,Type)->
+  ?NAME(Name,Storage,Type).
 
 get_storages()->
   [ S || S <- dlss:get_storages(), string:prefix(atom_to_list(S),"ecomet_")=/=nomatch ].

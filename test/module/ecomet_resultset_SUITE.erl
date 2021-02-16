@@ -287,137 +287,135 @@ define_patterns(_Config)->
     }
   ]}),
   % Can not limit patterns for root OR
-  {'OR',ORList,'UNDEFINED'}=Defined,
+  {'OR',ORList}=Defined,
   [AND1,AND2,ANDNOT]=ORList,
-  {'AND',AND1List,AND1Patterns}=AND1,
-  % First AND can be true only for PatternID1
-  {1,[1000]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],AND1Patterns,{none,none}),
+  {'AND',AND1List}=AND1,
+
   [AND1C1,AND1C2]=AND1List,
-  {'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'}=AND1C1,
-  {'LEAF',{'=',<<".pattern">>,PatternID1},AND1Patterns}=AND1C2,
+  {'LEAF',{'=',<<"field1">>,<<"value1">>}}=AND1C1,
+  {'LEAF',{'=',<<".pattern">>,PatternID1}}=AND1C2,
 
-  {'AND',AND2List,'UNDEFINED'}=AND2,
+  {'AND',AND2List}=AND2,
   [AND2C1,AND2C2]=AND2List,
-  {'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'}=AND2C1,
-  {'LEAF',{'=',<<"field2">>,<<"value2">>},'UNDEFINED'}=AND2C2,
+  {'LEAF',{'=',<<"field1">>,<<"value1">>}}=AND2C1,
+  {'LEAF',{'=',<<"field2">>,<<"value2">>}}=AND2C2,
 
-  {'ANDNOT',{ANDNOT1,ANDNOT2},ANDNOTPatterns}=ANDNOT,
-  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],ANDNOTPatterns,{none,none}),
-  {'LEAF',{'=',<<".pattern">>,PatternID2},ANDNOTPatterns}=ANDNOT1,
-  {'LEAF',{':>',<<"field1">>,<<"value1">>},'UNDEFINED'}=ANDNOT2.
+  {'ANDNOT',{ANDNOT1,ANDNOT2}}=ANDNOT,
+  {'LEAF',{'=',<<".pattern">>,PatternID2}}=ANDNOT1,
+  {'LEAF',{':>',<<"field1">>,<<"value1">>}}=ANDNOT2.
 
 simple_tag(Config)->
   % Can not define storages, because patterns are not defined
-  {{'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'},'UNDEFINED'),
+  {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field1">>,<<"value1">>}}),
   PatternID1=?config(pattern_id1,Config),
-  PatternID2=?config(pattern_id2,Config),
-  IDP1=ecomet_object:get_id(PatternID1),
-  IDP2=ecomet_object:get_id(PatternID2),
-  Ext1=ecomet_bitmap:set_bit(none,IDP1),
+
+
   % Field5 is not defined in pattern1 - no storages, nothing can be found
-  {{'TAG',{<<"field5">>,<<"value5">>,simple},{none,[]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field5">>,<<"value5">>},'UNDEFINED'},Ext1),
+  {'TAG',{<<"field5">>,<<"value5">>,simple},'UNDEFINED'}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field5">>,<<"value5">>}}),
   % Invalid tag
-  ?assertError({invalid_operation,'DUMMY'},ecomet_resultset:build_conditions({'LEAF',{'DUMMY',<<"field4">>,<<"value4">>},'UNDEFINED'},Ext1)),
-  Ext12=ecomet_bitmap:set_bit(Ext1,IDP2),
+  ?assertError({invalid_operation,'DUMMY'},ecomet_resultset:build_conditions({'LEAF',{'DUMMY',<<"field4">>,<<"value4">>}})),
   % Field4 defined only in pattern1 as disc
-  {{'TAG',{<<"field4">>,<<"value4">>,simple},{DPatterns,[{disc,DPatterns,[]}]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field4">>,<<"value4">>},'UNDEFINED'},Ext12),
-  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],DPatterns,{none,none}),
+  {'TAG',{<<"field4">>,<<"value4">>,simple},'UNDEFINED'}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field4">>,<<"value4">>}}),
   % Field defined in both patterns in the same storage
-  {{'TAG',{<<"field1">>,<<"value1">>,simple},{RPatterns,[{ram,RPatterns,[]}]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'},Ext12),
-  {2,[1001,1002]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],RPatterns,{none,none}),
+  {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field1">>,<<"value1">>}}),
   % Field defined in both patterns in different storages
-  {{'TAG',{<<"field2">>,<<"value2">>,simple},{Ext12,StorageList}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field2">>,<<"value2">>},'UNDEFINED'},Ext12),
-  {ramdisc,RDPatterns,[]}=lists:keyfind(ramdisc,1,StorageList),
-  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],RDPatterns,{none,none}),
-  {disc,DiscPatterns,[]}=lists:keyfind(disc,1,StorageList),
-  {1,[1002]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],DiscPatterns,{none,none}),
+  {'TAG',{<<"field2">>,<<"value2">>,simple},'UNDEFINED'}=ecomet_resultset:build_conditions({'LEAF',{'=',<<"field2">>,<<"value2">>}}),
+
   % Patterns defined by tag itself
-  {{'TAG',{<<".pattern">>,PatternID1,simple},{RamDiscPatterns,[{disc,RamDiscPatterns,[]}]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},'UNDEFINED'),
-  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],RamDiscPatterns,{none,none}),
+  {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'}=ecomet_resultset:build_conditions({'LEAF',{'=',<<".pattern">>,PatternID1}}),
   % Patterns do not intersect, no sense to search tag
-  Ext2=ecomet_bitmap:set_bit(none,IDP2),
-  {{'TAG',{<<".pattern">>,PatternID1,simple},{none,[]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},Ext2),
+  {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'}=ecomet_resultset:build_conditions({'LEAF',{'=',<<".pattern">>,PatternID1}}),
   % Patterns have intersection
-  {{'TAG',{<<".pattern">>,PatternID1,simple},{RamDiscPatterns,[{disc,RamDiscPatterns,[]}]}},false}=ecomet_resultset:build_conditions({'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},Ext12),
-  {{'DIRECT',{':>',<<"field1">>,<<"value1">>},'UNDEFINED'},true}=ecomet_resultset:build_conditions({'LEAF',{':>',<<"field1">>,<<"value1">>},'UNDEFINED'},Ext12),
-  {{'AND',LIKEList,{Ext12,[]}},false}=ecomet_resultset:build_conditions({'LEAF',{'LIKE',<<"field1">>,<<"value1">>},'UNDEFINED'},Ext12),
+  T1={'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'}=ecomet_resultset:build_conditions({'LEAF',{'=',<<".pattern">>,PatternID1}}),
+  false = ecomet_resultset:has_direct(T1),
+
+  D1 = {'DIRECT',{':>',<<"field1">>,<<"value1">>},'UNDEFINED'}=ecomet_resultset:build_conditions({'LEAF',{':>',<<"field1">>,<<"value1">>}}),
+  true = ecomet_resultset:has_direct(D1),
+
+  AND1 = {'AND',LIKEList,'UNDEFINED'}=ecomet_resultset:build_conditions({'LEAF',{'LIKE',<<"field1">>,<<"value1">>}}),
+  false = ecomet_resultset:has_direct(AND1),
+
   % String "value1" is splitted to:
   % [<<"_va">>,<<"val">>,<<"alu">>,<<"lue">>,<<"ue1">>,<<"e1_">>]
   % we drop first and last 3grams, because we are not linked to start and end of the phrase
   [
-    {'TAG',{<<"field1">>,<<"VAL">>,'3gram'},{RPatterns,[{ram,RPatterns,[]}]}},
-    {'TAG',{<<"field1">>,<<"ALU">>,'3gram'},{RPatterns,[{ram,RPatterns,[]}]}},
-    {'TAG',{<<"field1">>,<<"LUE">>,'3gram'},{RPatterns,[{ram,RPatterns,[]}]}},
-    {'TAG',{<<"field1">>,<<"UE1">>,'3gram'},{RPatterns,[{ram,RPatterns,[]}]}}
+    {'TAG',{<<"field1">>,<<"VAL">>,'3gram'},'UNDEFINED'},
+    {'TAG',{<<"field1">>,<<"ALU">>,'3gram'},'UNDEFINED'},
+    {'TAG',{<<"field1">>,<<"LUE">>,'3gram'},'UNDEFINED'},
+    {'TAG',{<<"field1">>,<<"UE1">>,'3gram'},'UNDEFINED'}
   ]=lists:reverse(LIKEList),
   % too short value
-  {{'DIRECT',{':LIKE',<<"field1">>,<<"va">>},'UNDEFINED'},true}=ecomet_resultset:build_conditions({'LEAF',{'LIKE',<<"field1">>,<<"va">>},'UNDEFINED'},Ext12).
+  LIKE1 = {'DIRECT',{':LIKE',<<"field1">>,<<"va">>},'UNDEFINED'} =ecomet_resultset:build_conditions({'LEAF',{'LIKE',<<"field1">>,<<"va">>}}),
+  true = ecomet_resultset:has_direct(LIKE1),
+
+  ok.
 
 
 constructions(Config)->
   PatternID1=?config(pattern_id1,Config),
   PatternID2=?config(pattern_id2,Config),
-  IDP1=ecomet_object:get_id(PatternID1),
-  IDP2=ecomet_object:get_id(PatternID2),
-  Ext1=ecomet_bitmap:set_bit(none,IDP1),
-  Ext2=ecomet_bitmap:set_bit(none,IDP2),
-  Ext12=ecomet_bitmap:set_bit(Ext1,IDP2),
+
   % Patterns that actual for AND are actual for all it's branches
-  {{'AND',AND1Tags,{Ext1,[]}},false}=ecomet_resultset:build_conditions({'AND',[
-    {'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},
-    {'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'}
-  ],Ext1},'UNDEFINED'),
+  AND1 = {'AND',AND1Tags,'UNDEFINED'}=ecomet_resultset:build_conditions({'AND',[
+    {'LEAF',{'=',<<".pattern">>,PatternID1}},
+    {'LEAF',{'=',<<"field1">>,<<"value1">>}}
+  ]}),
+  false = ecomet_resultset:has_direct(AND1),
   [
-    {'TAG',{<<".pattern">>,PatternID1,simple},{AND1T1RD,[{disc,AND1T1RD,[]}]}},
-    {'TAG',{<<"field1">>,<<"value1">>,simple},{AND1T2R,[{ram,AND1T2R,[]}]}}
+    {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'},
+    {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}
   ]=AND1Tags,
-  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],AND1T1RD,{none,none}),
-  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],AND1T2R,{none,none}),
+
   % Patterns that defined for AND are intersected with external patterns
-  {{'AND',AND1Tags,{Ext1,[]}},false}=ecomet_resultset:build_conditions({'AND',[
-    {'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},
-    {'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'}
-  ],Ext1},Ext12),
+  AND2={'AND',AND1Tags,'UNDEFINED'}=ecomet_resultset:build_conditions({'AND',[
+    {'LEAF',{'=',<<".pattern">>,PatternID1}},
+    {'LEAF',{'=',<<"field1">>,<<"value1">>}}
+  ]}),
+  false = ecomet_resultset:has_direct(AND2),
   % Patterns are not defined for OR
-  {{'OR',OR1Tags,'UNDEFINED'},false}=ecomet_resultset:build_conditions({'OR',[
-    {'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},
-    {'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'}
-  ],'UNDEFINED'},'UNDEFINED'),
+  OR1={'OR',OR1Tags,'UNDEFINED'}=ecomet_resultset:build_conditions({'OR',[
+    {'LEAF',{'=',<<".pattern">>,PatternID1}},
+    {'LEAF',{'=',<<"field1">>,<<"value1">>}}
+  ]}),
+  false = ecomet_resultset:has_direct(OR1),
   [
-    {'TAG',{<<".pattern">>,PatternID1,simple},{OR1T1RD,[{disc,OR1T1RD,[]}]}},
+    {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'},
     {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}
   ]=OR1Tags,
-  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],OR1T1RD,{none,none}),
   % External patterns are defined for OR
-  {{'OR',OR2Tags,{Ext12,[]}},false}=ecomet_resultset:build_conditions({'OR',[
-    {'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},
-    {'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'}
-  ],'UNDEFINED'},Ext12),
+  OR2={'OR',OR2Tags,'UNDEFINED'}=ecomet_resultset:build_conditions({'OR',[
+    {'LEAF',{'=',<<".pattern">>,PatternID1}},
+    {'LEAF',{'=',<<"field1">>,<<"value1">>}}
+  ]}),
+  false = ecomet_resultset:has_direct(OR2),
   [
-    {'TAG',{<<".pattern">>,PatternID1,simple},{OR2T1RD,[{disc,OR2T1RD,[]}]}},
-    {'TAG',{<<"field1">>,<<"value1">>,simple},{Ext12,[{ram,Ext12,[]}]}}
+    {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'},
+    {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}
   ]=OR2Tags,
-  {1,[1001]}=ecomet_bitmap:foldr(fun(Bit,Acc)->[Bit|Acc] end,[],OR2T1RD,{none,none}),
   % ANDNOT can be true only for patterns defined for condition1
-  {{'ANDNOT',{C1,C2},{Ext1,[]}},false}=ecomet_resultset:build_conditions({'ANDNOT',{
-    {'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},
-    {'LEAF',{'=',<<".pattern">>,PatternID2},Ext2}
-  },Ext1},Ext12),
-  {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=C1,
-  {'TAG',{<<".pattern">>,PatternID2,simple},{none,[]}}=C2,
+  ANDNOT1={'ANDNOT',{C1,C2},'UNDEFINED'}=ecomet_resultset:build_conditions({'ANDNOT',{
+    {'LEAF',{'=',<<".pattern">>,PatternID1}},
+    {'LEAF',{'=',<<".pattern">>,PatternID2}}
+  }}),
+  false = ecomet_resultset:has_direct(ANDNOT1),
+  {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'}=C1,
+  {'TAG',{<<".pattern">>,PatternID2,simple},'UNDEFINED'}=C2,
   % Direct
-  {{'AND',AND2Tags,{Ext1,[]}},true}=ecomet_resultset:build_conditions({'AND',[
-    {'LEAF',{'=',<<".pattern">>,PatternID1},Ext1},
+  AND3 = {'AND',AND2Tags,'UNDEFINED'}=ecomet_resultset:build_conditions({'AND',[
+    {'LEAF',{'=',<<".pattern">>,PatternID1}},
     {'OR',[
-      {'LEAF',{'=',<<"field1">>,<<"value1">>},'UNDEFINED'},
-      {'LEAF',{':>',<<"field1">>,<<"value1">>},'UNDEFINED'}
-    ],'UNDEFINED'}
-  ],Ext1},Ext12),
+      {'LEAF',{'=',<<"field1">>,<<"value1">>}},
+      {'LEAF',{':>',<<"field1">>,<<"value1">>}}
+    ]}
+  ]}),
+  true = ecomet_resultset:has_direct(AND3),
+
+
   [AND2T1,AND2T2]=AND2Tags,
-  {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=AND2T1,
-  {'OR',AND2OR2Tags,{Ext1,[]}}=AND2T2,
+  {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'}=AND2T1,
+  {'OR',AND2OR2Tags,'UNDEFINED'}=AND2T2,
   [
-    {'TAG',{<<"field1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}},
+    {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'},
     {'DIRECT',{':>',<<"field1">>,<<"value1">>},'UNDEFINED'}
   ]=AND2OR2Tags.
 
@@ -1077,16 +1075,11 @@ optimize(_Config)->
 prepare_summary(Config)->
   PatternID1=?config(pattern_id1,Config),
   PatternID2=?config(pattern_id2,Config),
-  IDP1=ecomet_object:get_id(PatternID1),
-  IDP2=ecomet_object:get_id(PatternID2),
-  Ext1=ecomet_bitmap:set_bit(none,IDP1),
-  Ext2=ecomet_bitmap:set_bit(none,IDP2),
-  Ext12=ecomet_bitmap:set_bit(Ext1,IDP2),
+
   % Simple tag
   {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}=ecomet_resultset:prepare({<<"field1">>,'=',<<"value1">>}),
   % Pattern tag
-  {'TAG',{<<".pattern">>,PatternID1,simple},S2Config}=ecomet_resultset:prepare({<<".pattern">>,':=',PatternID1}),
-  {Ext1,[{disc,Ext1,[]}]}=S2Config,
+  {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'}=ecomet_resultset:prepare({<<".pattern">>,':=',PatternID1}),
   ?assertError(no_base_conditions,ecomet_resultset:prepare({<<"field1">>,':=',<<"value1">>})),
   % Patterns are not defined
   {'AND',S4ANDList,'UNDEFINED'}=ecomet_resultset:prepare({'AND',[
@@ -1101,16 +1094,16 @@ prepare_summary(Config)->
   ]}),
   [
     {'OR',[
-      {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
+      {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'},
       {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}
     ],'UNDEFINED'},
     {'OR',[
-      {'TAG',{<<".pattern">>,PatternID2,simple},{Ext2,[{disc,Ext2,[]}]}},
+      {'TAG',{<<".pattern">>,PatternID2,simple},'UNDEFINED'},
       {'TAG',{<<"field2">>,<<"value2">>,simple},'UNDEFINED'}
     ],'UNDEFINED'}
   ]=S4ANDList,
   % Patterns are defined
-  {'OR',[S5AND1,S5AND2],{Ext12,[]}}=ecomet_resultset:prepare({'OR',[
+  {'OR',[S5AND1,S5AND2],'UNDEFINED'}=ecomet_resultset:prepare({'OR',[
     {'AND',[
       {<<".pattern">>,':=',PatternID1},
       {<<"field1">>,'=',<<"value1">>}
@@ -1121,13 +1114,13 @@ prepare_summary(Config)->
     ]}
   ]}),
   {'AND',[
-    {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
-    {'TAG',{<<"field1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}}
-  ],{Ext1,[]}}=S5AND1,
+    {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'},
+    {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'}
+  ],'UNDEFINED'}=S5AND1,
   {'AND',[
-    {'TAG',{<<".pattern">>,PatternID2,simple},{Ext2,[{disc,Ext2,[]}]}},
-    {'TAG',{<<"field2">>,<<"value2">>,simple},{Ext2,[{disc,Ext2,[]}]}}
-  ],{Ext2,[]}}=S5AND2,
+    {'TAG',{<<".pattern">>,PatternID2,simple},'UNDEFINED'},
+    {'TAG',{<<"field2">>,<<"value2">>,simple},'UNDEFINED'}
+  ],'UNDEFINED'}=S5AND2,
 
   % AND2 contains no base conditions and can not be attached to any
   ?assertError(no_base_conditions,ecomet_resultset:prepare({'OR',[
@@ -1141,28 +1134,28 @@ prepare_summary(Config)->
     ]}
   ]})),
   % Patterns spread to branch
-  {'AND',[S6AND1,S6AND2],{Ext1,[]}}=ecomet_resultset:prepare({'AND',[
+  {'AND',[S6AND1,S6AND2],'UNDEFINED'}=ecomet_resultset:prepare({'AND',[
     {<<".pattern">>,':=',PatternID1},
     {'ANDNOT',
       {<<"field1">>,'=',<<"value1">>},
       {<<"field2">>,'=',<<"value2">>}
     }
   ]}),
-  {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=S6AND1,
+  {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'}=S6AND1,
   {'ANDNOT',{
-    {'TAG',{<<"field1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}},
-    {'TAG',{<<"field2">>,<<"value2">>,simple},{Ext1,[{ramdisc,Ext1,[]}]}}
-  },{Ext1,[]}}=S6AND2,
+    {'TAG',{<<"field1">>,<<"value1">>,simple},'UNDEFINED'},
+    {'TAG',{<<"field2">>,<<"value2">>,simple},'UNDEFINED'}
+  },'UNDEFINED'}=S6AND2,
   % Direct conditions needs query normalization
-  {'OR',[S7Norm1],{Ext1,[]}}=ecomet_resultset:prepare({'AND',[
+  {'OR',[S7Norm1],'UNDEFINED'}=ecomet_resultset:prepare({'AND',[
     {<<".pattern">>,':=',PatternID1},
     {<<"field2">>,':>',<<"value2">>}
   ]}),
-  {'NORM',{{S7N1TAND,S7N1TANDNOT},{S7N1DAND,[]}},{Ext1,[]}}=S7Norm1,
+  {'NORM',{{S7N1TAND,S7N1TANDNOT},{S7N1DAND,[]}},'UNDEFINED'}=S7Norm1,
   {'AND',[
-    {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}
-  ],{Ext1,[]}}=S7N1TAND,
-  {'OR',[],{Ext1,[]}}=S7N1TANDNOT,
+    {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'}
+  ],'UNDEFINED'}=S7N1TAND,
+  {'OR',[],'UNDEFINED'}=S7N1TANDNOT,
   [{'DIRECT',{':>',<<"field2">>,<<"value2">>},'UNDEFINED'}]=S7N1DAND,
   % OR with direct
   {'OR',[S8Norm1,S8Norm2],'UNDEFINED'}=ecomet_resultset:prepare({'OR',[
@@ -1179,7 +1172,7 @@ prepare_summary(Config)->
   {'OR',[],'UNDEFINED'}=S8N1TANDNOT,
   {'NORM',{{S8N2TAND,S8N2TANDNOT},{S8N2DAND,[]}},'UNDEFINED'}=S8Norm2,
   {'AND',[
-    {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}
+    {'TAG',{<<".pattern">>,PatternID1,simple},'UNDEFINED'}
   ],'UNDEFINED'}=S8N2TAND,
   {'OR',[],'UNDEFINED'}=S8N2TANDNOT,
   [{'DIRECT',{':>',<<"field3">>,<<"value3">>},'UNDEFINED'}]=S8N2DAND,
@@ -1231,8 +1224,7 @@ search_patterns(Config)->
   S1Res=ecomet_resultset:search_patterns(S1Query,root,'UNDEFINED'),
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=S1Res,
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=ecomet_resultset:search_patterns(S1Query,root,Ext12),
-  {'TAG',{<<".pattern">>,PatternID1,simple},{Empty,[{disc,Ext1,[]}]}}=ecomet_resultset:search_patterns(S1Query,root,Ext2),
-  true = ecomet_bitmap:is_empty(Empty),
+  {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=ecomet_resultset:search_patterns(S1Query,root,Ext2),
 
   % S2. Single tag, pattern is not defined
   S2Query=ecomet_resultset:prepare({<<"string1">>,'=',<<"value1">>}),
@@ -1247,7 +1239,7 @@ search_patterns(Config)->
   ]}),
   {'AND',[
     {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
-    {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}}
+    {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ramdisc,Ext2,[]},{ram,Ext1,[]}]}}
   ],{Ext1,[]}}=ecomet_resultset:search_patterns(S3Query,root,'UNDEFINED'),
 
   % S3A. Empty AND
@@ -1321,7 +1313,7 @@ search_patterns(Config)->
   {'OR',[
     {'AND',[
       {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
-      {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}}
+      {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ramdisc,Ext2,[]},{ram,Ext1,[]}]}}
     ],{Ext1,[]}},
     {'ANDNOT',{
       {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext12,[{disc,Ext2,[]},{ramdisc,Ext1,[]}]}},
@@ -1369,11 +1361,12 @@ search_idhs(Config)->
 
   % S1. tag on pattern
   S1Query=ecomet_resultset:prepare({<<".pattern">>,':=',PatternID1}),
-  {IDH1,S1P1TAG}=ecomet_resultset:seacrh_idhs(S1Query,root,IDP1),
+  S1Query1 = ecomet_resultset:search_patterns(S1Query,root,'UNDEFINED'),
+  {IDH1,S1P1TAG}=ecomet_resultset:seacrh_idhs(S1Query1,root,IDP1),
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[
     {IDP1,IDH1}
   ]}]}}=S1P1TAG,
-  {none,S1P2TAG}=ecomet_resultset:seacrh_idhs(S1Query,root,IDP2),
+  {none,S1P2TAG}=ecomet_resultset:seacrh_idhs(S1Query1,root,IDP2),
   {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}}=S1P2TAG,
 
   %S2. Simple tag
@@ -1395,14 +1388,15 @@ search_idhs(Config)->
     {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,'=',<<"value1">>}
   ]}),
-  % No need to search patterns
-  {IDH1,S3P1COND}=ecomet_resultset:seacrh_idhs(S3Query,root,IDP1),
+  S3Query1 = ecomet_resultset:search_patterns(S3Query,root,'UNDEFINED'),
+  {IDH1,S3P1COND}=ecomet_resultset:seacrh_idhs(S3Query1,root,IDP1),
   {'AND',[
     {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[
       {disc,Ext1,[{IDP1,IDH1}]}
     ]}},
-    {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[
-      {ram,Ext1,[{IDP1,IDH1}]}
+    {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[
+      {ram,Ext1,[{IDP1,IDH1}]},
+      {ramdisc,Ext2,[]}
     ]}}
   ],{Ext1,[{IDP1,IDH1}]}}=S3P1COND,
   {none,S3P1COND}=ecomet_resultset:seacrh_idhs(S3P1COND,root,IDP2),
@@ -1412,8 +1406,9 @@ search_idhs(Config)->
     {<<".pattern">>,':=',PatternID1},
     {<<"string1">>,':>',<<"value1">>}
   ]}),
+  S4Query1 = ecomet_resultset:search_patterns(S4Query,root,'UNDEFINED'),
   % Pattern is defined, search idhs
-  {IDH1,S4P1COND}=ecomet_resultset:seacrh_idhs(S4Query,root,IDP1),
+  {IDH1,S4P1COND}=ecomet_resultset:seacrh_idhs(S4Query1,root,IDP1),
   {'OR',[S4Norm1],{Ext1,[{IDP1,IDH1}]}}=S4P1COND,
   {'NORM',{
     {
@@ -1422,7 +1417,7 @@ search_idhs(Config)->
           {disc,Ext1,[{IDP1,IDH1}]}
         ]}}
       ],{Ext1,[{IDP1,IDH1}]}},
-      {'OR',[],{Ext1,[]}}
+      {'OR',[],{none,[]}}
     },
     {
       [{'DIRECT',{':>',<<"string1">>,<<"value1">>},'UNDEFINED'}],

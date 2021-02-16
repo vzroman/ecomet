@@ -39,7 +39,7 @@
   from_string/2,
 
   %-------JSON-----------------
-  to_json/2,
+  to_json/1,to_json/2,
   from_json/2
 ]).
 
@@ -162,7 +162,7 @@ from_string(float,Invalid)->
 from_string(bool,true)->
   true;
 from_string(bool,false)->
-  true;
+  false;
 from_string(bool,<<"true">>)->
   true;
 from_string(bool,<<"false">>)->
@@ -242,6 +242,10 @@ from_string({list,_Type},Invalid)->
 %%---------------------------------------------------------------------
 to_string(_Type,none)->
   <<"none">>;
+to_string(_Type,undefined_field)->
+  <<"undefined_field">>;
+to_string(_Type,{undefined_field,_})->
+  <<"undefined_field">>;
 to_string(string,Value)->
   Value;
 to_string(integer,Value)->
@@ -257,7 +261,10 @@ to_string(atom,Value)->
 to_string(binary,Value)->
   base64:encode(Value);
 to_string(link,Value)->
-  ecomet_folder:oid2path(Value);
+  try ecomet_folder:oid2path(Value)
+  catch
+    _:_->term_to_string({invalid_oid,Value})
+  end;
 to_string(term,Value)->
   term_to_string(Value);
 to_string({list,Type},Value)->
@@ -281,9 +288,34 @@ to_json(bool,Value)->
 to_json(integer,Value)->
   Value;
 to_json(float,Value)->
-  Value(1.0*Value);
+  1.0*Value;
 to_json({list,Type},Value)->
   [ to_json(Type,Item) || Item <- Value ];
 % Other types are converted to a string
+to_json(term,Value)->
+  to_json(Value);
 to_json(Type,Value)->
   to_string(Type,Value).
+
+to_json(ItemsList) when is_list(ItemsList)->
+  [to_json(I)||I<-ItemsList];
+to_json(ItemsMap) when is_map(ItemsMap)->
+  maps:fold(fun(K,V,Acc)->
+    Acc#{ to_json(K)=>to_json(V) }
+  end,#{},ItemsMap);
+to_json(String) when is_binary(String)->
+  String;
+to_json(Number) when is_number(Number)->
+  Number;
+to_json(none)->
+  null;
+to_json(false)->
+  false;
+to_json(true)->
+  true;
+to_json(null)->
+  null;
+to_json(Atom) when is_atom(Atom)->
+  atom_to_binary(Atom,utf8);
+to_json(Term)->
+  ecomet_types:term_to_string(Term).

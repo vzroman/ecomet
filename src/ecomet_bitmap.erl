@@ -31,6 +31,7 @@
 
 -define(SHORT,5).
 -define(LONG,29).
+-define(MAX_LONG,536870912).  % 1 bsl 29
 
 %%------------------------------------------------------------------------------------
 %%  BITS API
@@ -73,7 +74,8 @@
   first/1,
   split/2,
   bit_and/2,
-  bit_or/2
+  bit_or/2,
+  bit_andnot/2
 ]).
 -endif.
 
@@ -245,9 +247,9 @@ bit_and(_Bitmap1,<<>>)->
   <<>>;
 % Short empty
 bit_and(<<?F:1,0:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
-  bit_and(Tail1,tail(Bitamp2,L));
+  <<?F:1,0:1,?X:1,L:?SHORT,(bit_and(Tail1,tail(Bitamp2,L)))/bitstring>>;
 bit_and(Bitamp1,<<?F:1,0:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
-  bit_and(tail(Bitamp1,L),Tail2);
+  <<?F:1,0:1,?X:1,L:?SHORT,(bit_and(tail(Bitamp1,L),Tail2))/bitstring>>;
 % Short full
 bit_and(<<?F:1,1:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
   { Head2, Tail2 } = split( Bitamp2, L),
@@ -257,9 +259,9 @@ bit_and(Bitamp1,<<?F:1,1:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
   <<Head1/bitstring,(bit_and(Tail1,Tail2))/bitstring>>;
 % Long empty
 bit_and(<<?F:1,0:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
-  bit_and(Tail1,tail(Bitamp2,L));
+  <<?F:1,0:1,?XX:1,L:?LONG,(bit_and(Tail1,tail(Bitamp2,L)))/bitstring>>;
 bit_and(Bitamp1,<<?F:1,0:1,?XX:1,L:?LONG,Tail2/bitstring>>)->
-  bit_and(tail(Bitamp1,L),Tail2);
+  <<?F:1,0:1,?XX:1,L:?LONG,(bit_and(tail(Bitamp1,L),Tail2))/bitstring>>;
 % Long full
 bit_and(<<?F:1,1:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
   { Head2, Tail2 } = split( Bitamp2, L),
@@ -344,7 +346,7 @@ bit_andnot( Bitmap1, <<>> )->
   Bitmap1;
 % Short empty
 bit_andnot(<<?F:1,0:1,?X:1,L:?SHORT,Tail1/bitstring>>,Bitamp2)->
-  bit_andnot(Tail1,tail(Bitamp2,L));
+  <<?F:1,0:1,?X:1,L:?SHORT,(bit_andnot(Tail1,tail(Bitamp2,L)))/bitstring>>;
 bit_andnot(Bitamp1,<<?F:1,0:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
   { Head1, Tail1 } = split(Bitamp1,L),
   <<Head1/bitstring,(bit_andnot(Tail1,Tail2))/bitstring>>;
@@ -356,7 +358,7 @@ bit_andnot(Bitamp1,<<?F:1,1:1,?X:1,L:?SHORT,Tail2/bitstring>>)->
   <<?F:1,0:1,?X:1,L:?SHORT,(bit_andnot(tail(Bitamp1,L),Tail2))/bitstring>>;
 % Long empty
 bit_andnot(<<?F:1,0:1,?XX:1,L:?LONG,Tail1/bitstring>>,Bitamp2)->
-  bit_andnot(Tail1,tail(Bitamp2,L));
+  <<?F:1,0:1,?XX:1,L:?LONG,(bit_andnot(Tail1,tail(Bitamp2,L)))/bitstring>>;
 bit_andnot(Bitamp1,<<?F:1,0:1,?XX:1,L:?LONG,Tail2/bitstring>>)->
   { Head1, Tail1 } = split(Bitamp1,L),
   <<Head1/bitstring,(bit_andnot(Tail1,Tail2))/bitstring>>;
@@ -606,7 +608,7 @@ split(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N,Head) when N < L->
 split(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N,Head) when N =:= L->
   { <<Head/bitstring,?F:1,V:1,?XX:1,L:?LONG>>, Tail };
 split(<<?F:1,V:1,?XX:1,L:?LONG,Tail/bitstring>>,N, Head) when N > L->
-  split(Tail,N-L,<<Head/bitstring,?F:1,V:1,?X:1,L:?SHORT>>);
+  split(Tail,N-L,<<Head/bitstring,?F:1,V:1,?XX:1,L:?LONG>>);
 % Sparse
 split(Bitmap, N, Head)->
   { Bucket, Tail } = first(Bitmap),
@@ -679,9 +681,12 @@ fill(_,0)->
   <<>>;
 fill(V,Length) when Length<(1 bsl 5)->
   <<?F:1,V:1,?X:1,Length:?SHORT>>;
+fill(V,Length) when Length < ?MAX_LONG->
+  <<?F:1,V:1,?XX:1,Length:?LONG>>;
 fill(V,Length)->
-  % Max length 1073741824
-  <<?F:1,V:1,?XX:1,Length:?LONG>>.
+  % The length is bigger than the max
+  <<?F:1,V:1,?XX:1,(?MAX_LONG-1):?LONG,(fill(V,Length - ?MAX_LONG + 1 ))/bitstring>>.
+
 
 bit_count(Value)->
   bit_count(Value,0).

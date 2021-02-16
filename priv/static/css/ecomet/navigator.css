@@ -1,0 +1,17 @@
+*[name="pathbar"]{
+    background-color: Silver;
+}
+
+*[name="pathbar"] *[name="pathtext"]{
+    text-align: left;
+    height: 1em;
+    padding-top: .4em;
+   	padding-bottom: .4em;
+    cursor:inherit;
+    background-color: Silver;
+    width: 100%;
+}
+*[name="pathbar"]>div{
+    display: table-cell;
+}
+

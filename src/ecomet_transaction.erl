@@ -64,8 +64,9 @@ internal(Fun)->
   end.
 
 internal_sync(Fun)->
-  tstart(internal),
+  State = tstart(internal),
   case ecomet_backend:sync_transaction(fun()->
+    clean(State),
     Result=Fun(),
     {Log,OnCommits}=tcommit(),
     {Result,Log,OnCommits}

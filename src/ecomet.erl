@@ -81,7 +81,9 @@
   to_path/1,
   is_object/1,
   is_oid/1,
-  get_pattern_oid/1
+  get_pattern_oid/1,
+  object_behaviours/1,
+  pattern_behaviours/1
 ]).
 
 %%=================================================================
@@ -100,7 +102,8 @@
 %%=================================================================
 -export([
   ts/0,
-  stop/0
+  stop/0,
+  get_storage_name/3
 ]).
 
 % @edoc ecomet object denotes map where each key is field_key()
@@ -307,6 +310,12 @@ is_oid(Value)->
 get_pattern_oid(ID)->
   ecomet_object:get_pattern_oid(ID).
 
+object_behaviours(ID)->
+  ecomet_object:get_behaviours(open(ID)).
+
+pattern_behaviours(ID)->
+  ecomet_pattern:get_behaviours(ID).
+
 %%=================================================================
 %%	Formatters
 %%=================================================================
@@ -331,4 +340,7 @@ ts()->
 stop()->
   application:stop(ecomet),
   dlss:stop().
+
+get_storage_name(Name,Storage,Type)->
+  ecomet_backend:get_storage_name(Name,Storage,Type).
 

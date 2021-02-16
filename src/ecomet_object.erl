@@ -48,13 +48,15 @@
   construct/1,
   edit/2,edit/3,
   copy/2,
-  read_field/2,read_field/3,read_fields/2,read_fields/3,read_all/1,read_all/2,
+  read_field/2,read_field/3,read_fields/2,read_fields/3,
+  read_all/1,read_all/2,
   field_changes/2,
   field_type/2,
   is_object/1,
   is_oid/1,
   get_oid/1,
-  check_rights/1
+  check_rights/1,
+  get_behaviours/1
 ]).
 %%====================================================================
 %%		Test API
@@ -91,7 +93,7 @@
 -define(TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
     none->
-      case ecomet_transaction:internal(Fun) of
+      case ecomet_transaction:internal_sync(Fun) of
         {ok,_TResult}->_TResult;
         {error,_TError}->?ERROR(_TError)
       end;
@@ -256,15 +258,19 @@ read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Field
   ToLoad = maps:merge(Project,?SERVICE_FIELDS),
   Storage=
     maps:fold(fun(F,_,Acc)->
-      {ok,S}=ecomet_field:get_storage(Map,F),
-
-      case Acc of
-        #{S:=_}->Acc;
+      case ecomet_field:get_storage(Map,F) of
+        {ok,S}->
+          case Acc of
+            #{S:=_}->Acc;
+            _->
+              case load_storage(OID,S) of
+                Values when is_map(Values)-> Acc#{S=>Values};
+                _-> Acc#{S=>#{}}
+              end
+          end;
         _->
-          case load_storage(OID,S) of
-            Values when is_map(Values)-> Acc#{S=>Values};
-            _-> Acc#{S=>#{}}
-          end
+          % undefined_field
+          Acc
       end
     end,#{},maps:without(maps:keys(ToLoad),Fields)),
 
@@ -290,12 +296,22 @@ read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Field
               New;
             _->
               % Look up the field in the storage
-              {ok,S}=ecomet_field:get_storage(Map,Name),
-              #{S:=Values} = Storage,
-              maps:get(Name,Values,Default)
+              case ecomet_field:get_storage(Map,Name) of
+                {ok,S}->
+                  #{S:=Values} = Storage,
+                  maps:get(Name,Values,Default);
+                _->
+                  % undefined_field
+                  undefined_field
+              end
           end,
-        {ok,Type}=ecomet_field:get_type(Map,Name),
-        Formatter(Type,Value)
+        if
+          Value=/=undefined_field ->
+            {ok,Type}=ecomet_field:get_type(Map,Name),
+            Formatter(Type,Value);
+          true ->
+            Formatter(string,undefined_field)
+        end
     end
   end,Fields).
 
@@ -304,9 +320,12 @@ read_all(Object)->
   read_all(Object,#{}).
 read_all(Object,Params) when is_list(Params)->
   read_all(Object,maps:from_list(Params));
-read_all(#object{map=Map}=Object,Params) when is_map(Params)->
+read_all(#object{map=Map,oid = OID}=Object,Params) when is_map(Params)->
   Fields=maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map)),
-  read_fields(Object,Fields,Params).
+  Fields1=Fields#{
+    <<".oid">>=>OID
+  },
+  read_fields(Object,Fields1,Params).
 
 % Edit object
 edit(Object,Fields)->
@@ -349,7 +368,10 @@ field_changes(#object{oid=OID,map=Map},Field)->
   ecomet_field:field_changes(Map,Fields,OID,Field).
 
 field_type(#object{map=Map},Field)->
-  ecomet_field:get_type(Map,Field).
+  case ?SERVICE_FIELDS of
+    #{Field:=_}-> {ok, string};
+    _->ecomet_field:get_type(Map,Field)
+  end.
 
 is_object(#object{})->
   true;
@@ -394,6 +416,9 @@ check_rights(Read,Write)->
         _->write
       end
   end.
+
+get_behaviours(#object{map=Map})->
+  ecomet_pattern:get_behaviours(Map).
 
 %%=================================================================
 %%	Service API
@@ -652,7 +677,6 @@ check_path(Object)->
 
 % Object can not change its folder if it is in another database
 check_db(#object{oid=OID}=Object)->
-  ct:pal("I am here, checkDB ~n~p~n", [ecomet:read_field(Object, <<".name">>)]),
   case field_changes(Object,<<".folder">>) of
     none->ok;
     {FolderID,_}->
@@ -748,6 +772,8 @@ get_id(?ObjectID(_,ObjectID))->
 get_pattern_oid(#object{oid=OID})->
   get_pattern_oid(OID);
 get_pattern_oid(?ObjectID(ServiceID,_))->
+  get_pattern_oid(ServiceID);
+get_pattern_oid(ServiceID)->
   IDH = ServiceID div (1 bsl (?NODE_ID_LENGTH + ?DB_ID_LENGTH + ?PATTERN_IDL_LENGTH)),
   IDL = ServiceID rem (1 bsl ?PATTERN_IDL_LENGTH),
   PatternID = IDH * (1 bsl ?PATTERN_IDL_LENGTH) + IDL,

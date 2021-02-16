@@ -240,19 +240,8 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
   },InParams),
 
   %----------Compile fields---------------------------
-  % Per object reading plan
-  ReadMap=read_map(Fields,Formatter),
+  { Read, ReadDeps } = compile_subscribe_read(Fields,Formatter),
 
-  % Fields dependencies
-  FieldsDeps=ordsets:union([field_args(F)|| {_,F}<-maps:to_list(ReadMap) ]),
-
-  % If a client subscribed only on .oid field then ecomet considers
-  % that it is interested all the updates for the objects
-  FieldsDeps1=
-    case Fields of
-      [<<".oid">>]->[<<"@ANY@">>];
-      _->FieldsDeps
-    end,
 
   % Compile the subscription constraints
   CompiledSubscription = ecomet_resultset:subscription_prepare(Conditions),
@@ -261,7 +250,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
   TagsDeps = ecomet_resultset:subscription_fields(CompiledSubscription),
 
   % The total fields dependencies
-  Deps = ordsets:union([FieldsDeps1,TagsDeps,[<<".readgroups">>]]),
+  Deps = ordsets:union([ReadDeps,TagsDeps,[<<".readgroups">>]]),
 
   % User rights
   Rights=
@@ -286,26 +275,11 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
     <<"no_feedback">>=>NoFeedback
   }),
 
-  % Compile the function for building query fields
-  Read=
-    fun(Changed,Object)->
-      maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
-        case ordsets:intersection(Changed,Args) of
-          []->
-            % If the changes are not among the function arguments list the the field is not affected
-            Acc;
-          _->
-            % The value has to be recalculated
-            Acc#{Alias=>Fun(Object)}
-        end
-      end,#{},ReadMap)
-    end,
-
   % If the subscription is not stateless (default) then we need to
   % perform a traditional search for what is already satisfies the conditions
   StartTS=
     if
-      not Stateless -> init_subscription_state(ID,DBs,Deps,Conditions,Read);
+      not Stateless -> init_subscription_state(ID,DBs,ReadDeps,Conditions,Read);
       true -> -1
     end,
 
@@ -350,7 +324,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
                   TagsResult =:= add,RightsResult=:=del->false ;
                   TagsResult =:= del,RightsResult=:=add->false ;
                   TagsResult =:= add;RightsResult=:=add ->
-                    Self!?SUBSCRIPTION(ID,create,OID,Read(Deps,Object));
+                    Self!?SUBSCRIPTION(ID,create,OID,Read(ReadDeps,Object));
                   TagsResult =:= del;RightsResult=:=del ->
                     Self!?SUBSCRIPTION(ID,delete,OID,#{});
                   true ->
@@ -362,6 +336,64 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
 
   % Run the subscription
   ok = ecomet_session:run_subscription(ID,Match).
+
+compile_subscribe_read([<<".oid">>],_Formatter)->
+  { fun(_Changed,_Object)-> #{} end, [<<"@ANY@">>] };
+compile_subscribe_read(['*'],Formatter)->
+  ReadField =
+    if
+      is_function(Formatter,2) ->
+        fun(Object,Field)->
+          Value = maps:get(Field,Object,none),
+          {ok,Type}=ecomet_object:field_type(maps:get(object,Object),Field),
+          Formatter(Type,Value)
+        end;
+      true ->
+        fun(Object,Field)->maps:get(Field,Object,none) end
+    end,
+
+  Params=
+    if
+      is_function(Formatter,2) ->
+        #{format=>Formatter};
+      true ->
+        #{}
+    end,
+
+  Read=
+    fun
+      ([<<"@ANY@">>],#{object:=Object})->
+        ecomet_object:read_all(Object,Params);
+      (Changed,Object)->
+        lists:foldl(fun(Field,Acc)->Acc#{Field=>ReadField(Object,Field)} end,#{},Changed)
+    end,
+
+  { Read, [<<"@ANY@">>] };
+
+compile_subscribe_read(Fields,Formatter)->
+
+  % Per object reading plan
+  ReadMap=read_map(Fields,Formatter),
+
+  % Fields dependencies
+  FieldsDeps=ordsets:union([field_args(F)|| {_,F}<-maps:to_list(ReadMap) ]),
+
+  Read=
+    fun(Changed,Object)->
+      maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
+        case ordsets:intersection(Changed,Args) of
+          []->
+            % If the changes are not among the function arguments list the the field is not affected
+            Acc;
+          _->
+            % The value has to be recalculated
+            Acc#{Alias=>Fun(Object)}
+        end
+      end,#{},ReadMap)
+    end,
+
+  { Read, FieldsDeps }.
+
 
 unsubscribe(ID)->
   ok = ecomet_session:remove_subscription(ID).
@@ -377,14 +409,15 @@ match_log( New, Old, Del, NewObject, OldObject, Match )->
   end.
 
 init_subscription_state(ID,DBs,Deps,Conditions,Read)->
+  RealDeps = [D||D<-Deps,D=/=<<"@ANY@">>],
   F=
     fun([Object|Values])->
-      Values1 = maps:from_list(lists:zip(Deps,Values)),
+      Values1 = maps:from_list(lists:zip(RealDeps,Values)),
       ObjectMap=object_map(Object,Values1),
       OID = ecomet_object:get_oid(Object),
       ?SUBSCRIPTION(ID,create,OID,Read(Deps,ObjectMap))
     end,
-  Fields = [<<".ts">>,{F, [<<".object">>|Deps]}],
+  Fields = [<<".ts">>,{F, [<<".object">>|RealDeps]}],
   {_Header, Objects}=ecomet_query:get(DBs,Fields,Conditions,#{order=>[{<<".ts">>,'ASC'}]}),
 
   % Send the results
@@ -849,9 +882,9 @@ map_reduce_plan(#{aggregate:=false}=Params)->
   MergeTrees=
     fun([InitTree|Results])->
       lists:foldr(fun(GroupsTree,Acc)->
-        merge_trees(length(TraverseGroups),GroupsTree,fun(RowList,GroupAcc)->
+        merge_trees(length(TraverseGroups),GroupsTree,Acc,fun(RowList,GroupAcc)->
           RowList++GroupAcc
-        end,Acc)
+        end)
       end,InitTree,Results)
      end,
   %-------Fun to reduce results--------------
@@ -1042,6 +1075,19 @@ read_fun(count,_Formatter)->
       end
     end
   };
+read_fun('*',Formatter)->
+  Read =
+    if
+      is_function(Formatter,2) ->
+        fun(#{object:=Object})->ecomet_object:read_all(Object,#{format=>Formatter}) end;
+      true ->
+        fun(#{object:=Object})->ecomet_object:read_all(Object) end
+    end,
+
+  #get{
+    value = Read,
+    args = []
+  };
 read_fun({Aggregate,Value},_Formatter) when (Aggregate=:=sum) or (Aggregate=:=max) or (Aggregate=:=min)->
   Get=read_fun(Value,undefined),
   Fun=
@@ -1069,16 +1115,31 @@ read_fun({Fun,Arguments},_Formatter) when is_function(Fun,1)->
     args = lists:foldl(fun(#get{args=Args},Acc)->ordsets:union(Args,Acc) end,[],ArgumentList)
   };
 read_fun(FieldName,Formatter) when is_binary(FieldName)->
+  GetValue =
+    fun(Fields)->
+      case Fields of
+        #{FieldName:=Value}->Value;
+        #{object:=Object}->
+          case ecomet_object:field_type(Object,FieldName) of
+            {ok,_}->none;
+            _->undefined_field
+          end
+      end
+    end,
   Fun =
     if
       is_function(Formatter,2) ->
         fun(Object)->
-          Value = maps:get(FieldName,Object),
-          {ok,Type}=ecomet_object:field_type(maps:get(object,Object),FieldName),
-          Formatter(Type,Value)
+          case GetValue(Object) of
+            undefined_field->
+              Formatter(string,undefined_field);
+            Value->
+              {ok,Type}=ecomet_object:field_type(maps:get(object,Object),FieldName),
+              Formatter(Type,Value)
+          end
         end;
       true ->
-        fun(Object)->maps:get(FieldName,Object) end
+        GetValue
     end,
   #get{
     value = Fun,
@@ -1244,6 +1305,24 @@ compile_function(ecomet_ql_util,sum,[Value])->
   {sum,Value};
 compile_function(ecomet_ql_util,sum,_)->
   ?ERROR(wrong_sum_arguments);
+
+% Join
+compile_function(ecomet_ql_util,join,Arguments)->
+  case collect_deps(Arguments) of
+    []->none;
+    Deps ->
+      Map = values_map(Deps),
+      Fun =
+        fun(Values)->
+          ValueMap = Map(Values),
+
+          % Evaluate the arguments
+          ArgValues=[arg_value(A,ValueMap)||A<-Arguments],
+
+          ecomet_ql_util:join(ArgValues)
+        end,
+      { Fun, Deps }
+  end;
 
 %---------------Utility functions---------------------
 compile_function(Module,Function,Arguments)->

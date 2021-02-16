@@ -62,6 +62,8 @@
 %%=================================================================
 %%	API
 %%=================================================================
+oid2path({?FOLDER_PATTERN,0})->
+  <<"/">>;
 oid2path({?FOLDER_PATTERN,?ROOT_FOLDER})->
   <<"/root">>;
 oid2path(OID)->
@@ -79,12 +81,12 @@ path2oid(<<"/root",_/binary>> = Path)->
   Tokens = string:tokens(unicode:characters_to_list(Tail),"/"),
   Path1= [ unicode:characters_to_binary(Name) || Name <- Tokens],
   path2oid(FolderID,Path1);
-path2oid(_Path)->
-  {error,invalid_path}.
+path2oid(Path)->
+  {error,{invalid_path,Path}}.
 path2oid(FolderID,[Name|Tail])->
   case find_object_system(FolderID,Name) of
     {ok,ItemID} -> path2oid(ItemID,Tail);
-    _->{ error, invalid_path }
+    _->{ error, {invalid_path , <<(oid2path(FolderID))/binary,"/",Name/binary>> } }
   end;
 path2oid(OID,[])->
   {ok,OID}.
@@ -95,8 +97,8 @@ find_object(FolderID,Name)->
     { <<".folder">>,'=',FolderID},
     { <<".name">>,'=',Name }
   ]}) of
-    []->{ error, not_found };
-    [OID|_]-> { ok, OID }
+    [OID|_]-> { ok, OID };
+    _->{ error, not_found }
   end.
 find_object_system(FolderID,Name)->
   DB = get_db_name(FolderID),
@@ -104,8 +106,8 @@ find_object_system(FolderID,Name)->
     {<<".folder">>,'=',FolderID},
     { <<".name">>,'=',Name}
   ]}) of
-    []->{ error, not_found };
-    [OID|_]-> { ok, OID }
+    [OID|_]-> { ok, OID };
+    _->{ error, not_found }
   end.
 
 get_content(Folder)->
@@ -172,9 +174,12 @@ on_delete(Object)->
   % IMPORTANT! The search is under admin rights (system), but the remove
   % is in the user context. If the user does not have rights for the object the whole
   % transaction will throw
-  [ begin
+  [ try
       Item = ecomet:open(ItemID,_Lock=none),
       ok = ecomet:delete_object(Item)
+    catch
+      _:object_deleted->ok;
+      _:OtherError->throw(OtherError)
     end || ItemID <- get_content_system(?OID(Object)) ],
 
   % Unmount a database if some is mounted
@@ -297,7 +302,7 @@ apply_recursion(Object)->
           end);
         true -> ok
       end,
-      ok = ecomet:edit_object(Object,[{<<"recursive_rights">>,false}]);
+      ok = ecomet:edit_object(Object,#{<<"recursive_rights">> => false});
     true ->ok
   end.
 

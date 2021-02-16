@@ -26,9 +26,11 @@
 -export([
   oid/1,
   path/1,
+  join/1,
   concat/2,concat/1,
   string/1,
   term/1,
+  atom/1,
   to_base64/1,
   from_base64/1
 ]).
@@ -45,6 +47,20 @@ path(List) when is_list(List)->
   [path(I)||I<-List];
 path(ID)->
   ?PATH(ID).
+
+join([none|_Tail])->
+  none;
+join([])->
+  none;
+join([OID,Field|Tail])->
+  case try ecomet:read_field(?OBJECT(OID),Field) catch
+         _:Error->{error,Error}
+  end of
+    {ok,NextOID}->join([NextOID|Tail]);
+    {error,_}->none
+  end;
+join([Value])->
+  Value.
 
 concat(Value) when is_binary(Value)->
   Value;
@@ -76,6 +92,11 @@ term(String) when is_binary(String)->
   Term;
 term(Term)->
   Term.
+
+atom(List) when is_list(List)->
+  [atom(I)||I<-List];
+atom(String)->
+  ecomet_types:from_string(atom,String).
 
 to_base64(Value) when is_binary(Value)->
   base64:encode(Value);

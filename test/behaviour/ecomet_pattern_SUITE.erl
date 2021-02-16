@@ -45,8 +45,6 @@ all() ->
     check_handler_module_test,
     check_handler_test,
     check_parent_test,
-    get_parent_test,
-    get_parents_test,
     set_parents_test,
     on_delete_test,
     on_edit_test,
@@ -118,7 +116,7 @@ get_parents_test(_Config) ->
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
   meck:expect(ecomet_lib, to_object_system, fun(Pattern) -> Pattern end),
 
-  parents = ecomet_pattern:get_parents(#{<<"parents">> => parents}),
+  parents = ecomet_pattern:get_parent(#{<<"parents">> => parents}),
 
   meck:unload([ecomet, ecomet_lib])
 .
