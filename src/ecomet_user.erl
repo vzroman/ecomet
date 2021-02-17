@@ -169,7 +169,7 @@ check_groups(Object)->
     none->ok;
     { New, _Old } when is_list(New)->
       case ecomet:is_admin() of
-        true->ecomet:edit_object(Object,#{<<"usergroups">>=> ordsets:from_list(New) });
+        {ok,true}->ecomet:edit_object(Object,#{<<"usergroups">>=> ordsets:from_list(New) });
         _->?ERROR(access_denied)
       end;
     { _New, _Old }->
