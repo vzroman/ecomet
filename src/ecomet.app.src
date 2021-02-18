@@ -8,7 +8,7 @@
     stdlib,
     dlss,
     cowboy,
-    ec
+    erlware_commons
    ]},
   {env,[]},
   {modules, []},
