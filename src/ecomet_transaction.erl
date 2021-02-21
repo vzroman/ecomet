@@ -23,6 +23,7 @@
 -export([
   internal/1,
   internal_sync/1,
+  dirty/1,
   start/0,
   lock_key/4,
   lock/3,
@@ -43,7 +44,7 @@
 -define(LOCKTIMEOUT,10000).
 -define(LOCKKEY(DB,Storage,Type,Key),{DB,Storage,Type,Key}).
 
--record(state,{locks,dict,log,droplog,parent,oncommit,type}).
+-record(state,{locks,dict,log,droplog,parent,oncommit,type,dirty}).
 -record(lock,{value,level,pid}).
 
 % Run fun within transaction
@@ -79,11 +80,26 @@ internal_sync(Fun)->
       {error,Error}
   end.
 
+dirty(Fun)->
+  tstart( internal, dirty ),
+  try
+    Result=Fun(),
+    {Log,OnCommits}=tcommit(),
+    on_commit(Log,OnCommits),
+    {ok,Result}
+  catch
+    _:Error->
+      rollback(),
+      {error,Error}
+  end.
+
 % Start external transaction
 start()->tstart(external).
 
 % Start transaction
 tstart(Type)->
+  tstart(Type, _Dirty=false).
+tstart(Type,Dirty)->
   State=
     case get(?TKEY) of
       % It is root transaction
@@ -95,7 +111,8 @@ tstart(Type)->
           droplog=[],
           parent=none,
           oncommit=[],
-          type=Type
+          type=Type,
+          dirty = Dirty
         };
       % Subtransaction
       Parent->
@@ -159,7 +176,8 @@ clean(State)->
 get_type()->
   case get(?TKEY) of
     undefined->none;
-    State->State#state.type
+    #state{ dirty = true }-> dirty;
+    #state{ type = Type }-> Type
   end.
 
 lock_key(DB,Storage,Type,Key)->

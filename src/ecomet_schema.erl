@@ -355,7 +355,12 @@ get_pattern(ID)->
   end.
 
 set_pattern(ID,Value)->
-  ok = mnesia:write(?SCHEMA,#kv{key = #pattern{id=ID}, value = Value },write).
+  case mnesia:transaction(fun()->
+    ok = mnesia:write(?SCHEMA,#kv{key = #pattern{id=ID}, value = Value },write)
+  end) of
+    { atomic, ok }-> ok;
+    { aborted, Reason }->?ERROR(Reason)
+  end.
 
 list_patterns() ->
   Matcher = #kv{key = #pattern{id = '$1'}, value = '$2'},

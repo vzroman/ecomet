@@ -269,7 +269,11 @@ run_query(ParsedQuery)->
 %%	Transactions API
 %%=================================================================
 is_transaction()->
-  ecomet_transaction:get_type()=/=none.
+  case ecomet_transaction:get_type() of
+    none->false;
+    dirty->false;
+    _->true
+  end.
 
 transaction(Fun)->
   ecomet_transaction:internal(Fun).
