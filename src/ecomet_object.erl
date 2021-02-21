@@ -577,7 +577,7 @@ commit(OID,Dict)->
 
       TransactionType = ecomet_transaction:get_type(),
       % Indexed fields changes
-      Indexed = [ F || F <- ChangedFields,
+      Indexed = [ F || {F,_} <- ChangedFields,
         case ecomet_field:get_index(Map,F) of
           {ok,none}->false;
           _->true
@@ -594,7 +594,7 @@ commit(OID,Dict)->
           % But if indexed are involved we have to wrap it into a true transaction to keep
           % them consistent
           Dict1 = maps:fold( fun(T,S,Acc)->Acc#{ {OID,T}=> S } end, Dict, Storages),
-          case ecomet_backend:sync_transaction(fun()-> commit(OID,Dict1) end) of
+          case ecomet_transaction:internal_sync(fun()-> commit(OID,Dict1) end) of
             { ok, Log }->Log;
             { error, Error }->
               ?ERROR( Error )
@@ -620,7 +620,7 @@ commit(OID,Dict)->
                   case maps:size(TFields) of
                     0->
                       % Storage is empty now, delete it
-                      ok = ecomet_backend:Delete(DB,?DATA,T,OID,none),
+                      ok = ecomet_backend:Delete(DB,?DATA,T,OID),
                       Acc;
                     _->
                       % Update storage tags
@@ -631,7 +631,7 @@ commit(OID,Dict)->
                           _->#{fields=>TFields, tags=>TTags}
                         end,
                       % Dump the new version of the storage
-                      ok = ecomet_backend:Write(DB,?DATA,T,OID,NewStorage,none),
+                      ok = ecomet_backend:Write(DB,?DATA,T,OID,NewStorage),
                       maps:merge(Acc,TFields)
                   end
               end
