@@ -38,6 +38,7 @@
   field_changes/2,
   field_type/2,
   edit_object/2,edit_object/3,
+  dirty_edit_object/2,dirty_edit_object/3,
   delete_object/1,
   copy_object/2
 ]).
@@ -217,6 +218,12 @@ edit_object(Object, Fields)->
 
 edit_object(Object, Fields, Params)->
   ecomet_object:edit(Object, Fields, Params).
+
+dirty_edit_object(Object, Fields)->
+  ecomet_object:dirty_edit(Object, Fields).
+
+dirty_edit_object(Object, Fields, Params)->
+  ecomet_object:dirty_edit(Object, Fields, Params).
 
 % @edoc Deletes existing ecomet object
 -spec delete_object(Object :: object_handler()) -> ok.

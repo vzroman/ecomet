@@ -44,7 +44,7 @@
 -define(LOCKTIMEOUT,10000).
 -define(LOCKKEY(DB,Storage,Type,Key),{DB,Storage,Type,Key}).
 
--record(state,{locks,dict,log,droplog,parent,oncommit,type,dirty,child_t}).
+-record(state,{locks,dict,log,droplog,parent,oncommit,type,dirty}).
 -record(lock,{value,level,pid}).
 
 % Run fun within transaction
@@ -112,8 +112,7 @@ tstart(Type,Dirty)->
           parent=none,
           oncommit=[],
           type=Type,
-          dirty = Dirty,
-          child_t = false
+          dirty = Dirty
         };
       % Subtransaction
       Parent->
@@ -132,10 +131,10 @@ tstart(Type,Dirty)->
           dict= Parent#state.dict,
           log=[],
           droplog=[],
-          parent=Parent#state{ child_t = Parent#state.child_t or Dirty=/=false },
+          parent=Parent,
           oncommit=[],
           type=SubType,
-          dirty=Dirty and Parent#state.dirty
+          dirty=Dirty
         }
     end,
   put(?TKEY,State),
@@ -359,24 +358,22 @@ tcommit()->
   case get(?TKEY) of
     undefined->?ERROR(no_transaction);
     % Root transaction
-    #state{parent=none,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits,dirty = Dirty, child_t = ChildT }->
+    #state{parent=none,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits }->
       Commits = lists:reverse(lists:subtract(Log,DropLog)),
-      CommitLog=
-        if
-          Dirty,ChildT ->
-            % Wrap commit into a transaction if at least one child was transactional, but the parent is dirty
-            case ecomet_backend:transaction(fun()->run_commit(Commits,Dict,[]) end) of
-              {ok,_CommitLog}->_CommitLog;
-              {error, Error}->?ERROR( Error )
-            end;
-          true ->
-            run_commit(Commits,Dict,[])
-        end,
+      CommitLog = run_commit(Commits,Dict,[]),
       erase(?TKEY),
       {CommitLog,OnCommits};
-    State->
+    #state{ dirty=IsDirty, parent = #state{ dirty = IsDirty } }=State->
+      % If the parent and child have the same dirty we merge commits
       put(?TKEY,merge_commit(State)),
-      {[],[]}
+      {[],[]};
+    #state{parent=Parent,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits }->
+      % The parent and the child have different levels of dirty
+      % We perform the commit
+      Commits = lists:reverse(lists:subtract(Log,DropLog)),
+      CommitLog = run_commit(Commits,Dict,[]),
+      put(?TKEY,Parent),
+      {CommitLog,OnCommits}
   end.
 
 % Commit changes to storage
