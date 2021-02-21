@@ -564,7 +564,8 @@ commit(OID,Dict)->
           % be performed in the dirty mode.
           % But if indexed are involved we have to wrap it into a true transaction to keep
           % them consistent
-          case ecomet_backend:sync_transaction(fun()-> commit(OID,Dict) end) of
+          TObject = Object#object{mode = ?TRANSACTIONAL },
+          case ecomet_backend:sync_transaction(fun()-> commit(OID,Dict#{ {OID,object} => TObject}) end) of
             { ok, Log }->Log;
             { error, Error }->
               ?ERROR( Error )
