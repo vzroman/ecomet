@@ -100,23 +100,31 @@ edit_map(Pattern,Map)->
   end.
 
 wrap_transaction(PatternID,Fun)->
-  % Check if the schema is already under transaction
-  RootTransaction = ecomet_transaction:dict_get({'@pattern_map@',PatternID},undefined)=:=undefined,
-  % Put the schema into the transaction
-  Map = get_map(PatternID),
-  ecomet_transaction:dict_put(#{
-    {'@pattern_map@',PatternID}=>Map
-  }),
-  % Perform schema transformations
-  Fun(Map),
-  % Commit the schema if there is no upper level transaction
-  if
-    RootTransaction ->
-      NewMap=get_map(PatternID),
-      ecomet_transaction:dict_remove([{'@pattern_map@',PatternID}]),
-      edit_map(PatternID,NewMap);
-    true ->
-      ok
+  case ecomet:is_transaction() of
+    true->
+      % Check if the schema is already under transaction
+      RootTransaction = ecomet_transaction:dict_get({'@pattern_map@',PatternID},undefined)=:=undefined,
+      % Put the schema into the transaction
+      Map = get_map(PatternID),
+      ecomet_transaction:dict_put(#{
+        {'@pattern_map@',PatternID}=>Map
+      }),
+      % Perform schema transformations
+      Fun(Map),
+      % Commit the schema if there is no upper level transaction
+      if
+        RootTransaction ->
+          NewMap=get_map(PatternID),
+          ecomet_transaction:dict_remove([{'@pattern_map@',PatternID}]),
+          edit_map(PatternID,NewMap);
+        true ->
+          ok
+      end;
+    _->
+      case ecomet:transaction(fun()->wrap_transaction(PatternID,Fun) end) of
+        {ok,_}->ok;
+        {error,Error}->?ERROR(Error)
+      end
   end.
 
 get_behaviours(Map) when is_map(Map)->
