@@ -44,7 +44,7 @@
 -define(LOCKTIMEOUT,10000).
 -define(LOCKKEY(DB,Storage,Type,Key),{DB,Storage,Type,Key}).
 
--record(state,{locks,dict,log,droplog,parent,oncommit,type,dirty}).
+-record(state,{locks,dict,log,droplog,parent,oncommit,type,dirty,child_t}).
 -record(lock,{value,level,pid}).
 
 % Run fun within transaction
@@ -81,7 +81,7 @@ internal_sync(Fun)->
   end.
 
 dirty(Fun)->
-  tstart( internal, dirty ),
+  tstart( internal, _Dirty=true ),
   try
     Result=Fun(),
     {Log,OnCommits}=tcommit(),
@@ -112,7 +112,8 @@ tstart(Type,Dirty)->
           parent=none,
           oncommit=[],
           type=Type,
-          dirty = Dirty
+          dirty = Dirty,
+          child_t = false
         };
       % Subtransaction
       Parent->
@@ -131,9 +132,10 @@ tstart(Type,Dirty)->
           dict= Parent#state.dict,
           log=[],
           droplog=[],
-          parent=Parent,
+          parent=Parent#state{ child_t = Parent#state.child_t or Dirty=/=false },
           oncommit=[],
-          type=SubType
+          type=SubType,
+          dirty=Dirty and Parent#state.dirty
         }
     end,
   put(?TKEY,State),
@@ -357,8 +359,19 @@ tcommit()->
   case get(?TKEY) of
     undefined->?ERROR(no_transaction);
     % Root transaction
-    #state{parent=none,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits}->
-      CommitLog=run_commit(lists:reverse(lists:subtract(Log,DropLog)),Dict,[]),
+    #state{parent=none,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits,dirty = Dirty, child_t = ChildT }->
+      Commits = lists:reverse(lists:subtract(Log,DropLog)),
+      CommitLog=
+        if
+          Dirty,ChildT ->
+            % Wrap commit into a transaction if at least one child was transactional, but the parent is dirty
+            case ecomet_backend:transaction(fun()->run_commit(Commits,Dict,[]) end) of
+              {ok,_CommitLog}->_CommitLog;
+              {error, Error}->?ERROR( Error )
+            end;
+          true ->
+            run_commit(Commits,Dict,[])
+        end,
       erase(?TKEY),
       {CommitLog,OnCommits};
     State->
@@ -377,7 +390,14 @@ release_locks([{_Key,Lock}|Rest])->
 release_locks([])->ok.
 
 % Merge results of the transaction to the parent
-merge_commit(#state{locks=Locks,dict=Dict,log=Log,droplog=DropLog,oncommit=OnCommits,parent=Parent})->
+merge_commit(#state{
+  locks=Locks,
+  dict=Dict,
+  log=Log,
+  droplog=DropLog,
+  oncommit=OnCommits,
+  parent=Parent
+})->
   ClearedLog=lists:subtract(Log,DropLog),
   MergedLog=merge_log(ClearedLog,Parent#state.log),
   Parent#state{
