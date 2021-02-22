@@ -108,7 +108,7 @@
 -define(TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
     _T when _T=:=none;_T=:=dirty->
-      case ecomet_transaction:internal(Fun) of
+      case ecomet_transaction:internal_sync(Fun) of
         {ok,_TResult}->_TResult;
         {error,_TError}->?ERROR(_TError)
       end;
