@@ -456,9 +456,9 @@ on_commit(#ecomet_log{
     {'OR',[{<<"dependencies">>,'=',F} || F <- [<<"@ANY@">>|ChangedFields1]]},
 
   Query = ecomet_resultset:subscription_compile({'AND',[
-    Index,
-    Rights,
     Dependencies,
+    Rights,
+    Index,
     {<<"databases">>,'=',DB}
   ]}),
 
