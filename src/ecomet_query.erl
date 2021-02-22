@@ -456,9 +456,9 @@ on_commit(#ecomet_log{
     {'OR',[{<<"dependencies">>,'=',F} || F <- [<<"@ANY@">>|ChangedFields1]]},
 
   Query = ecomet_resultset:subscription_compile({'AND',[
+    Dependencies,
     Index,
     Rights,
-    Dependencies,
     {<<"databases">>,'=',DB}
   ]}),
 
@@ -476,6 +476,39 @@ on_commit(#ecomet_log{
   notify( Query, Log1 ),
 
   ok.
+
+
+index_query( Tags )->
+  {'OR',[
+    {'AND',[ {<<"index">>,'=',{T1,1}}, {'OR', [
+      {'AND',[{<<"index">>,'=',{T2,2}},{'OR',[
+        {<<"index">>,'=',{T3,3}} || T3<- [none|tags_tail(T2Tags,T2)]
+      ]}]}
+      || T2 <- [none| T2Tags = tags_tail(Tags,T1)] ] } ]}
+    || T1 <- Tags ]}.
+
+%%index_query( Tags ) when length(Tags) < 15->
+%%  {'OR',[
+%%    {'AND',[ {<<"index">>,'=',{T1,1}},{'AND',[
+%%      {'OR',[ {<<"index">>,'=',{T,2}} || T<-[none|Tags]--[T1] ]},
+%%      {'OR',[ {<<"index">>,'=',{T,3}} || T<-[none|Tags]--[T1] ]}
+%%    ]} ]}
+%%    || T1 <- Tags ]};
+%%
+%%index_query( Tags ) ->
+%%  {'AND',[
+%%    {'OR',[ {<<"index">>,'=',{T,1}}  || T<-Tags ]},
+%%    {'OR',[ {<<"index">>,'=',{T,2}} || T<-[none|Tags] ]},
+%%    {'OR',[ {<<"index">>,'=',{T,3}} || T<-[none|Tags] ]}
+%%  ]}.
+
+tags_tail( [T|Rest], To ) when T=<To->
+  tags_tail( Rest, To );
+tags_tail( Rest, _To )->
+  Rest.
+
+
+
 
 notify( Query, Log )->
   Session =

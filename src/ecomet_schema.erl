@@ -355,7 +355,12 @@ get_pattern(ID)->
   end.
 
 set_pattern(ID,Value)->
-  ok = mnesia:write(?SCHEMA,#kv{key = #pattern{id=ID}, value = Value },write).
+  case mnesia:transaction(fun()->
+    ok = mnesia:write(?SCHEMA,#kv{key = #pattern{id=ID}, value = Value },write)
+  end) of
+    { atomic, ok }-> ok;
+    { aborted, Reason }->?ERROR(Reason)
+  end.
 
 list_patterns() ->
   Matcher = #kv{key = #pattern{id = '$1'}, value = '$2'},
@@ -386,15 +391,19 @@ init([])->
 
   ok = register_node(),
 
+  ?LOGINFO("initialize base types"),
   ok = init_base_types(),
 
   % Set the init context
   ecomet_user:on_init_state(),
 
+  ?LOGINFO("initialize base type objects"),
   ok = init_base_types_objects(),
 
+  ?LOGINFO("initialize storage objects"),
   ok = init_storage_objects(),
 
+  ?LOGINFO("initialize default users"),
   ok = init_default_users(),
 
   ok = ecomet_session:on_start_node(node()),
@@ -407,6 +416,7 @@ init([])->
   % Enter the loop
   self()!on_cycle,
 
+  ?LOGINFO("finish ecomet schema initialization"),
   {ok,#state{cycle = Cycle}}.
 
 handle_call(Request, From, State) ->
