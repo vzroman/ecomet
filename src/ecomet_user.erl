@@ -168,7 +168,10 @@ check_groups(Object)->
   case ecomet:field_changes(Object,<<"usergroups">>) of
     none->ok;
     { New, _Old } when is_list(New)->
-      ecomet:edit_object(Object,#{<<"usergroups">>=> ordsets:from_list(New) });
+      case ecomet:is_admin() of
+        {ok,true}->ecomet:edit_object(Object,#{<<"usergroups">>=> ordsets:from_list(New) });
+        _->?ERROR(access_denied)
+      end;
     { _New, _Old }->
       ecomet:edit_object(Object,#{<<"usergroups">>=>[]})
   end.
