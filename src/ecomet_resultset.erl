@@ -720,11 +720,11 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 	{'TAG',Tag,Config};
 search_patterns({'AND',Conditions,'UNDEFINED'},DB,ExtBits)->
 	{ResPatterns,ResConditions}=
-		lists:foldr(fun(Condition,{AccPatterns,AccCond})->
+		lists:foldl(fun(Condition,{AccPatterns,AccCond})->
 			PatternedCond=search_patterns(Condition,DB,AccPatterns),
 			% If one branch can be true only for PATTERNS1, then hole AND can be true only for PATTERNS1
 			{CBits,_}=element(3,PatternedCond),
-			{bitmap_oper('AND',AccPatterns,CBits),[PatternedCond|AccCond]}
+			{bitmap_oper('AND',AccPatterns,CBits),AccCond++[PatternedCond]}
 		end,{ExtBits,[]},Conditions),
 
 	% 'UNDEFINED' only if AND contains no real tags.
@@ -733,10 +733,10 @@ search_patterns({'AND',Conditions,'UNDEFINED'},DB,ExtBits)->
 	{'AND',ResConditions,Config};
 search_patterns({'OR',Conditions,'UNDEFINED'},DB,ExtBits)->
 	{ResPaterns,ResConditions}=
-	lists:foldr(fun(Condition,{AccPatterns,AccCond})->
+	lists:foldl(fun(Condition,{AccPatterns,AccCond})->
 		PatternedCond=search_patterns(Condition,DB,ExtBits),
 		{CBits,_}=element(3,PatternedCond),
-		{bitmap_oper('OR',AccPatterns,CBits),[PatternedCond|AccCond]}
+		{bitmap_oper('OR',AccPatterns,CBits),AccCond++[PatternedCond]}
 	end,{none,[]},Conditions),
 	% !!! EMPTY {'OR',[]} MAY KILL ALL RESULTS
 	{'OR',ResConditions,{ResPaterns,[]}};
@@ -787,19 +787,19 @@ seacrh_idhs({Type,Condition,{IDPBits,IDHList}},DB,IDP)->
 			{IDHBits,{Type,ResCondition,{IDPBits,ResIDHList}}}
 	end.
 search_type('AND',Conditions,DB,IDP)->
-	lists:foldr(fun(Condition,{AccBits,AccConditions})->
+	lists:foldl(fun(Condition,{AccBits,AccConditions})->
 		if
 		% One of branches is empty, no sense to search others
 			AccBits==none->{none,AccConditions};
 			true->
 				{CBits,Condition1}=seacrh_idhs(Condition,DB,IDP),
-				{bitmap_oper('AND',AccBits,CBits),[Condition1|AccConditions]}
+				{bitmap_oper('AND',AccBits,CBits),AccConditions++[Condition1]}
 		end
 	end,{start,[]},Conditions);
 search_type('OR',Conditions,DB,IDP)->
-	lists:foldr(fun(Condition,{AccBits,AccConditions})->
+	lists:foldl(fun(Condition,{AccBits,AccConditions})->
 		{CBits,Condition1}=seacrh_idhs(Condition,DB,IDP),
-		{bitmap_oper('OR',AccBits,CBits),[Condition1|AccConditions]}
+		{bitmap_oper('OR',AccBits,CBits),AccConditions++[Condition1]}
 	end,{none,[]},Conditions);
 search_type('ANDNOT',{Condition1,Condition2},DB,IDP)->
 	case seacrh_idhs(Condition1,DB,IDP) of
