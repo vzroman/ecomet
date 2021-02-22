@@ -473,7 +473,7 @@ on_commit(#ecomet_log{
 
   ok.
 
-index_query( Tags ) when length(Tags) < 5->
+index_query( Tags ) when length(Tags) < 8->
   {'OR',[
     {'AND',[ {<<"index">>,'=',{T1,1}}, {'OR', [
       {'AND',[{<<"index">>,'=',{T2,2}},{'OR',[
@@ -483,14 +483,19 @@ index_query( Tags ) when length(Tags) < 5->
     || T1 <- Tags ]};
 
 index_query( Tags ) when length(Tags) < 15->
+  {'OR',[
+    {'AND',[ {<<"index">>,'=',{T1,1}},{'AND',[
+      {'OR',[ {<<"index">>,'=',{T,2}} || T<-[none|Tags]--[T1] ]},
+      {'OR',[ {<<"index">>,'=',{T,3}} || T<-[none|Tags]--[T1] ]}
+    ]} ]}
+    || T1 <- Tags ]};
+
+index_query( Tags ) ->
   {'AND',[
     {'OR',[ {<<"index">>,'=',{T,1}}  || T<-Tags ]},
     {'OR',[ {<<"index">>,'=',{T,2}} || T<-[none|Tags] ]},
     {'OR',[ {<<"index">>,'=',{T,3}} || T<-[none|Tags] ]}
-  ]};
-
-index_query( Tags )->
-  {'OR',[ {<<"index">>,'=',{T,1}}  || T<-Tags ]}.
+  ]}.
 
 
 
