@@ -443,11 +443,7 @@ on_commit(#ecomet_log{
 
   %-----------------------The SEARCH phase-------------------------------------
   Tags = TAdd1 ++ TOld1 ++ TDel1,
-  Index = {'AND',[
-    {'OR',[ {<<"index">>,'=',{T,1}}  || T<-Tags ]},
-    {'OR',[ {<<"index">>,'=',{T,2}} || T<-[none|Tags] ]},
-    {'OR',[ {<<"index">>,'=',{T,3}} || T<-[none|Tags] ]}
-  ]},
+  Index = index_query(Tags) ,
 
   Rights =
     {'OR',[{<<"rights">>,'=',T} || T <- [is_admin|RAdd1 ++ ROld1 ++ RDel1] ]},
@@ -456,9 +452,9 @@ on_commit(#ecomet_log{
     {'OR',[{<<"dependencies">>,'=',F} || F <- [<<"@ANY@">>|ChangedFields1]]},
 
   Query = ecomet_resultset:subscription_compile({'AND',[
+    Index,
     Dependencies,
     Rights,
-    Index,
     {<<"databases">>,'=',DB}
   ]}),
 
@@ -476,6 +472,27 @@ on_commit(#ecomet_log{
   notify( Query, Log1 ),
 
   ok.
+
+index_query( Tags ) when length(Tags) < 5->
+  {'OR',[
+    {'AND',[ {<<"index">>,'=',{T1,1}}, {'OR', [
+      {'AND',[{<<"index">>,'=',{T2,2}},{'OR',[
+        {<<"index">>,'=',T3} || {T3,3}<- [none|Tags]--[T1,T2]
+      ]}]}
+      || T2 <- [none,Tags]--[T1] ] } ]}
+    || T1 <- Tags ]};
+
+index_query( Tags ) when length(Tags) < 15->
+  {'AND',[
+    {'OR',[ {<<"index">>,'=',{T,1}}  || T<-Tags ]},
+    {'OR',[ {<<"index">>,'=',{T,2}} || T<-[none|Tags] ]},
+    {'OR',[ {<<"index">>,'=',{T,3}} || T<-[none|Tags] ]}
+  ]};
+
+index_query( Tags )->
+  {'OR',[ {<<"index">>,'=',{T,1}}  || T<-Tags ]}.
+
+
 
 notify( Query, Log )->
   Session =

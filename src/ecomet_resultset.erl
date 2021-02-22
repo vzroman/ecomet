@@ -300,8 +300,8 @@ has_direct(_Other)->
 %------------Service fields-----------------------------------
 build_leaf({'=',<<".path">>,<<"/root">>})->
 	{'AND',[
-		{'TAG',{<<".folder">>, {?FOLDER_PATTERN, 0 } ,'simple'},'UNDEFINED'},
-		{'TAG',{<<".name">>,<<"root">>,'simple'},'UNDEFINED'}
+		{'TAG',{<<".name">>,<<"root">>,'simple'},'UNDEFINED'},
+		{'TAG',{<<".folder">>, {?FOLDER_PATTERN, 0 } ,'simple'},'UNDEFINED'}
 	],'UNDEFINED'};
 build_leaf({'=',<<".path">>,Value})->
 	case re:run(Value,"(?<F>.*)/(?<N>[^/]+)",[{capture,['F','N'],binary}]) of
@@ -309,8 +309,8 @@ build_leaf({'=',<<".path">>,Value})->
 			case ecomet_folder:path2oid(Folder) of
 				{ok,FolderID}->
 					{'AND',[
-						{'TAG',{<<".folder">>,FolderID,'simple'},'UNDEFINED'},
-						{'TAG',{<<".name">>,Name,'simple'},'UNDEFINED'}
+						{'TAG',{<<".name">>,Name,'simple'},'UNDEFINED'},
+						{'TAG',{<<".folder">>,FolderID,'simple'},'UNDEFINED'}
 					],'UNDEFINED'};
 				_->
 					?ERROR({invalid_path,Value})
@@ -326,8 +326,8 @@ build_leaf({'=',<<".oid">>,Value})->
 	} = ecomet:read_fields(Object,[<<".name">>,<<".folder">>]),
 
 	{'AND',[
-		{'TAG',{<<".folder">>,Folder,'simple'},'UNDEFINED'},
-		{'TAG',{<<".name">>,Name,'simple'},'UNDEFINED'}
+		{'TAG',{<<".name">>,Name,'simple'},'UNDEFINED'},
+		{'TAG',{<<".folder">>,Folder,'simple'},'UNDEFINED'}
 	],'UNDEFINED'};
 
 %-----------------Simple index search-------------------------
