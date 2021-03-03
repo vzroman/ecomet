@@ -25,7 +25,7 @@
 %%	Service API
 %%=================================================================
 -export([
-  login/2,login/3,
+  login/2,login/3,dirty_login/1,dirty_login/2,
   logout/0,
   get_user/0,
   get_usergroups/0,
@@ -77,6 +77,24 @@ login(Login,Pass,Info)->
               end
           end
         end,
+        fun(_)->set_context(User) end,
+        fun(_)->create_session(Info) end
+      ],none)
+    end
+  ],none) of
+    {ok,_}->ok;
+    _->error
+  end.
+
+dirty_login(Login) ->
+  dirty_login(Login, #{}).
+
+dirty_login(Login, Info) ->
+  case ?PIPE([
+    fun(_)->ecomet_folder:path2oid(<<"/root/.users/",Login/binary>>) end,
+    fun(UserID)->{ok,?OBJECT(UserID)} end,
+    fun(User)->
+      ?PIPE([
         fun(_)->set_context(User) end,
         fun(_)->create_session(Info) end
       ],none)

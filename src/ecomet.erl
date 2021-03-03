@@ -21,7 +21,7 @@
 %%	Authentication
 %%=================================================================
 -export([
-  login/2, login/3,
+  login/2, login/3, dirty_login/1, dirty_login/2,
   logout/0,
   get_user/0,
   is_admin/0
@@ -131,6 +131,12 @@ login(User,Password)->
 
 login(User,Password,Info)->
   ecomet_user:login(User,Password,Info).
+
+dirty_login(User)->
+  ecomet_user:dirty_login(User).
+
+dirty_login(User,Info)->
+  ecomet_user:dirty_login(User,Info).
 
 logout()->
   ecomet_user:logout().
