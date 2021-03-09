@@ -21,7 +21,7 @@
 %%	Authentication
 %%=================================================================
 -export([
-  login/2, login/3,
+  login/2, login/3, dirty_login/1, dirty_login/2,
   logout/0,
   get_user/0,
   is_admin/0
@@ -38,6 +38,7 @@
   field_changes/2,
   field_type/2,
   edit_object/2,edit_object/3,
+  dirty_edit_object/2,dirty_edit_object/3,
   delete_object/1,
   copy_object/2
 ]).
@@ -131,6 +132,12 @@ login(User,Password)->
 login(User,Password,Info)->
   ecomet_user:login(User,Password,Info).
 
+dirty_login(User)->
+  ecomet_user:dirty_login(User).
+
+dirty_login(User,Info)->
+  ecomet_user:dirty_login(User,Info).
+
 logout()->
   ecomet_user:logout().
 
@@ -218,6 +225,12 @@ edit_object(Object, Fields)->
 edit_object(Object, Fields, Params)->
   ecomet_object:edit(Object, Fields, Params).
 
+dirty_edit_object(Object, Fields)->
+  ecomet_object:dirty_edit(Object, Fields).
+
+dirty_edit_object(Object, Fields, Params)->
+  ecomet_object:dirty_edit(Object, Fields, Params).
+
 % @edoc Deletes existing ecomet object
 -spec delete_object(Object :: object_handler()) -> ok.
 
@@ -269,7 +282,11 @@ run_query(ParsedQuery)->
 %%	Transactions API
 %%=================================================================
 is_transaction()->
-  ecomet_transaction:get_type()=/=none.
+  case ecomet_transaction:get_type() of
+    none->false;
+    dirty->false;
+    _->true
+  end.
 
 transaction(Fun)->
   ecomet_transaction:internal(Fun).

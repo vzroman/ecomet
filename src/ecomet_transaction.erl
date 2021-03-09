@@ -23,6 +23,7 @@
 -export([
   internal/1,
   internal_sync/1,
+  dirty/1,
   start/0,
   lock_key/4,
   lock/3,
@@ -43,7 +44,7 @@
 -define(LOCKTIMEOUT,10000).
 -define(LOCKKEY(DB,Storage,Type,Key),{DB,Storage,Type,Key}).
 
--record(state,{locks,dict,log,droplog,parent,oncommit,type}).
+-record(state,{locks,dict,log,droplog,parent,oncommit,type,dirty}).
 -record(lock,{value,level,pid}).
 
 % Run fun within transaction
@@ -79,11 +80,26 @@ internal_sync(Fun)->
       {error,Error}
   end.
 
+dirty(Fun)->
+  tstart( internal, _Dirty=true ),
+  try
+    Result=Fun(),
+    {Log,OnCommits}=tcommit(),
+    on_commit(Log,OnCommits),
+    {ok,Result}
+  catch
+    _:Error->
+      rollback(),
+      {error,Error}
+  end.
+
 % Start external transaction
 start()->tstart(external).
 
 % Start transaction
 tstart(Type)->
+  tstart(Type, _Dirty=false).
+tstart(Type,Dirty)->
   State=
     case get(?TKEY) of
       % It is root transaction
@@ -95,7 +111,8 @@ tstart(Type)->
           droplog=[],
           parent=none,
           oncommit=[],
-          type=Type
+          type=Type,
+          dirty = Dirty
         };
       % Subtransaction
       Parent->
@@ -116,7 +133,8 @@ tstart(Type)->
           droplog=[],
           parent=Parent,
           oncommit=[],
-          type=SubType
+          type=SubType,
+          dirty=Dirty
         }
     end,
   put(?TKEY,State),
@@ -159,7 +177,8 @@ clean(State)->
 get_type()->
   case get(?TKEY) of
     undefined->none;
-    State->State#state.type
+    #state{ dirty = true }-> dirty;
+    #state{ type = Type }-> Type
   end.
 
 lock_key(DB,Storage,Type,Key)->
@@ -339,13 +358,22 @@ tcommit()->
   case get(?TKEY) of
     undefined->?ERROR(no_transaction);
     % Root transaction
-    #state{parent=none,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits}->
-      CommitLog=run_commit(lists:reverse(lists:subtract(Log,DropLog)),Dict,[]),
+    #state{parent=none,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits }->
+      Commits = lists:reverse(lists:subtract(Log,DropLog)),
+      CommitLog = run_commit(Commits,Dict,[]),
       erase(?TKEY),
       {CommitLog,OnCommits};
-    State->
+    #state{ dirty=IsDirty, parent = #state{ dirty = IsDirty } }=State->
+      % If the parent and child have the same dirty we merge commits
       put(?TKEY,merge_commit(State)),
-      {[],[]}
+      {[],[]};
+    #state{parent=Parent,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits }->
+      % The parent and the child have different levels of dirty
+      % We perform the commit
+      Commits = lists:reverse(lists:subtract(Log,DropLog)),
+      CommitLog = run_commit(Commits,Dict,[]),
+      put(?TKEY,Parent),
+      {CommitLog,OnCommits}
   end.
 
 % Commit changes to storage
@@ -359,7 +387,14 @@ release_locks([{_Key,Lock}|Rest])->
 release_locks([])->ok.
 
 % Merge results of the transaction to the parent
-merge_commit(#state{locks=Locks,dict=Dict,log=Log,droplog=DropLog,oncommit=OnCommits,parent=Parent})->
+merge_commit(#state{
+  locks=Locks,
+  dict=Dict,
+  log=Log,
+  droplog=DropLog,
+  oncommit=OnCommits,
+  parent=Parent
+})->
   ClearedLog=lists:subtract(Log,DropLog),
   MergedLog=merge_log(ClearedLog,Parent#state.log),
   Parent#state{

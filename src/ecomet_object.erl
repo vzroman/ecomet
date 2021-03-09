@@ -47,6 +47,7 @@
   open/1,open/2,open/3,
   construct/1,
   edit/2,edit/3,
+  dirty_edit/2,dirty_edit/3,
   copy/2,
   read_field/2,read_field/3,read_fields/2,read_fields/3,
   read_all/1,read_all/2,
@@ -79,6 +80,19 @@
   on_delete/1
 ]).
 
+-define(TRANSACTIONAL,#{
+  read=>read,
+  write=>write,
+  delete=>delete,
+  transaction=>internal_sync
+}).
+-define(DIRTY,#{
+  read=>dirty_read,
+  write=>dirty_write,
+  delete=>dirty_delete,
+  transaction=>dirty
+}).
+
 % @edoc handler of ecomet object
 -record(object, {oid, edit, map, deleted=false, db}).
 
@@ -90,15 +104,32 @@
 -define(PATTERN_IDL_LENGTH,16).
 
 -define(ObjectID(PatternID,ObjectID),{PatternID,ObjectID}).
+
 -define(TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
-    none->
+    _T when _T=:=none;_T=:=dirty->
       case ecomet_transaction:internal_sync(Fun) of
         {ok,_TResult}->_TResult;
         {error,_TError}->?ERROR(_TError)
       end;
-    _->Fun()
+    _-> Fun()
   end).
+-define(DIRTY_TRANSACTION(Fun),
+  case ecomet_transaction:get_type() of
+    none->
+      case ecomet_transaction:dirty(Fun) of
+        {ok,_TResult}->_TResult;
+        {error,_TError}->?ERROR(_TError)
+      end;
+    _-> Fun()
+  end).
+
+-define(TMODE,
+  case ecomet_transaction:get_type() of
+    _T when _T=:=none;_T=:=dirty->?DIRTY;
+    _->?TRANSACTIONAL
+  end).
+
 -define(SERVICE_FIELDS,#{
   <<".oid">>=>fun ecomet_lib:to_oid/1,
   <<".path">>=>fun ecomet_lib:to_path/1,
@@ -178,8 +209,10 @@ delete(#object{oid=OID}=Object)->
       Fields=ecomet_transaction:dict_get({OID,fields},#{}),
       case ecomet_transaction:dict_get({OID,handler},none) of
         none->
-          % Queue the procedure
-          save(Object#object{deleted=true},Fields,on_delete);
+          % Queue the procedure.
+          ?TRANSACTION( fun()->
+            save(Object#object{ deleted=true },Fields,on_delete)
+          end );
         _->
           % Object can not be deleted? if it is under behaviour handlers
           ?ERROR(behaviours_run)
@@ -209,7 +242,11 @@ open(OID,Lock,Timeout)->
       FoundObject->FoundObject
     end,
   % Set lock if requested
-  if Lock=/=none->get_lock(Lock,Object,Timeout); true->ok end,
+  if
+    Lock=/=none->
+      get_lock(Lock,Object,Timeout);
+    true->ok
+  end,
   Object.
 
 % Read field value
@@ -343,12 +380,36 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
   NewFields=ecomet_field:merge(Map,OldFields,Fields),
   case ecomet_transaction:dict_get({OID,handler},none) of
     none->
-      save(Object,NewFields,on_edit);
+      ?TRANSACTION(fun()->save(Object,NewFields,on_edit) end );
     _->
       % If object is under behaviour handlers, just save changes to dict
       ecomet_transaction:dict_put([{{OID,fields},NewFields}])
   end,
   ok.
+
+% Dirty edit object
+dirty_edit(Object,Fields)->
+  dirty_edit(Object,Fields,#{}).
+dirty_edit(Object,Fields,Params) when is_list(Params)->
+  dirty_edit(Object,Fields,maps:from_list(Params));
+dirty_edit(#object{edit=false},_Fields,_Params)->?ERROR(access_denied);
+dirty_edit(#object{map=Map}=Object,Fields,#{format:=Format}=Params)->
+  ParsedFields= parse_fields(Format,Map,Fields),
+  Params1 = maps:remove(format,Params),
+  dirty_edit(Object,ParsedFields,Params1);
+dirty_edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
+  OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
+
+  NewFields=ecomet_field:merge(Map,OldFields,Fields),
+  case ecomet_transaction:dict_get({OID,handler},none) of
+    none->
+      ?DIRTY_TRANSACTION(fun()->save(Object,NewFields,on_edit) end );
+    _->
+      % If object is under behaviour handlers, just save changes to dict
+      ecomet_transaction:dict_put([{{OID,fields},NewFields}])
+  end,
+  ok.
+
 
 copy(Object, Replace)->
   Original = read_all(Object),
@@ -448,8 +509,9 @@ load_storage(OID,Type)->
                 _->{ false, DBName }
               end
           end,
+        #{ read:=Read } =?TMODE,
         LoadedStorage=
-          case ecomet_backend:dirty_read(DB,?DATA,Type,OID,UseCache) of
+          case ecomet_backend:Read(DB,?DATA,Type,OID) of
             not_found->none;
             Loaded->Loaded
           end,
@@ -472,7 +534,8 @@ commit(OID,Dict)->
   % Retrieve the object from the transaction dictionary
   Object=maps:get({OID,object},Dict),
 
-  #object{ map=Map, db=DB }=Object,
+  #object{ map=Map, db=DB } = Object,
+
   % Load storage types that are not loaded yet
   Storages=load_storage_types(Object,Dict),
   BackTags = get_backtags(Storages),
@@ -489,6 +552,8 @@ commit(OID,Dict)->
   if
     Object#object.deleted->
       %----------Delete procedure--------------------------
+      % The delete procedure is always wrapped into a true
+      % transaction, the 'delete' method MUST do it
       % Purge object indexes
       {[],Tags}= ecomet_index:delete_object(OID,BackTags),
       % Purge object storage
@@ -509,14 +574,39 @@ commit(OID,Dict)->
 
       % Get fields changes
       {UpdatedFields,ChangedFields}=ecomet_field:save_changes(Map,Fields,LoadedFields,OID),
+
+      TransactionType = ecomet_transaction:get_type(),
+      % Indexed fields changes
+      Indexed = [ F || {F,_} <- ChangedFields,
+        case ecomet_field:get_index(Map,F) of
+          {ok,none}->false;
+          _->true
+        end],
+
       if
         length(ChangedFields)=:=0 ->
           % No changes. Optimization
           #ecomet_log{ };
+        TransactionType =:= dirty,length(Indexed) > 0->
+          % Dirty transaction. Optimization.
+          % If there are no changes in the indexed fields changes may
+          % be performed in the dirty mode.
+          % But if indexed are involved we have to wrap it into a true transaction to keep
+          % them consistent
+          Dict1 = maps:fold( fun(T,S,Acc)->Acc#{ {OID,T}=> S } end, Dict, Storages),
+          case ecomet_transaction:internal_sync(fun()-> commit(OID,Dict1) end) of
+            { ok, Log }->Log;
+            { error, Error }->
+              ?ERROR( Error )
+          end;
         true ->
+          %---------------The dump procedure----------------------------------------------------
           % Step 2. Indexes
           % Update the object indexes and get changes
           {Add,Unchanged,Del,UpdatedBackTags}= ecomet_index:build_index(OID,Map,ChangedFields,BackTags),
+
+          % Used backend handlers
+          #{ write := Write, delete := Delete } = ?TMODE,
 
           % Step 3. Dump changes to the storage, build the new version of the object
           NewVersion=
@@ -530,7 +620,7 @@ commit(OID,Dict)->
                   case maps:size(TFields) of
                     0->
                       % Storage is empty now, delete it
-                      ok = ecomet_backend:delete(DB,?DATA,T,OID,none),
+                      ok = ecomet_backend:Delete(DB,?DATA,T,OID),
                       Acc;
                     _->
                       % Update storage tags
@@ -541,7 +631,7 @@ commit(OID,Dict)->
                           _->#{fields=>TFields, tags=>TTags}
                         end,
                       % Dump the new version of the storage
-                      ok = ecomet_backend:write(DB,?DATA,T,OID,NewStorage,none),
+                      ok = ecomet_backend:Write(DB,?DATA,T,OID,NewStorage),
                       maps:merge(Acc,TFields)
                   end
               end
@@ -815,12 +905,13 @@ put_empty_storages(OID,Map)->
 
 % Backtag handlers for commit routine
 load_storage_types(#object{oid=OID,map=Map,db=DB},Dict)->
+  #{read:=Read} = ?TMODE,
   List=
     [ case maps:find({OID,Type},Dict) of
         {ok, none} -> { Type, #{} };
         {ok, Loaded} -> { Type, Loaded };
         error->
-          case ecomet_backend:dirty_read(DB,?DATA,Type,OID) of
+          case ecomet_backend:Read(DB,?DATA,Type,OID) of
             not_found -> { Type, #{} };
             Loaded -> { Type, Loaded }
           end
@@ -829,23 +920,22 @@ load_storage_types(#object{oid=OID,map=Map,db=DB},Dict)->
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet
 save(#object{oid=OID,map=Map}=Object,Fields,Handler)->
+
   % All operations within transaction. No changes applied if something is wrong
-  ?TRANSACTION(fun()->
-    ecomet_transaction:dict_put([
-      {{OID,object},Object},	% Object is opened (created)
-      {{OID,fields},Fields},	% Project has next changes (may by empty)
-      {{OID,handler},Handler}	% Object is under the Handler
-    ]),
-    ecomet_transaction:queue_commit(OID),
+  ecomet_transaction:dict_put([
+    {{OID,object},Object},	% Object is opened (created)
+    {{OID,fields},Fields},	% Project has next changes (may by empty)
+    {{OID,handler},Handler}	% Object is under the Handler
+  ]),
+  ecomet_transaction:queue_commit(OID),
 
-    % Run behaviours
-    [ Behaviour:Handler(Object) || Behaviour <- ecomet_pattern:get_behaviours(Map) ],
+  % Run behaviours
+  [ Behaviour:Handler(Object) || Behaviour <- ecomet_pattern:get_behaviours(Map) ],
 
-    % Release object from under the Handler
-    ecomet_transaction:dict_remove([{OID,handler}]),
+  % Release object from under the Handler
+  ecomet_transaction:dict_remove([{OID,handler}]),
 
-    % Confirm the commit
-    ecomet_transaction:apply_commit(OID),
-    % The result
-    ok
-  end).
+  % Confirm the commit
+  ecomet_transaction:apply_commit(OID),
+  % The result
+  ok.
