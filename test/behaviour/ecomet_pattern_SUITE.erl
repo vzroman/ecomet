@@ -31,6 +31,7 @@
   check_handler_module_test/1,
   check_handler_test/1,
   check_parent_test/1,
+  check_db_test/1,
   get_parent_test/1,
   get_parents_test/1,
   set_parents_test/1,
@@ -45,6 +46,9 @@ all() ->
     check_handler_module_test,
     check_handler_test,
     check_parent_test,
+    check_db_test,
+    get_parent_test,
+    get_parents_test,
     set_parents_test,
     on_delete_test,
     on_edit_test,
@@ -101,6 +105,40 @@ check_handler_test(_Config) ->
   meck:unload(ecomet)
 .
 
+check_db_test(_Config) ->
+  ecomet_user:on_init_state(),
+
+  Folder1 = ecomet:create_object(#{
+    <<".name">> => <<"folder1">>,
+    <<".folder">> => ?OID(<<"/root">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>)
+  }),
+  {ok, Fold1} = ecomet:read_field(Folder1, <<".folder">>),
+  ct:pal("DB folder1 name ~n~p~n",[ecomet_object:get_db_name(Fold1)]),
+  DB = ecomet:create_object(#{
+    <<".name">> => <<"DB">>,
+    <<".folder">> => ?OID(<<"/root/.databases">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.database">>)
+  }),
+  Folder2 = ecomet:create_object(#{
+    <<".name">> => <<"folder2">>,
+    <<".folder">> => ?OID(Folder1),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<"database">> => ?OID(DB)
+  }),
+  {ok, Fold2} = ecomet:read_field(Folder2, <<".folder">>),
+  ct:pal("DB folder2 name ~n~p~n",[ecomet_object:get_db_name(Fold2)]),
+  Folder3 = ecomet:create_object(#{
+    <<".name">> => <<"folder3">>,
+    <<".folder">> => ?OID(Folder2),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>)
+  }),
+  {ok, Fold3} = ecomet:read_field(Folder3, <<".folder">>),
+  ct:pal("DB folder3 name ~n~p~n",[ecomet_object:get_db_name(Fold3)]),
+  ecomet:delete_object(Folder1),
+  ecomet:delete_object(DB),
+  ok.
+
 get_parent_test(_Config) ->
   meck:new([ecomet, ecomet_lib]),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
@@ -116,7 +154,7 @@ get_parents_test(_Config) ->
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
   meck:expect(ecomet_lib, to_object_system, fun(Pattern) -> Pattern end),
 
-  parents = ecomet_pattern:get_parent(#{<<"parents">> => parents}),
+  parents = ecomet_pattern:get_parents(#{<<"parents">> => parents}),
 
   meck:unload([ecomet, ecomet_lib])
 .
