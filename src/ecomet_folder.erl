@@ -216,9 +216,9 @@ inherit_rights(Object)->
   }).
 
 recursive_rights(Object)->
-  {ok,Recursion}=ecomet:read_field(Object,<<"recursive_rights">>),
-  if
-    Recursion=:= true ->
+  Recursion=ecomet:field_changes(Object,<<"recursive_rights">>),
+  case Recursion of
+    {true,_}->
       Read=rights_changes(Object,<<".readgroups">>),
       Write=rights_changes(Object,<<".writegroups">>),
       Changes=
@@ -234,11 +234,11 @@ recursive_rights(Object)->
         end,
       if
         Changes=/=none ->
-          apply_rights(Object,Changes,[{<<"recursive_rights">>,true}]),
+          apply_rights(Object,Changes,[]),
           ok;
         true -> ok
       end;
-    true -> ok
+    _ -> ok
   end.
 
 rights_changes(Object,Field)->
@@ -270,9 +270,9 @@ apply_rights(Object,Changes,Additional)->
   Object1.
 
 apply_recursion(Object)->
-  {ok,Recursion}=ecomet:read_field(Object,<<"recursive_rights">>),
-  if
-    Recursion=:= true ->
+  Recursion=ecomet:field_changes(Object,<<"recursive_rights">>),
+  case Recursion of
+    {true,_}->
       Read=rights_changes(Object,<<".contentreadgroups">>),
       Write=rights_changes(Object,<<".contentwritegroups">>),
       Changes=
@@ -303,7 +303,7 @@ apply_recursion(Object)->
         true -> ok
       end,
       ok = ecomet:edit_object(Object,#{<<"recursive_rights">> => false});
-    true ->ok
+    _ ->ok
   end.
 
 check_database(Object)->
