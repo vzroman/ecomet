@@ -513,10 +513,15 @@ init_schema_table()->
         {ram_copies,[]}
       ]) of
         {atomic,ok} ->
-          ok;
-        {aborted,Reason} ->
-          ?LOGERROR("unable to create the schema table for the node ~p",[Reason]),
-          ?ERROR(Reason)
+          case mnesia:change_table_load_order( ?SCHEMA, 999 ) of
+            {atomic,ok} -> ok;
+            {aborted,SetLoadOrderError}->
+              ?LOGERROR("unable to set load order for the schema, error ~p",[SetLoadOrderError]),
+              ?ERROR( SetLoadOrderError )
+          end;
+        {aborted,CreateError} ->
+          ?LOGERROR("unable to create the schema table for the node ~p",[CreateError]),
+          ?ERROR(CreateError)
       end
   end.
 
