@@ -442,8 +442,8 @@ handle_info(on_cycle,#state{cycle = Cycle}=State)->
     ecomet_db:sync(),
     ok
   catch
-    _:Error->
-      ?LOGERROR("Error on schema synchronizaton ~p",[Error])
+    _:Error:Stack->
+      ?LOGERROR("Error on schema synchronizaton ~p, stack ~p",[Error,Stack])
   end,
 
   {noreply,State};
