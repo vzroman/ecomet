@@ -111,10 +111,11 @@ check_db_test(_Config) ->
   Folder1 = ecomet:create_object(#{
     <<".name">> => <<"folder1">>,
     <<".folder">> => ?OID(<<"/root">>),
-    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>)
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
   {ok, Fold1} = ecomet:read_field(Folder1, <<".folder">>),
-  ct:pal("DB folder1 name ~n~p~n",[ecomet_object:get_db_name(Fold1)]),
+  ct:pal("DB folder1 name ~n~p ~p~n",[Fold1, ecomet_object:get_db_name(Fold1)]),
   DB = ecomet:create_object(#{
     <<".name">> => <<"DB">>,
     <<".folder">> => ?OID(<<"/root/.databases">>),
@@ -123,18 +124,23 @@ check_db_test(_Config) ->
   Folder2 = ecomet:create_object(#{
     <<".name">> => <<"folder2">>,
     <<".folder">> => ?OID(Folder1),
-    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
-    <<"database">> => ?OID(DB)
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"database">> => ?OID(DB),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
   {ok, Fold2} = ecomet:read_field(Folder2, <<".folder">>),
-  ct:pal("DB folder2 name ~n~p~n",[ecomet_object:get_db_name(Fold2)]),
+  ct:pal("DB folder2 name ~n~p ~p~n",[Fold2, ecomet_object:get_db_name(Fold2)]),
   Folder3 = ecomet:create_object(#{
     <<".name">> => <<"folder3">>,
     <<".folder">> => ?OID(Folder2),
-    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>)
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.object">>)
   }),
   {ok, Fold3} = ecomet:read_field(Folder3, <<".folder">>),
-  ct:pal("DB folder3 name ~n~p~n",[ecomet_object:get_db_name(Fold3)]),
+  io:fwrite("~n~p~n",[Fold3]),
+  ct:pal("DB folder3 name ~n~p ~p~n",[Fold3, ecomet_object:get_db_name(Fold3)]),
+  io:fwrite("~n~p~n",[Folder3]),
+  io:fwrite("~n~p~n",[ecomet_pattern:get_map(Folder3)]),
   ecomet:delete_object(Folder1),
   ecomet:delete_object(DB),
   ok.
