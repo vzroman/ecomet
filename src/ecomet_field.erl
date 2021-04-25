@@ -18,6 +18,7 @@
 -module(ecomet_field).
 
 -include("ecomet.hrl").
+-include("ecomet_schema.hrl").
 
 %%=================================================================
 %%	Service API
@@ -454,9 +455,14 @@ check_name(Object,IsEmpty)->
 check_folder(Object, _IsEmpty)->
   case ecomet:field_changes(Object,<<".folder">>) of
     none -> false;
-    { _NewFolder, none }->
+    { NewFolder, none }->
       % Create procedure
-      true;
+      case ecomet:get_pattern_oid(NewFolder) of
+        {?PATTERN_PATTERN, ?PATTERN_PATTERN} ->
+          true;
+        _ ->
+          ?ERROR(invalid_folder)
+      end;
     { _NewFolder, _OldFolder }->
       ?ERROR(cannot_change_pattern)
   end.

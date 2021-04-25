@@ -37,7 +37,9 @@
   set_parents_test/1,
   on_delete_test/1,
   on_edit_test/1,
-  on_create_test/1
+  on_create_test/1,
+  get_storage_test/1,
+  is_empty_test/1
 ]).
 
 
@@ -52,7 +54,9 @@ all() ->
     set_parents_test,
     on_delete_test,
     on_edit_test,
-    on_create_test
+    on_create_test,
+    get_storage_test,
+    is_empty_test
   ].
 
 group() ->
@@ -134,13 +138,13 @@ check_db_test(_Config) ->
     <<".name">> => <<"folder3">>,
     <<".folder">> => ?OID(Folder2),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.object">>)
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
   {ok, Fold3} = ecomet:read_field(Folder3, <<".folder">>),
-  io:fwrite("~n~p~n",[Fold3]),
+  io:fwrite("Fold3: ~n~p~n",[Fold3]),
   ct:pal("DB folder3 name ~n~p ~p~n",[Fold3, ecomet_object:get_db_name(Fold3)]),
-  io:fwrite("~n~p~n",[Folder3]),
-  io:fwrite("~n~p~n",[ecomet_pattern:get_map(Folder3)]),
+  io:fwrite("Folder3: ~n~p~n",[Folder3]),
+  io:fwrite("GetMap: ~n~p~n",[ecomet_pattern:get_map(Folder3)]),
   ecomet:delete_object(Folder1),
   ecomet:delete_object(DB),
   ok.
@@ -321,3 +325,102 @@ on_delete_test(_Config) ->
   ecomet:delete_object(Pattern),
   ok.
 
+
+is_empty_test(_Config) ->
+  ecomet_user:on_init_state(),
+  Pattern1 = ecomet:create_object(#{
+    <<".name">> => <<"MyPattern">>,
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>)
+  }),
+
+  N1 = 100,
+  ObjList1 = [
+    begin
+     BID = integer_to_binary(ID),
+     Name = <<"O", BID/binary>>,
+     ecomet:create_object(#{
+       <<".name">> => Name,
+       <<".folder">> => ?OID(<<"/root">>),
+       <<".pattern">> => ?OID(Pattern1)
+     })
+    end || ID<- lists:seq(1, N1)],
+  false = ecomet_pattern:is_empty(Pattern1),
+  lists:foreach(fun ecomet:delete_object/1, ObjList1),
+  true = ecomet_pattern:is_empty(Pattern1),
+
+  DBNumber = 20,
+  DBList = [
+    begin
+      BID = integer_to_binary(ID),
+      DbName = <<"DB", BID/binary>>,
+      ecomet:create_object(#{
+        <<".name">> => DbName,
+        <<".folder">> => ?OID(<<"/root/.databases">>),
+        <<".pattern">> => ?OID(<<"/root/.patterns/.database">>)
+      })
+    end || ID <- lists:seq(1, DBNumber)],
+
+  FolNum = 10,
+  FList = [
+    begin
+      BID = integer_to_binary(ID),
+      FName = <<"F", BID/binary>>,
+      DB = lists:nth(rand:uniform(DBNumber), DBList),
+      ecomet:create_object(#{
+        <<".name">> => FName,
+        <<".folder">> => ?OID(<<"/root">>),
+        <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+        <<"database">> => ?OID(DB)
+      })
+    end
+  || ID <- lists:seq(1, FolNum)],
+
+  N2 = 100,
+  ObjList2 = [
+    begin
+      BID = integer_to_binary(ID),
+      Name = <<"O", BID/binary>>,
+      Folder = lists:nth(rand:uniform(FolNum) ,FList),
+      ecomet:create_object(#{
+        <<".name">> => Name,
+        <<".folder">> => ?OID(Folder),
+        <<".pattern">> => ?OID(Pattern1)
+      })
+    end
+    || ID <- lists:seq(1, N2)],
+
+  false = ecomet_pattern:is_empty(Pattern1),
+  lists:foreach(fun ecomet:delete_object/1, ObjList2),
+  true = ecomet_pattern:is_empty(Pattern1),
+
+  lists:foreach(fun ecomet:delete_object/1, FList),
+  lists:foreach(fun ecomet:delete_object/1, DBList),
+  ok.
+
+get_storage_test(_Config) ->
+  ecomet_user:on_init_state(),
+
+%%  MyDb1 = ecomet:create_object(#{
+%%    <<".name">> =>
+%%  })
+%%
+%%
+%%  MyFolder1 = ecomet:create_object(#{
+%%    <<".name">> => <<"MyFolder1">>,
+%%    <<".folder">> => ?OID(<<"/root">>),
+%%    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>)
+%%  })
+  MyPattern = ecomet:create_object(#{
+    <<".name">> => <<"MyObject">>,
+    <<".folder">> => ?OID(<<"/root">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.database">>)
+  }),
+  ct:pal("~n~p~n",[ecomet:read_field(MyPattern,  <<"parents">>) ]),
+  ct:pal("~nMAP ~p ~n", [ecomet_pattern:get_map(MyPattern)]),
+  ct:pal("~nPattern ~p ~n",[MyPattern]),
+  ct:pal("~n~p~n",[ecomet_pattern:get_storage(MyPattern)]),
+  ecomet:delete_object(MyPattern),
+  ok.
