@@ -1239,17 +1239,17 @@ search_patterns(Config)->
   ]}),
   {'AND',[
     {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
-    {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ramdisc,Ext2,[]},{ram,Ext1,[]}]}}
+    {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}}
   ],{Ext1,[]}}=ecomet_resultset:search_patterns(S3Query,root,'UNDEFINED'),
 
   % S3A. Empty AND
   S3AQuery=ecomet_resultset:prepare({'AND',[
-    {<<"string1">>,'=',<<"value1">>},
-    {<<"string1">>,'=',<<"empty">>}
+    {<<"string1">>,'=',<<"empty">>},
+    {<<"string1">>,'=',<<"value1">>}
   ]}),
   {'AND',[
-    {'TAG',{<<"string1">>,<<"value1">>,simple},{none,[]}},
-    {'TAG',{<<"string1">>,<<"empty">>,simple},{none,[]}}
+    {'TAG',{<<"string1">>,<<"empty">>,simple},{none,[]}},
+    {'TAG',{<<"string1">>,<<"value1">>,simple},{none,[]}}
   ],{none,[]}}=ecomet_resultset:search_patterns(S3AQuery,root,'UNDEFINED'),
 
 
@@ -1313,7 +1313,7 @@ search_patterns(Config)->
   {'OR',[
     {'AND',[
       {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[{disc,Ext1,[]}]}},
-      {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[{ramdisc,Ext2,[]},{ram,Ext1,[]}]}}
+      {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[{ram,Ext1,[]}]}}
     ],{Ext1,[]}},
     {'ANDNOT',{
       {'TAG',{<<"string2">>,<<"value2">>,simple},{Ext12,[{disc,Ext2,[]},{ramdisc,Ext1,[]}]}},
@@ -1394,9 +1394,8 @@ search_idhs(Config)->
     {'TAG',{<<".pattern">>,PatternID1,simple},{Ext1,[
       {disc,Ext1,[{IDP1,IDH1}]}
     ]}},
-    {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext12,[
-      {ram,Ext1,[{IDP1,IDH1}]},
-      {ramdisc,Ext2,[]}
+    {'TAG',{<<"string1">>,<<"value1">>,simple},{Ext1,[
+      {ram,Ext1,[{IDP1,IDH1}]}
     ]}}
   ],{Ext1,[{IDP1,IDH1}]}}=S3P1COND,
   {none,S3P1COND}=ecomet_resultset:seacrh_idhs(S3P1COND,root,IDP2),

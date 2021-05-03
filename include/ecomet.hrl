@@ -70,6 +70,8 @@
 -define(A2B(Atom),unicode:characters_to_binary(atom_to_list(Atom))).
 -define(T2B(Term),if is_binary(Term)->Term; true->unicode:characters_to_binary(io_lib:format("~p",[Term])) end).
 
+-ifndef(TEST).
+
 -define(LOGERROR(Text),lager:error(Text)).
 -define(LOGERROR(Text,Params),lager:error(Text,Params)).
 -define(LOGWARNING(Text),lager:warning(Text)).
@@ -78,5 +80,19 @@
 -define(LOGINFO(Text,Params),lager:info(Text,Params)).
 -define(LOGDEBUG(Text),lager:debug(Text)).
 -define(LOGDEBUG(Text,Params),lager:debug(Text,Params)).
+
+-else.
+
+-define(LOGERROR(Text),ct:pal("error: "++Text)).
+-define(LOGERROR(Text,Params),ct:pal("error: "++Text,Params)).
+-define(LOGWARNING(Text),ct:pal("warning: "++Text)).
+-define(LOGWARNING(Text,Params),ct:pal("warning: "++Text,Params)).
+-define(LOGINFO(Text),ct:pal("info: "++Text)).
+-define(LOGINFO(Text,Params),ct:pal("info: "++Text,Params)).
+-define(LOGDEBUG(Text),ct:pal("debug: "++Text)).
+-define(LOGDEBUG(Text,Params),ct:pal("debug: "++Text,Params)).
+
+-endif.
+
 
 -endif.

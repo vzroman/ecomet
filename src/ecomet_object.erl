@@ -80,8 +80,14 @@
   on_delete/1
 ]).
 
--define(TRANSACTIONAL,#{
+-define(INTERNAL,#{
   read=>read,
+  write=>write,
+  delete=>delete,
+  transaction=>internal_sync
+}).
+-define(EXTERNAL,#{
+  read=>dirty_read,     % Reading is in dirty mode because it might be performed before the actual transaction starts
   write=>write,
   delete=>delete,
   transaction=>internal_sync
@@ -108,11 +114,14 @@
 -define(TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
     _T when _T=:=none;_T=:=dirty->
+      ?LOGDEBUG("start internal transaction"),
       case ecomet_transaction:internal_sync(Fun) of
         {ok,_TResult}->_TResult;
         {error,_TError}->?ERROR(_TError)
       end;
-    _-> Fun()
+    _->
+      ?LOGDEBUG("skip transaction"),
+      Fun()
   end).
 -define(DIRTY_TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
@@ -127,7 +136,10 @@
 -define(TMODE,
   case ecomet_transaction:get_type() of
     _T when _T=:=none;_T=:=dirty->?DIRTY;
-    _->?TRANSACTIONAL
+    external ->
+      ?EXTERNAL;
+    _->
+      ?INTERNAL
   end).
 
 -define(SERVICE_FIELDS,#{
@@ -382,7 +394,7 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
     none->
       ?TRANSACTION(fun()->save(Object,NewFields,on_edit) end );
     _->
-      % If object is under behaviour handlers, just save changes to dict
+      % If object is under behaviour handlers, just save changes to the dict
       ecomet_transaction:dict_put([{{OID,fields},NewFields}])
   end,
   ok.

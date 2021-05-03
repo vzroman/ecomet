@@ -24,7 +24,7 @@
 
 
 -define(TKEY,eCoMeT_tRaNsAcTiOn).
--record(state,{locks,dict,log,droplog,parent,oncommit,type}).
+-record(state,{locks,dict,log,droplog,parent,oncommit,type,dirty}).
 
 %% API
 -export([

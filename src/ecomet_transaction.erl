@@ -201,7 +201,8 @@ lock(?LOCKKEY(_,_,_,_)=LockKey,Level,_Timeout)->
 
 add_lock(Key,LockLevel,Locks,TType,Timeout)->
   case maps:find(Key,Locks) of
-    error->get_lock(TType,Key,LockLevel,Timeout);
+    error->
+      get_lock(TType,Key,LockLevel,Timeout);
     {ok,Lock}->
       case {LockLevel,Lock#lock.level} of
         % No need to upgrade

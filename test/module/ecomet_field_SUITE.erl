@@ -335,11 +335,11 @@ object_creation(_Config)->
   2=maps:size(S1_Ram),
   <<"ram_value1">> =maps:get(<<"ram_field1">>,S1_Ram),
   <<"ram_value4">> =maps:get(<<"ram_field4">>,S1_Ram),
-  % 2 fields has changes, but on creation project contains all fields defined in the Map
-  8=length(S1_FieldsChanges),
+  % 2 fields has changes
+  2 = length(S1_FieldsChanges),
   <<"ram_value1">>=proplists:get_value(<<"ram_field1">>,S1_FieldsChanges),
   <<"ram_value4">>=proplists:get_value(<<"ram_field4">>,S1_FieldsChanges),
-  none=proplists:get_value(<<"disc_field1">>,S1_FieldsChanges),
+  undefined=proplists:get_value(<<"disc_field1">>,S1_FieldsChanges),
   %-----------------------------------------------------------
   % Scenario 2. All storages changed
   %-----------------------------------------------------------
@@ -378,7 +378,7 @@ object_creation(_Config)->
   <<"disc_value2">> =maps:get(<<"disc_field2">>,S2_Disc),
 
   % 4 fields has changes
-  8=length(S2_FieldsChanges),
+  4 = length(S2_FieldsChanges),
   <<"ram_value2">>=proplists:get_value(<<"ram_field2">>,S2_FieldsChanges),
   <<"ram_value3">>=proplists:get_value(<<"ram_field3">>,S2_FieldsChanges),
   <<"ramdisc_value">>=proplists:get_value(<<"ramdisc_field">>,S2_FieldsChanges),
@@ -601,7 +601,7 @@ helpers(_Config)->
   % type
   {ok,string}=ecomet_field:get_type(ObjectDescription,<<"simple">>),
   {ok,{list,string}}=ecomet_field:get_type(ObjectDescription,<<"list">>),
-  {error,undefined_field}=ecomet_field:get_type(ObjectDescription,<<"invalid_field">>),
+  {error,{undefined_field,<<"invalid_field">>}}=ecomet_field:get_type(ObjectDescription,<<"invalid_field">>),
   % index
   {ok,[simple]}=ecomet_field:get_index(ObjectDescription,<<"simple">>),
   {ok,none}=ecomet_field:get_index(ObjectDescription,<<"list">>),
