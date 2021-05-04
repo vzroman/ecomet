@@ -269,7 +269,7 @@ to_string(term,Value)->
   term_to_string(Value);
 to_string({list,Type},Value)->
   List= [ to_string(Type,Item) || Item <- Value ],
-  ecomet_json:to_json(List).
+  term_to_string(List).
 
 %% ====================================================================
 %% JSON FORMATTER
