@@ -167,9 +167,17 @@ check_name(Object)->
   case ecomet:field_changes(Object,<<".name">>) of
     none->ok;
     {NewName,none}->
+      % long names?
       case re:run(NewName,"^([a-z])([a-z0-9])*@(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\\.)+([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\\-]*[A-Za-z0-9])$") of
         {match,_}->ok;
-        _->?ERROR(invalid_node_name)
+        _->
+          % Is it a short name?
+          % TODO. How to find out if the VM is configured to use short names
+          case re:run(NewName,"^([a-z])([a-z0-9])*$") of
+            {match,_}->ok;
+            _->
+              ?ERROR(invalid_node_name)
+          end
       end;
     _->
       ?ERROR(renaming_is_not_allowed)
