@@ -51,7 +51,7 @@ function(ecomet,errordlg,dialogid,types) {
         }
 
         function nameformatter(name,options,rowObject){
-            if (Properties[name].required=="true"){
+            if (Properties[name].required===true){
                 return name+" *";
             } else {
                 return name;

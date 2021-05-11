@@ -57,6 +57,10 @@ function(ecomet,dialogid,selectpath,editlist,errordlg) {
             return getContentBinary($dialog,Value);
         } else if (Value.type=="string"){
             return getContentString($dialog,Value);
+        }else if (Value.type=="atom"){
+            return getContentString($dialog,Value);
+        }else if (Value.type=="term"){
+            return getContentString($dialog,Value);
         }
     }
 
@@ -137,7 +141,11 @@ function(ecomet,dialogid,selectpath,editlist,errordlg) {
     function OnOk(Type,$dialog){
         if (Type=="string"){
             return readValueString($dialog);
-        } else if (Type=="integer"){
+        }else if (Type=="atom"){
+            return readValueString($dialog);
+        }else if (Type=="term"){
+            return readValueString($dialog);
+        }else if (Type=="integer"){
             return readValueInteger($dialog);
         } else if (Type=="float"){
             return readValueFloat($dialog);
