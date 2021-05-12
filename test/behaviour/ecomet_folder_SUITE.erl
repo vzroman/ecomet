@@ -77,7 +77,7 @@ check_database_test(_Config) ->
     <<".name">> => <<"Folder1">>,
     <<".folder">> => ?OID(<<"/root">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
-    <<"database">> => ?OID(MyDB)
+    <<".database">> => ?OID(MyDB)
   }),
 
   Folder2 = ecomet:create_object(#{
@@ -87,9 +87,9 @@ check_database_test(_Config) ->
   }),
   % We are trying to change database(unmount old and mount new),
   % but unmount only allowed when folder is empty
-  ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<"database">> => none})),
+  ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<".database">> => none})),
   ecomet:delete_object(Folder2),
-  ecomet:edit_object(Folder1, #{<<"database">> => none}),
+  ecomet:edit_object(Folder1, #{<<".database">> => none}),
   none = ecomet_schema:get_mounted_db(?OID(Folder1)),
   ecomet:delete_object(Folder1),
   ecomet:delete_object(MyDB),
@@ -187,13 +187,13 @@ apply_rights_test(_Config) ->
     <<"exclude_patterns">> => {[{1, 2}, {3, 4}], [{5, 6}, {7, 8}]},
     <<"only_patterns">> => {[{10, 20}, {20, 30}], [{30, 40}, {40, 50}]}
   },
-  Additional = [{<<"database">>, {5, 5}}],
+  Additional = [{<<".database">>, {5, 5}}],
   ecomet_folder:apply_rights(Object, Changes, Additional),
 
   Expected =#{
     <<"exclude_patterns">> => [{1, 2}, {1, 3}, {2, 5}, {3, 4}],
     <<"only_patterns">> =>[{10, 20}, {20, 30}],
-    <<"database">> => {5, 5}
+    <<".database">> => {5, 5}
   },
 
   Expected = get(edit),
@@ -225,7 +225,7 @@ on_create_test(_Config) ->
     <<".name">> => <<"Chester">>,
     <<".folder">> => ?OID(<<"/root">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
-    <<"database">> => ?OID(MyUselessDB)
+    <<".database">> => ?OID(MyUselessDB)
   }),
 
   %ct:pal("db for /root/Chester ~p",[ecomet_schema:get_mounted_folder(<<"/root/Chester/some">>)]),
@@ -238,7 +238,7 @@ on_create_test(_Config) ->
   }),
 
   %ecomet:delete_object(Folder2),
-  ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<"database">> => ?OID(NotSoUseless)})) ,
+  ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<".database">> => ?OID(NotSoUseless)})) ,
   ecomet:delete_object(Folder2),
 
   ecomet:delete_object(Folder1),
@@ -265,7 +265,7 @@ on_edit_test(_Config) ->
     <<".name">> => <<"Chester">>,
     <<".folder">> => ?OID(<<"/root">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
-    <<"database">> => ?OID(MyUselessDB)
+    <<".database">> => ?OID(MyUselessDB)
   }),
 
   %ct:pal("db for /root/Chester ~p",[ecomet_schema:get_mounted_folder(<<"/root/Chester/some">>)]),
@@ -278,12 +278,12 @@ on_edit_test(_Config) ->
   }),
   % Folder1 contains Folder2, so we cannot unmount 'MyUselessDB'
   % while Folder1 is not empty
-  ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<"database">> => ?OID(NotSoUseless)})) ,
+  ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<".database">> => ?OID(NotSoUseless)})) ,
 
   ecomet:delete_object(Folder2),
   % Folder2 deleted and here Folder1 is empty
   % So we can change <<database>> field %
-  ecomet:edit_object(Folder1, #{<<"database">> => ?OID(NotSoUseless)}),
+  ecomet:edit_object(Folder1, #{<<".database">> => ?OID(NotSoUseless)}),
   'NotSoUseless' = ecomet_schema:get_mounted_db(?OID(Folder1)),
 
   ecomet:delete_object(Folder1),

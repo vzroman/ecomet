@@ -204,20 +204,20 @@ on_delete_test(_Config) ->
     <<".name">>=><<"test_folder3">>,
     <<".folder">>=>?OID(<<"/root">>),
     <<".pattern">>=>?OID(<<"/root/.patterns/.folder">>),
-    <<"database">>=>?OID(TestDB_3)
+    <<".database">>=>?OID(TestDB_3)
   }),
 
   TestFolder_4=ecomet:create_object(#{
   <<".name">>=><<"test_folder4">>,
   <<".folder">>=>?OID(<<"/root">>),
   <<".pattern">>=>?OID(<<"/root/.patterns/.folder">>),
-  <<"database">>=>?OID(TestDB_4)
+  <<".database">>=>?OID(TestDB_4)
   }),
 
   ?assertError({is_mounted,_}, ecomet:delete_object(TestDB_3)),
   ?assertError({is_mounted,_}, ecomet:delete_object(TestDB_4)),
-  ok = ecomet:edit_object(TestFolder_3, #{<<"database">> => none}),
-  ok = ecomet:edit_object(TestFolder_4, #{<<"database">> => none}),
+  ok = ecomet:edit_object(TestFolder_3, #{<<".database">> => none}),
+  ok = ecomet:edit_object(TestFolder_4, #{<<".database">> => none}),
 
   ok = ecomet:delete_object(TestDB_3),
   ok = ecomet:delete_object(TestDB_4),
@@ -266,7 +266,7 @@ on_create_test(_Config) ->
     <<".name">>=><<"test_folder">>,
     <<".folder">>=>?OID(<<"/root">>),
     <<".pattern">>=>?OID(<<"/root/.patterns/.folder">>),
-   <<"database">>=>?OID(TestDB)
+   <<".database">>=>?OID(TestDB)
   }),
   my_db = ecomet_schema:get_mounted_db(?OID(Folder)),
   ok = ecomet:delete_object(Folder),

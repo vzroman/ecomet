@@ -151,7 +151,7 @@ find_mount_points(ID)->
   % Folder descendants
   ecomet_query:system(DBs,[<<".oid">>],{'AND',[
     {<<".pattern">>,'=',{?PATTERN_PATTERN,?FOLDER_PATTERN}},
-    {<<"database">>,'=',?OID(ID)}
+    {<<".database">>,'=',?OID(ID)}
   ]}).
 
 
@@ -183,7 +183,7 @@ on_delete(Object)->
     end || ItemID <- get_content_system(?OID(Object)) ],
 
   % Unmount a database if some is mounted
-  case ecomet:read_field(Object,<<"database">>) of
+  case ecomet:read_field(Object,<<".database">>) of
     {ok,DB} when DB=/=none->
       ok = ecomet_schema:unmount_db(?OID(Object));
     _->
@@ -216,7 +216,7 @@ inherit_rights(Object)->
   }).
 
 recursive_rights(Object)->
-  Recursion=ecomet:field_changes(Object,<<"recursive_rights">>),
+  Recursion=ecomet:field_changes(Object,<<".recursive">>),
   case Recursion of
     {true,_}->
       Read=rights_changes(Object,<<".readgroups">>),
@@ -270,7 +270,7 @@ apply_rights(Object,Changes,Additional)->
   Object1.
 
 apply_recursion(Object)->
-  Recursion=ecomet:field_changes(Object,<<"recursive_rights">>),
+  Recursion=ecomet:field_changes(Object,<<".recursive">>),
   case Recursion of
     {true,_}->
       Read=rights_changes(Object,<<".contentreadgroups">>),
@@ -293,8 +293,8 @@ apply_recursion(Object)->
             [begin
                Item=ecomet:open_nolock(ItemID),
                Additional=
-                 case ecomet:read_field(Item,<<"recursive_rights">>) of
-                   {ok,_}->[{<<"recursive_rights">>,true}];
+                 case ecomet:read_field(Item,<<".recursive">>) of
+                   {ok,_}->[{<<".recursive">>,true}];
                    _->[]
                  end,
                apply_rights(Item,Changes,Additional)
@@ -302,12 +302,12 @@ apply_recursion(Object)->
           end);
         true -> ok
       end,
-      ok = ecomet:edit_object(Object,#{<<"recursive_rights">> => false});
+      ok = ecomet:edit_object(Object,#{<<".recursive">> => false});
     _ ->ok
   end.
 
 check_database(Object)->
-  case ecomet:field_changes(Object,<<"database">>) of
+  case ecomet:field_changes(Object,<<".database">>) of
     none->ok;
     { MountedDB, UnmountedDB }->
       FolderID = ?OID(Object),

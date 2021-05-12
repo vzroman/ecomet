@@ -139,8 +139,8 @@ check_storage_test(_Config) ->
   false = ecomet_field:check_storage(#{1 => 2}, IsEmptyTrue),
 
   % Object or smth not empty, error should occur %
-  ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}}, IsEmptyFalse)),
-  ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {?RAMLOCAL, ?RAM}}, IsEmptyFalse)),
+  ?assertError(has_objects, ecomet_field:check_storage(#{<<".storage">> => {?DISC, none}}, IsEmptyFalse)),
+  ?assertError(has_objects, ecomet_field:check_storage(#{<<".storage">> => {?RAMLOCAL, ?RAM}}, IsEmptyFalse)),
 
   % Mecking ecomet_pattern:get_storage
   % {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
@@ -151,19 +151,19 @@ check_storage_test(_Config) ->
   % is_empty == true %
   % Storage == [?RAMLOCAL,?RAM,?RAMDISC,?DISC] or whatever  %
   % NewStorage = RAMDISC or NewStorage = ?DISC %
-  ?assertError(memory_only_pattern, ecomet_field:check_storage(#{<<"storage">> => {?RAMDISC, none}, <<".folder">> => ?RAMLOCAL},IsEmptyTrue)),
-  ?assertError(memory_only_pattern, ecomet_field:check_storage(#{<<"storage">> => {?RAMDISC, none}, <<".folder">> => ?RAM}, IsEmptyTrue)),
-  ?assertError(memory_only_pattern, ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}, <<".folder">> => ?RAMLOCAL}, IsEmptyTrue)),
-  ?assertError(memory_only_pattern, ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}, <<".folder">> => ?RAM}, IsEmptyTrue)),
+  ?assertError(memory_only_pattern, ecomet_field:check_storage(#{<<".storage">> => {?RAMDISC, none}, <<".folder">> => ?RAMLOCAL},IsEmptyTrue)),
+  ?assertError(memory_only_pattern, ecomet_field:check_storage(#{<<".storage">> => {?RAMDISC, none}, <<".folder">> => ?RAM}, IsEmptyTrue)),
+  ?assertError(memory_only_pattern, ecomet_field:check_storage(#{<<".storage">> => {?DISC, none}, <<".folder">> => ?RAMLOCAL}, IsEmptyTrue)),
+  ?assertError(memory_only_pattern, ecomet_field:check_storage(#{<<".storage">> => {?DISC, none}, <<".folder">> => ?RAM}, IsEmptyTrue)),
 
-  true = ecomet_field:check_storage(#{<<"storage">> => {?RAMDISC, none}, <<".folder">> => ?RAMDISC}, IsEmptyTrue),
-  true = ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}, <<".folder">> => ?DISC}, IsEmptyTrue),
+  true = ecomet_field:check_storage(#{<<".storage">> => {?RAMDISC, none}, <<".folder">> => ?RAMDISC}, IsEmptyTrue),
+  true = ecomet_field:check_storage(#{<<".storage">> => {?DISC, none}, <<".folder">> => ?DISC}, IsEmptyTrue),
 
   % NewStorage != RAMDISC and NewStorage != ?DISC %
-  true = ecomet_field:check_storage(#{<<"storage">> => {?RAM, ?RAMLOCAL}, <<".folder">> => ?RAMLOCAL}, IsEmptyTrue),
-  true = ecomet_field:check_storage(#{<<"storage">> => {?RAMLOCAL, ?DISC}, <<".folder">> => <<"MyFolder">>},IsEmptyTrue),
-  ?assertError(invalid_storage_type, ecomet_field:check_storage(#{<<"storage">> => {<<"HDFS">>, <<"SSD">>}, <<"Green">> => <<"Day">>}, IsEmptyTrue)),
-  ?assertError(invalid_storage_type, ecomet_field:check_storage(#{<<"storage">> => {<<"Cloud">>, ?RAM}}, IsEmptyTrue)),
+  true = ecomet_field:check_storage(#{<<".storage">> => {?RAM, ?RAMLOCAL}, <<".folder">> => ?RAMLOCAL}, IsEmptyTrue),
+  true = ecomet_field:check_storage(#{<<".storage">> => {?RAMLOCAL, ?DISC}, <<".folder">> => <<"MyFolder">>},IsEmptyTrue),
+  ?assertError(invalid_storage_type, ecomet_field:check_storage(#{<<".storage">> => {<<"HDFS">>, <<"SSD">>}, <<"Green">> => <<"Day">>}, IsEmptyTrue)),
+  ?assertError(invalid_storage_type, ecomet_field:check_storage(#{<<".storage">> => {<<"Cloud">>, ?RAM}}, IsEmptyTrue)),
 
   meck:unload([ecomet, ecomet_pattern]),
   ok
@@ -171,21 +171,21 @@ check_storage_test(_Config) ->
 
 to_schema_test(_Config) ->
   Params1 = #{
-    <<"type">> => integer,
-    <<"subtype">> => none,
-    <<"index">> => none,
-    <<"required">> => false,
-    <<"storage">> => ram,
-    <<"default">> => none,
-    <<"autoincrement">> => true,
+    <<".type">> => integer,
+    <<".subtype">> => none,
+    <<".index">> => none,
+    <<".required">> => false,
+    <<".storage">> => ram,
+    <<".default">> => none,
+    <<".autoincrement">> => true,
     <<"myfield">> => <<"plsnotcrash">>
   },
 
   Params2 = #{
-    <<"type">> => link,
-    <<"required">> => true,
-    <<"storage">> => disc,
-    <<"default">> => none,
+    <<".type">> => link,
+    <<".required">> => true,
+    <<".storage">> => disc,
+    <<".default">> => none,
     <<"myfield">> => <<"tired">>
   },
 
@@ -226,21 +226,21 @@ check_type_test(_Config) ->
   false = ecomet_field:check_type(#{}, IsEmptyTrue),
 
   % We are trying to change type or subtype, but there already created object with the schema %
-  ?assertError(has_objects, ecomet_field:check_type(#{<<"type">> => {bool, atom}, <<"subtype">> => {new, old}}, IsEmptyFalse)),
-  ?assertError(has_objects, ecomet_field:check_type(#{<<"type">> => {atom, term}}, IsEmptyFalse)),
-  ?assertError(has_objects, ecomet_field:check_type(#{<<"subtype">> => {float, bool}}, IsEmptyFalse)),
+  ?assertError(has_objects, ecomet_field:check_type(#{<<".type">> => {bool, atom}, <<".subtype">> => {new, old}}, IsEmptyFalse)),
+  ?assertError(has_objects, ecomet_field:check_type(#{<<".type">> => {atom, term}}, IsEmptyFalse)),
+  ?assertError(has_objects, ecomet_field:check_type(#{<<".subtype">> => {float, bool}}, IsEmptyFalse)),
 
   % is_empty == true %
   % We are trying to change type or subtype or we have valid types %
   % If the type is not a list then it doesn't matter what is a subtype
-  true = ecomet_field:check_type(#{<<"type">> => term, <<"subtype">> => {new, old}}, IsEmptyTrue),
-  true = ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => binary} ,IsEmptyTrue),
-  true = ecomet_field:check_type(#{<<"type">> => atom}, IsEmptyTrue),
-  true = ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => link} ,IsEmptyTrue),
+  true = ecomet_field:check_type(#{<<".type">> => term, <<".subtype">> => {new, old}}, IsEmptyTrue),
+  true = ecomet_field:check_type(#{<<".type">> => list, <<".subtype">> => binary} ,IsEmptyTrue),
+  true = ecomet_field:check_type(#{<<".type">> => atom}, IsEmptyTrue),
+  true = ecomet_field:check_type(#{<<".type">> => list, <<".subtype">> => link} ,IsEmptyTrue),
 
   % We have unsupported types, error should occur %
-  ?assertError(invalid_type, ecomet_field:check_type(#{<<"type">> => qweasd, <<"subtype">> => link} ,IsEmptyTrue)),
-  ?assertError(invalid_type, ecomet_field:check_type(#{<<"type">> => list, <<"subtype">> => gsg} ,IsEmptyTrue)),
+  ?assertError(invalid_type, ecomet_field:check_type(#{<<".type">> => qweasd, <<".subtype">> => link} ,IsEmptyTrue)),
+  ?assertError(invalid_type, ecomet_field:check_type(#{<<".type">> => list, <<".subtype">> => gsg} ,IsEmptyTrue)),
 
   meck:unload(ecomet),
 
@@ -259,8 +259,8 @@ check_index_test(_Config) ->
   false = ecomet_field:check_index(#{<<"Album">> => <<"Meteora">>, <<"Crypto">> => <<"RSA">>}, IsEmptyFalse),
 
   % %
-  true = ecomet_field:check_index(#{<<"index">> => {none, [simple]}, <<"Album">> => <<"Meteora">>}, IsEmptyTrue),
-  true = ecomet_field:check_index(#{<<"index">> => {none, ['3gram']}, <<"Album">> => <<"Meteora">>}, IsEmptyFalse),
+  true = ecomet_field:check_index(#{<<".index">> => {none, [simple]}, <<"Album">> => <<"Meteora">>}, IsEmptyTrue),
+  true = ecomet_field:check_index(#{<<".index">> => {none, ['3gram']}, <<"Album">> => <<"Meteora">>}, IsEmptyFalse),
 
   %supported types %
 %%  [
@@ -269,13 +269,13 @@ check_index_test(_Config) ->
 %%    datetime
 %%  ],
   % New indexes contain only supported types, should return true%
-  true = ecomet_field:check_index(#{<<"index">> => {[simple, '3gram'], [datetime]}, <<"Album">> => <<"Meteora">>}, IsEmptyFalse),
-  true = ecomet_field:check_index(#{<<"index">> => {[datetime, '3gram', datetime], none}, <<"Album">> => <<"FolkLore">>},IsEmptyTrue),
-  true = ecomet_field:check_index(#{<<"index">> => {[datetime, datetime, datetime], none}, <<"Album">> => <<"Divide">>}, IsEmptyTrue),
+  true = ecomet_field:check_index(#{<<".index">> => {[simple, '3gram'], [datetime]}, <<"Album">> => <<"Meteora">>}, IsEmptyFalse),
+  true = ecomet_field:check_index(#{<<".index">> => {[datetime, '3gram', datetime], none}, <<"Album">> => <<"FolkLore">>},IsEmptyTrue),
+  true = ecomet_field:check_index(#{<<".index">> => {[datetime, datetime, datetime], none}, <<"Album">> => <<"Divide">>}, IsEmptyTrue),
 
   % New indexes contain not supported types, error should occur %
-  ?assertError(invalid_index_type, ecomet_field:check_index(#{<<"index">> => {[notvalidtype], [simple]} }, IsEmptyTrue)),
-  ?assertError(invalid_index_type, ecomet_field:check_index(#{<<"index">> => {[validtype, it ,is, joke], [datetime]} }, IsEmptyFalse)),
+  ?assertError(invalid_index_type, ecomet_field:check_index(#{<<".index">> => {[notvalidtype], [simple]} }, IsEmptyTrue)),
+  ?assertError(invalid_index_type, ecomet_field:check_index(#{<<".index">> => {[validtype, it ,is, joke], [datetime]} }, IsEmptyFalse)),
 
 
   meck:unload(ecomet)
@@ -284,7 +284,7 @@ check_index_test(_Config) ->
 check_default_test(_Config) ->
   meck:new(ecomet, [no_link]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
-  meck:expect(ecomet, edit_object, fun(_Object, Map) -> put(default, maps:get(<<"default">>, Map)), ok end),
+  meck:expect(ecomet, edit_object, fun(_Object, Map) -> put(default, maps:get(<<".default">>, Map)), ok end),
 
   IsEmptyTrue = true,
   IsEmptyFalse = false,
@@ -293,8 +293,8 @@ check_default_test(_Config) ->
   false = ecomet_field:check_default(#{}, IsEmptyFalse),
 
   % We are changing default field to none, should return true %
-  true = ecomet_field:check_default(#{<<"default">> => {none, <<"notnone">>}}, IsEmptyTrue),
-  true = ecomet_field:check_default(#{<<"default">> => {none, <<"qwe">>}}, IsEmptyFalse),
+  true = ecomet_field:check_default(#{<<".default">> => {none, <<"notnone">>}}, IsEmptyTrue),
+  true = ecomet_field:check_default(#{<<".default">> => {none, <<"qwe">>}}, IsEmptyFalse),
 
 %%  #{
 %%    type => string,
@@ -308,50 +308,50 @@ check_default_test(_Config) ->
 
   % We are changing default field with valid default_field value, should return ok %
   true = ecomet_field:check_default(#{
-    <<"default">> => {1, old},
-    <<"type">> => string,
-    <<"subtype">> => none
+    <<".default">> => {1, old},
+    <<".type">> => string,
+    <<".subtype">> => none
   }, IsEmptyFalse),
   <<"1">> = get(default),
 
   true = ecomet_field:check_default(#{
-    <<"default">> => {<<"123">>, old},
-    <<"type">> => integer,
-    <<"subtype">> => none
+    <<".default">> => {<<"123">>, old},
+    <<".type">> => integer,
+    <<".subtype">> => none
   }, IsEmptyTrue),
   123 = get(default),
 
   true = ecomet_field:check_default(#{
-    <<"default">> => {new, old},
-    <<"type">> => atom,
-    <<"subtype">> => none
+    <<".default">> => {new, old},
+    <<".type">> => atom,
+    <<".subtype">> => none
   }, IsEmptyFalse),
   new = get(default),
 
   true = ecomet_field:check_default(#{
-    <<"default">> => {1, old},
-    <<"type">> => term,
-    <<"subtype">> => none
+    <<".default">> => {1, old},
+    <<".type">> => term,
+    <<".subtype">> => none
   }, IsEmptyTrue),
   1 = get(default),
 
   % We are changing default field with invalid default_field value, error should occur %
   ?assertError(invalid_default_value, ecomet_field:check_default(#{
-    <<"default">> => {new, old},
-    <<"type">> => float,
-    <<"subtype">> => none
+    <<".default">> => {new, old},
+    <<".type">> => float,
+    <<".subtype">> => none
   }, IsEmptyTrue)),
 
   ?assertError(invalid_default_value, ecomet_field:check_default(#{
-    <<"default">> => {qwe, old},
-    <<"type">> => bool,
-    <<"subtype">> => none
+    <<".default">> => {qwe, old},
+    <<".type">> => bool,
+    <<".subtype">> => none
   }, IsEmptyFalse)),
 
   ?assertError(invalid_default_value, ecomet_field:check_default(#{
-    <<"default">> => {new, old},
-    <<"type">> => binary,
-    <<"subtype">> => none
+    <<".default">> => {new, old},
+    <<".type">> => binary,
+    <<".subtype">> => none
   }, IsEmptyTrue)),
 
   meck:unload(ecomet)
@@ -370,53 +370,53 @@ on_create_test(_Config) ->
 
   % <<.name>> => valid name %
   % <<".folder">> => PatternStorage DISC%
-  % <<"storage">> => %
-  % <<"type">>  => valid type %
-  % <<"subtype">> => does not need, because <<"type">> != list %
-  % <<"index">> => valid index%
-  % <<"default">> => valid default value, accordingly to type %
+  % <<".storage">> => %
+  % <<".type">>  => valid type %
+  % <<".subtype">> => does not need, because <<".type">> != list %
+  % <<".index">> => valid index%
+  % <<".default">> => valid default value, accordingly to type %
   Object1 = #{<<".name">> => {<<".faceplate">>, none},
     <<".folder">> => {?DISC, none},
-    <<"storage">> => {?RAMDISC, ?DISC},
-    <<"type">> => term,
-    <<"subtype">> => none,
-    <<"index">> => {[simple], none},
-    <<"default">> => {<<"newdef">>, none}
+    <<".storage">> => {?RAMDISC, ?DISC},
+    <<".type">> => term,
+    <<".subtype">> => none,
+    <<".index">> => {[simple], none},
+    <<".default">> => {<<"newdef">>, none}
   },
   ok = ecomet_field:on_create(Object1),
 
   % <<.name>> => valid name %
   % <<".folder">> => PatternStorage RAMLOCAL%
-  % <<"storage">> => We cannot change storage type to RAMDISC
+  % <<".storage">> => We cannot change storage type to RAMDISC
   % while PatternStorage is RAMLOCAL %
-  % <<"type">>  => valid type %
-  % <<"subtype">> => does not need, because <<"type">> != list %
-  % <<"index">> => valid index%
-  % <<"default">> => valid default value, accordingly to type %
+  % <<".type">>  => valid type %
+  % <<".subtype">> => does not need, because <<".type">> != list %
+  % <<".index">> => valid index%
+  % <<".default">> => valid default value, accordingly to type %
   Object2 = #{<<".name">> => {<<".google">>, none},
     <<".folder">> => {?RAMLOCAL, none},
-    <<"storage">> => {?RAMDISC, none},
-    <<"type">> => string,
-    <<"subtype">> => none,
-    <<"index">> => {[simple, '3gram'], none},
-    <<"default">> => {123, none}
+    <<".storage">> => {?RAMDISC, none},
+    <<".type">> => string,
+    <<".subtype">> => none,
+    <<".index">> => {[simple, '3gram'], none},
+    <<".default">> => {123, none}
   },
   ?assertError(memory_only_pattern, ecomet_field:on_create(Object2)),
 
   % <<.name>> => valid name %
   % <<".folder">> => PatternStorage RAMDISC%
-  % <<"storage">> => %
-  % <<"type">>  => valid type %
-  % <<"subtype">> => does not need, because <<"type">> != list %
-  % <<"index">> => invalid index%
-  % <<"default">> => valid default value, accordingly to type %
+  % <<".storage">> => %
+  % <<".type">>  => valid type %
+  % <<".subtype">> => does not need, because <<".type">> != list %
+  % <<".index">> => invalid index%
+  % <<".default">> => valid default value, accordingly to type %
   Object3 = #{<<".name">> => {<<".yahoo">>, none},
     <<".folder">> => {?RAMDISC, none},
-    <<"storage">> => {?DISC, none},
-    <<"type">> => integer,
-    <<"subtype">> => none,
-    <<"index">> => {[notsimple, datetime], none},
-    <<"default">> => {<<"123">>, none}
+    <<".storage">> => {?DISC, none},
+    <<".type">> => integer,
+    <<".subtype">> => none,
+    <<".index">> => {[notsimple, datetime], none},
+    <<".default">> => {<<"123">>, none}
   },
   ?assertError(invalid_index_type, ecomet_field:on_create(Object3)),
   meck:unload([ecomet, ecomet_pattern]),
@@ -439,11 +439,11 @@ on_edit_test(_Config) ->
   put(is_empty, true),
   Object1 = #{<<".name">> => {<<".faceplate">>, <<".zeinet">>},
     <<".folder">> => {?RAMLOCAL, none},
-    <<"storage">> => {?RAM, ?DISC},
-    <<"type">> => term,
-    <<"subtype">> => none,
-    <<"index">> => {[simple], datetime},
-    <<"default">> => {<<"newdef">>, <<"newdef">>}
+    <<".storage">> => {?RAM, ?DISC},
+    <<".type">> => term,
+    <<".subtype">> => none,
+    <<".index">> => {[simple], datetime},
+    <<".default">> => {<<"newdef">>, <<"newdef">>}
   },
   ok = ecomet_field:on_edit(Object1),
 
@@ -451,11 +451,11 @@ on_edit_test(_Config) ->
   put(is_empty, false),
   Object2 = #{<<".name">> => {<<".faceplate">>, <<".zeinet">>},
     <<".folder">> => {?DISC, none},
-    <<"storage">> => {?RAMDISC, ?DISC},
-    <<"type">> => string,
-    <<"subtype">> => none,
-    <<"index">> => {[datetime], datetime},
-    <<"default">> => {<<"newdef">>, <<"newdef">>}
+    <<".storage">> => {?RAMDISC, ?DISC},
+    <<".type">> => string,
+    <<".subtype">> => none,
+    <<".index">> => {[datetime], datetime},
+    <<".default">> => {<<"newdef">>, <<"newdef">>}
   },
   ?assertError(has_objects, ecomet_field:on_edit(Object2)),
 

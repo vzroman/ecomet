@@ -161,7 +161,7 @@ check_db_test(_Config) ->
     <<".name">> => <<"Folder2">>,
     <<".folder">> => ?OID(<<"/root">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
-    <<"database">> => ?OID(RealDB)
+    <<".database">> => ?OID(RealDB)
   }),
   'RealDB' = ecomet_schema:get_mounted_db(?OID(Folder3)),
   ct:pal("RealDB ID ~n~p~n",[ecomet_schema:get_db_id('RealDB')]),

@@ -97,16 +97,18 @@
 %%	Service API
 %%=================================================================
 to_schema(Params) when is_map(Params)->
-  maps:map(fun(K,Default)->
-    maps:get( atom_to_binary(K,utf8), Params, Default )
-  end,?DEFAULT_DESCRIPTION);
+  maps:fold(fun(K,Default,Acc)->
+    Name = <<".",(atom_to_binary(K,utf8))/binary>>,
+    Acc#{K => maps:get( Name, Params, Default )}
+  end, #{}, ?DEFAULT_DESCRIPTION );
 to_schema(ID)->
   Config = ecomet:read_fields(?OBJECT(ID),from_schema(?DEFAULT_DESCRIPTION)),
   to_schema(Config).
 
 from_schema(Params)->
   maps:fold(fun(K, V ,Acc)->
-    Acc#{ atom_to_binary(K,utf8) => V }
+    Name = <<".",(atom_to_binary(K,utf8))/binary>>,
+    Acc#{ Name => V }
   end,#{},Params ).
 
 build_description(Params)->
@@ -462,7 +464,7 @@ check_folder(Object, _IsEmpty)->
   end.
 
 check_storage(Object,IsEmpty)->
-  case ecomet:field_changes(Object,<<"storage">>) of
+  case ecomet:field_changes(Object,<<".storage">>) of
     none->false;
     { _NewStorage, _OldStorage } when not IsEmpty->
       % Cannot change the storage for the field if there are already objects created with the schema
@@ -488,9 +490,9 @@ check_storage(Object,IsEmpty)->
 
 check_type(Object,IsEmpty)->
   IsChanged =
-    ecomet:field_changes(Object,<<"type">>) =/=none
+    ecomet:field_changes(Object,<<".type">>) =/=none
       orelse
-    ecomet:field_changes(Object,<<"subtype">>) =/=none,
+    ecomet:field_changes(Object,<<".subtype">>) =/=none,
   if
     not IsChanged->false;
     not IsEmpty ->
@@ -509,7 +511,7 @@ check_type(Object,IsEmpty)->
   end.
 
 check_index(Object,_IsEmpty)->
-  case ecomet:field_changes(Object,<<"index">>) of
+  case ecomet:field_changes(Object,<<".index">>) of
     none->false;
     { none, _OldStorage }->true;
     { NewIndex, _OldStorage }->
@@ -520,19 +522,19 @@ check_index(Object,_IsEmpty)->
         []->ok;
         _->?ERROR(invalid_index_type)
       end,
-      ecomet:edit_object(Object,#{<<"index">>=>Index}),
+      ecomet:edit_object(Object,#{<<".index">>=>Index}),
       true
   end.
 
 check_default(Object,_IsEmpty)->
-  case ecomet:field_changes(Object,<<"default">>) of
+  case ecomet:field_changes(Object,<<".default">>) of
     none->false;
     {none,_Old}->true;
     { NewDefault, _Old}->
       Type = get_type(to_schema(Object)),
       case ecomet_types:parse_safe(Type,NewDefault) of
         {ok,Parsed}->
-          ok = ecomet:edit_object(Object,#{<<"default">>=>Parsed});
+          ok = ecomet:edit_object(Object,#{<<".default">>=>Parsed});
         _->?ERROR(invalid_default_value)
       end,
       true

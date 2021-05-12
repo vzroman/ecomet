@@ -105,7 +105,7 @@ init_per_suite(Config)->
         { <<"test_pattern">>, #{
           fields=>#{
             <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-            <<"parent_pattern">>=>?OID(<<"/root/.patterns/.object">>)
+            <<".inherit">>=>?OID(<<"/root/.patterns/.object">>)
           },
           children=>[
             { <<".name">>, #{ fields=>?FIELD(#{

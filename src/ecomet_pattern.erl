@@ -146,26 +146,26 @@ get_storage(OIDOrMap)->
 
 get_parent(Pattern)->
   Object = ?OBJECT(Pattern),
-  {ok,Parent} = ecomet:read_field(Object,<<"parent_pattern">>),
+  {ok,Parent} = ecomet:read_field(Object,<<".inherit">>),
   Parent.
 
 get_parents(Pattern)->
   Object = ?OBJECT(Pattern),
-  {ok,Parents} = ecomet:read_field(Object,<<"parents">>),
+  {ok,Parents} = ecomet:read_field(Object,<<".ancestors">>),
   Parents.
 
 get_children(Pattern)->
   OID=?OID(Pattern),
   ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
     {<<".pattern">>,':=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
-    {<<"parent_pattern">>,'=',OID}
+    {<<".inherit">>,'=',OID}
   ]})--[OID].
 
 get_children_recursive(Pattern)->
   OID=?OID(Pattern),
   ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
     {<<".pattern">>,':=',{?PATTERN_PATTERN,?PATTERN_PATTERN}},
-    {<<"parents">>,'=',OID}
+    {<<".ancestors">>,'=',OID}
   ]})--[OID].
 
 get_fields(Pattern)->
@@ -293,7 +293,7 @@ on_delete(Object)->
   end.
 
 check_parent(Object)->
-  case ecomet:field_changes(Object,<<"parent_pattern">>) of
+  case ecomet:field_changes(Object,<<".inherit">>) of
     none->ok;
     _->?ERROR(cannot_change_parent)
   end.
@@ -306,7 +306,7 @@ check_db(Object)->
   end.
 
 check_handler(Object)->
-  case ecomet:field_changes(Object,<<"behaviour_module">>) of
+  case ecomet:field_changes(Object,<<".behaviour">>) of
     none->ok;
     {none,_}->ok;
     {NewHandler,_}->
@@ -342,7 +342,7 @@ check_handler_module(Module)->
 update_behaviour(Pattern,ParentHandlers)->
   Object = ?OBJECT(Pattern),
   Handlers=
-    case ecomet:read_field(Object,<<"behaviour_module">>) of
+    case ecomet:read_field(Object,<<".behaviour">>) of
       {ok,none}->ParentHandlers;
       {ok,Module}->[Module|ParentHandlers]
     end,
@@ -356,7 +356,7 @@ update_behaviour(Pattern,ParentHandlers)->
 set_parents(Object)->
   Parent = get_parent(Object),
   GrandParents = get_parents(Parent),
-  ok = ecomet:edit_object(Object,#{<<"parents">> => [Parent|GrandParents]}).
+  ok = ecomet:edit_object(Object,#{<<".ancestors">> => [Parent|GrandParents]}).
 
 
 inherit_fields(Object)->
