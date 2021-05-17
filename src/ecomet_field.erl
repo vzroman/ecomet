@@ -396,18 +396,29 @@ on_edit(Object)->
   check_index(Object,IsEmpty),
   check_default(Object,IsEmpty),
 
-  Changes=[ A || A <- maps:keys(?DEFAULT_DESCRIPTION), none=/=ecomet:field_changes(Object,?A2B(A)) ],
+  case ecomet:field_changes(Object,<<".name">>) of
+    {NewName, OldName}->
+      % Rename
+      ok = ecomet_pattern:remove_field(PatternID,OldName),
 
-  case Changes of
-    []->
-      % No real schema changes
-      ok;
-    _->
-      % Append the field to the schema
-      { ok, Name }=ecomet:read_field(Object, <<".name">>),
-      { ok, PatternID } = ecomet:read_field(Object, <<".folder">>),
       Config = to_schema(Object),
-      ok = ecomet_pattern:append_field(PatternID, Name, Config)
+      ok = ecomet_pattern:append_field(PatternID, NewName, Config),
+      ok;
+    none->
+      % Check for schema changes
+      Changes=[ A || A <- maps:keys(?DEFAULT_DESCRIPTION), none=/=ecomet:field_changes(Object,?A2B(A)) ],
+
+      case Changes of
+        []->
+          % No real schema changes
+          ok;
+        _->
+          % Append the field to the schema
+          { ok, Name }=ecomet:read_field(Object, <<".name">>),
+          { ok, PatternID } = ecomet:read_field(Object, <<".folder">>),
+          Config = to_schema(Object),
+          ok = ecomet_pattern:append_field(PatternID, Name, Config)
+      end
   end.
 
 on_delete(Object)->
