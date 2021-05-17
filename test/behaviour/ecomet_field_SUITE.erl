@@ -65,10 +65,6 @@ end_per_suite(_Config)->
   ?BACKEND_STOP(30000),
   ok.
 
-
-
-
-
 check_name_test(_Config) ->
 
   meck:new(ecomet, [no_link]),
