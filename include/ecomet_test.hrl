@@ -31,7 +31,7 @@
   goldrush,
   lager,
   eleveldb,
-  mnesia_eleveldb
+  mnesia_eleveldb,
   dlss
 ]).
 
