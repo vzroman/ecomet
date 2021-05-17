@@ -398,8 +398,7 @@ on_edit(Object)->
   check_index(Object,IsEmpty),
   check_default(Object,IsEmpty),
 
-  Changes=[ A || A <- maps:keys(?DEFAULT_DESCRIPTION), none=/=ecomet:field_changes(Object,?A2B(A)) ],
-
+  Changes=[ A || A <- maps:keys(?DEFAULT_DESCRIPTION), none=/=ecomet:field_changes(Object,<<".",(?A2B(A))/binary>>) ],
   case Changes of
     []->
       % No real schema changes
