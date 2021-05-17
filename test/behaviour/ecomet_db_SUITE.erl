@@ -213,17 +213,18 @@ on_delete_test(_Config) ->
   <<".pattern">>=>?OID(<<"/root/.patterns/.folder">>),
   <<"database">>=>?OID(TestDB_4)
   }),
-
   ?assertError({is_mounted,_}, ecomet:delete_object(TestDB_3)),
   ?assertError({is_mounted,_}, ecomet:delete_object(TestDB_4)),
-  ok = ecomet:edit_object(TestFolder_3, #{<<"database">> => none}),
-  ok = ecomet:edit_object(TestFolder_4, #{<<"database">> => none}),
+%%  ok = ecomet:edit_object(TestFolder_3, #{<<"database">> => none}),
+%%  ok = ecomet:edit_object(TestFolder_4, #{<<"database">> => none}),
+
+
+  ok = ecomet:delete_object(TestFolder_3),
+  ok = ecomet:delete_object(TestFolder_4),
 
   ok = ecomet:delete_object(TestDB_3),
   ok = ecomet:delete_object(TestDB_4),
 
-  ok = ecomet:delete_object(TestFolder_3),
-  ok = ecomet:delete_object(TestFolder_4),
   ok.
 
 % Object =  {<<".name">> => {NewName, OldName}, <<"id">> => {NewId, OldId}} or #{} %
