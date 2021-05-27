@@ -36,7 +36,9 @@
   set_parents_test/1,
   on_delete_test/1,
   on_edit_test/1,
-  on_create_test/1
+  on_create_test/1,
+  fields_manipulation/1,
+  inherit_manipulation/1
 ]).
 
 
@@ -48,7 +50,9 @@ all() ->
     set_parents_test,
     on_delete_test,
     on_edit_test,
-    on_create_test
+    on_create_test,
+    fields_manipulation,
+    inherit_manipulation
   ].
 
 group() ->
@@ -277,3 +281,144 @@ on_delete_test(_Config) ->
   ecomet:delete_object(Pattern),
   ok.
 
+
+fields_manipulation(_Config) ->
+  ecomet_user:on_init_state(),
+
+  ParentPattern = ecomet:create_object(#{
+    <<".name">> => <<"my_pattern">>,
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<".inherit">> => ?OID(<<"/root/.patterns/.folder">>)
+  }),
+  F1 = ecomet:create_object(#{
+    <<".name">> => <<"f1">>,
+    <<".folder">> => ?OID(ParentPattern),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.field">>),
+    <<".type">> => integer
+  }),
+  #{<<"f1">> := _} = ecomet_pattern:get_map(ParentPattern),
+  ecomet:edit_object(F1, #{<<".storage">> => ?RAMDISC}),
+  #{<<"f1">> := #{storage := ?RAMDISC}} = ecomet_pattern:get_map(ParentPattern),
+
+  ChildPattern = ecomet:create_object(#{
+    <<".name">> => <<"child_pattern">>,
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<".inherit">> => ?OID(ParentPattern)
+  }),
+
+  F2 = ecomet:create_object(#{
+    <<".name">> => <<"f2">>,
+    <<".folder">> => ?OID(ParentPattern),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.field">>),
+    <<".type">> => string
+  }),
+  #{<<"f2">> := _} = ecomet_pattern:get_map(ChildPattern),
+
+  EditList = [{type, float}, {index, [simple]}, {required, true}],
+  [begin
+    ecomet:edit_object(F2, #{<<".", (atom_to_binary(Field, utf8))/binary>> => Value}),
+    #{<<"f2">> := #{Field := Value}} = ecomet_pattern:get_map(ParentPattern),
+    #{<<"f2">> := #{Field := Value}} = ecomet_pattern:get_map(ChildPattern),
+    ct:pal("Successfully updated ~p ~p~n", [Field, Value])
+   end
+   || {Field, Value} <- EditList],
+
+  ChildFieldF2 = ecomet:open(?OID(<<"/root/.patterns/child_pattern/f2">>)),
+  Modifications = [
+    #{<<".name">> => <<"f22">>}, #{<<".type">> => integer}, #{<<".required">> => false}, #{<<".index">> => none}
+  ],
+  [
+    case Map of
+      #{<<".index">> := _} ->
+        ?assertError(
+          {parent_index, _},
+          ecomet:edit_object(ChildFieldF2, Map)
+        );
+      _ ->
+        ?assertError(
+          {parent_field, _},
+          ecomet:edit_object(ChildFieldF2, Map)
+        )
+    end
+  || Map <- Modifications],
+
+  ?assertError(
+    {parent_field, _},
+    ecomet:delete_object(ecomet:open(?OID(<<"/root/.patterns/child_pattern/f2">>)) )
+  ),
+
+  Object1 = ecomet:create_object(#{
+    <<".name">> => <<"instance1">>,
+    <<".folder">> => ?OID(<<"/root">>),
+    <<".pattern">> => ?OID(ChildPattern),
+    <<"f2">> => 1.0
+  }),
+  ?assertError({has_objects, _}, ecomet:delete_object(F1) ),
+  ?assertError({has_objects, _}, ecomet:edit_object(F1, #{<<".type">> => string}) ),
+  ?assertError({has_objects, _}, ecomet:delete_object(ParentPattern)),
+
+  ecomet:delete_object(Object1),
+  ecomet:delete_object(F1),
+  ?assertError({badmatch, _}, #{<<"f1">> := _} = ecomet_pattern:get_map(ParentPattern)),
+
+  ?assertError({badmatch, _}, #{<<"f1">> := _} = ecomet_pattern:get_map(ChildPattern)),
+
+  ecomet:delete_object(ChildPattern),
+  ecomet:delete_object(ParentPattern),
+  ok.
+
+
+inherit_manipulation(_Config) ->
+  ecomet_user:on_init_state(),
+  Height = 3,
+  Branches = 2,
+  Patterns1 = ecomet:query("get .path from root where .folder=$oid('/root/.patterns')"),
+  ct:pal("Query result before creating ~p~n", [Patterns1]),
+  create_patterns_tree(Height, Branches, 1, Height),
+  ct:pal("Query result after creating ~p~n", [ecomet:query("get .path from root where .folder=$oid('/root/.patterns')")]),
+
+  Suffix = <<(integer_to_binary(Height))/binary, "_1">>,
+
+  ct:pal("Get children ~p~n",[ecomet_pattern:get_children(ecomet:open(?OID(<<"/root/.patterns/pattern_", Suffix/binary>>)))]),
+  ct:pal("Get recursive children ~p~n",[ecomet_pattern:get_children_recursive(ecomet:open(?OID(<<"/root/.patterns/pattern_", Suffix/binary>>)))]),
+
+  ecomet:delete_object(ecomet:open(?OID(<<"/root/.patterns/pattern_", Suffix/binary>>))),
+
+  Patterns2 = ecomet:query("get .path from root where .folder=$oid('/root/.patterns')"),
+  ct:pal("Query result after super_class deleting ~p~n", [Patterns2]),
+  Patterns1 = Patterns2,
+  ok.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                Helper functions                   %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+create_patterns_tree(0, _ChildNum, _ID, _MaxLevel) ->
+  ok;
+create_patterns_tree(Level, ChildNum, ID, MaxLevel) when Level == MaxLevel ->
+  Suffix = <<(integer_to_binary(Level))/binary, "_", (integer_to_binary(ID))/binary>>,
+  ecomet:create_object(#{
+    <<".name">> => <<"pattern_", Suffix/binary>>,
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<".inherit">> => ?OID(<<"/root/.patterns/.folder">>)
+  }),
+  [begin
+     ChildID = ChildNum * ID - Child,
+     create_patterns_tree(Level - 1, ChildNum, ChildID, MaxLevel)
+   end || Child <- lists:seq(ChildNum - 1, 0, -1)];
+create_patterns_tree(Level, ChildNum, ID, MaxLevel) ->
+  Suffix = <<(integer_to_binary(Level))/binary, "_", (integer_to_binary(ID))/binary>>,
+  ParentID = <<(integer_to_binary(Level + 1))/binary, "_",(integer_to_binary(ID div ChildNum + ID rem ChildNum))/binary>>,
+  ecomet:create_object(#{
+    <<".name">> => <<"pattern_", Suffix/binary>>,
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<".inherit">> => ?OID(<<"/root/.patterns/pattern_", ParentID/binary>>)
+  }),
+  [begin
+     ChildID = ChildNum * ID - Child,
+     create_patterns_tree(Level - 1, ChildNum, ChildID, MaxLevel)
+   end || Child <- lists:seq(ChildNum - 1, 0, -1)].

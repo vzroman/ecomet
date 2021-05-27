@@ -288,7 +288,7 @@ on_edit(Object)->
 
 on_delete(Object)->
   case is_empty(?OID(Object)) of
-    true->ok;
+    true-> [ecomet:delete_object(ecomet:open(ChildID)) || ChildID <- get_children(Object)], ok;
     _->?ERROR(has_objects)
   end.
 
