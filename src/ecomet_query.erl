@@ -455,12 +455,12 @@ on_commit(#ecomet_log{
   Dependencies =
     {'OR',[{<<"dependencies">>,'=',F} || F <- [<<"@ANY@">>|ChangedFields1]]},
 
-  Query = ecomet_resultset:subscription_compile({'AND',[
+  Query = {'AND',[
     Dependencies,
     Index,
     Rights,
     {<<"databases">>,'=',DB}
-  ]}),
+  ]},
 
   % Log with sorted items
   Log1=Log#ecomet_log{
@@ -477,12 +477,14 @@ on_commit(#ecomet_log{
 
   ok.
 
-notify( Query, Log )->
+notify( Filter, Log )->
   Session =
     case ecomet_user:get_session() of
       {ok,S}->S;
       _->none
     end,
+
+  Query = ecomet_resultset:subscription_compile( Filter ),
 
   ecomet_resultset:execute_local(?ROOT,Query, fun(RS)->
     ecomet_resultset:foldl(fun(OID,Acc)->

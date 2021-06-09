@@ -104,9 +104,15 @@ prepare(Conditions)->
 on_init()->
 	% Store the subscription pattern as a persistent term for optimized access
 	PatternID = ?OID(<<"/root/.patterns/.subscription">>),
-	ID=ecomet_object:get_id(PatternID),
-	Bit=ecomet_bitmap:set_bit(none,ID),
+
+	% Calculate the ServiceID
+	DB = ecomet_schema:get_db_id(?ROOT),
+	ServiceID = ecomet_object:get_service_id( DB, PatternID ),
+	Bit=ecomet_bitmap:set_bit(none,ServiceID),
+
+	% Register the ServiceID for the subscriptions
 	persistent_term:put({?MODULE,subscription_pattern},Bit),
+
 	ok.
 
 subscription_prepare(Conditions)->

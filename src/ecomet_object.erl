@@ -35,7 +35,8 @@
   get_node_id/1,
   get_pattern/1,
   get_pattern_oid/1,
-  get_id/1
+  get_id/1,
+  get_service_id/2
 ]).
 
 %%=================================================================
@@ -837,6 +838,14 @@ new_id(FolderID,?ObjectID(_,PatternID))->
 
   ID= ecomet_schema:local_increment({id,PatternID}),
 
+  DB = ecomet_folder:get_db_id( FolderID ),
+
+  ServiceID = get_service_id( DB, { ?PATTERN_PATTERN ,PatternID} ),
+
+  { ServiceID, ID }.
+
+get_service_id( DB, ?ObjectID(_,PatternID) )->
+
   PatternIDH = PatternID bsr ?PATTERN_IDL_LENGTH,
   PatternIDL = PatternID rem (1 bsl ?PATTERN_IDL_LENGTH),
 
@@ -846,11 +855,8 @@ new_id(FolderID,?ObjectID(_,PatternID))->
   % Additionally, to be able to define the database the object is stored in
   % we add the database id to the serviceId too
   NodeID = ecomet_node:get_unique_id(),
-  DB = ecomet_folder:get_db_id( FolderID ),
 
-  ServiceID = ((((PatternIDH bsl ?NODE_ID_LENGTH) + NodeID) bsl ?DB_ID_LENGTH + DB) bsl ?PATTERN_IDL_LENGTH) + PatternIDL,
-
-  { ServiceID, ID }.
+  ((((PatternIDH bsl ?NODE_ID_LENGTH) + NodeID) bsl ?DB_ID_LENGTH + DB) bsl ?PATTERN_IDL_LENGTH) + PatternIDL.
 
 get_db_id(?ObjectID(ServiceID,_))->
   IDH=ServiceID bsr ?PATTERN_IDL_LENGTH,
