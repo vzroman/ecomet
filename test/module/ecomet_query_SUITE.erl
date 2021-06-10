@@ -555,7 +555,7 @@ read_fun_format(_Config)->
 
   %------------List of Links----------------
   #get{value=F7,args=[<<"list_link_field">>],aggregate=undefined}=ecomet_query:read_fun(<<"list_link_field">>,fun ecomet_types:to_string/2),
-  <<"[\"/root/.databases\",\"/root/.patterns\"]">> =F7(#{
+  <<"[<<\"/root/.databases\">>,<<\"/root/.patterns\">>]">> =F7(#{
     <<"list_link_field">>=>[
       ?OID(<<"/root/.databases">>),
       ?OID(<<"/root/.patterns">>)
