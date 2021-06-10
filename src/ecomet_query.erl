@@ -75,6 +75,19 @@
 
 -endif.
 
+-define(TRANSACTION(Fun),
+  case ecomet_transaction:get_type() of
+    _T when _T=:=none;_T=:=dirty->
+      ?LOGDEBUG("start internal transaction"),
+      case ecomet_transaction:internal_sync(Fun) of
+        {ok,_TResult}->_TResult;
+        {error,_TError}->?ERROR(_TError)
+      end;
+    _->
+      ?LOGDEBUG("skip transaction"),
+      Fun()
+  end).
+
 %%=====================================================================
 %%
 %%			API
@@ -166,7 +179,14 @@ get(DBs,Fields,Conditions,Params) when is_list(Params)->
 get(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(get,Fields,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-  execute(CompiledQuery,DBs,Union).
+  case maps:get(lock,Params,none) of
+    none ->
+      % All operations are dirty - no need to start transaction
+      execute(CompiledQuery,DBs,Union);
+    _->
+      % Operations require locks - wrap the query into transactions
+      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
+  end.
 
 system(DBs,Fields,Conditions)->
   Conditions1=ecomet_resultset:prepare(Conditions),
@@ -521,7 +541,15 @@ set(DBs,Fields,Conditions,Params) when is_list(Params)->
 set(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(set,Fields,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-  execute(CompiledQuery,DBs,Union).
+
+  case maps:get(lock,Params,none) of
+    none ->
+      % All operations are dirty - no need to start transaction
+      execute(CompiledQuery,DBs,Union);
+    _->
+      % Operations require locks - wrap the query into transactions
+      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
+  end.
 
 %%=====================================================================
 %%	INSERT
@@ -567,7 +595,15 @@ delete(DBs,Conditions,Params) when is_list(Params)->
 delete(DBs,Conditions,Params)->
   CompiledQuery=compile(delete,none,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-  execute(CompiledQuery,DBs,Union).
+
+  case maps:get(lock,Params,none) of
+    none ->
+      % All operations are dirty - no need to start transaction
+      execute(CompiledQuery,DBs,Union);
+    _->
+      % Operations require locks - wrap the query into transactions
+      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
+  end.
 %%=====================================================================
 %%	COMPILE
 %%=====================================================================
