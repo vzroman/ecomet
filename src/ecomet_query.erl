@@ -626,7 +626,12 @@ compile(Type,Fields,Conditions,Params)->
 execute(CompiledQuery,DBs)->
   execute(CompiledQuery,DBs,{'OR',ecomet_resultset:new()}).
 execute(#compiled_query{conditions = Conditions,map = Map,reduce = Reduce},DBs,Union)->
-  ecomet_resultset:execute(DBs,Conditions,Map,Reduce,Union).
+  DBs1=
+    case DBs of
+      '*'-> ecomet_db:get_databases();
+      _-> DBs
+    end,
+  ecomet_resultset:execute(DBs1,Conditions,Map,Reduce,Union).
 
 %%-------------GET------------------------------------------------
 %% Search params is a map:
