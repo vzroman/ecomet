@@ -224,6 +224,7 @@ delete(#object{oid=OID}=Object)->
         none->
           % Queue the procedure.
           ?TRANSACTION( fun()->
+            get_lock( write, Object, none ),
             save(Object#object{ deleted=true },Fields,on_delete)
           end );
         _->
@@ -424,7 +425,10 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
   NewFields=ecomet_field:merge(Map,OldFields,Fields),
   case ecomet_transaction:dict_get({OID,handler},none) of
     none->
-      ?TRANSACTION(fun()->save(Object,NewFields,on_edit) end );
+      ?TRANSACTION(fun()->
+        get_lock(write,Object,none),
+        save(Object,NewFields,on_edit)
+      end );
     _->
       % If object is under behaviour handlers, just save changes to the dict
       ecomet_transaction:dict_put([{{OID,fields},NewFields}])
