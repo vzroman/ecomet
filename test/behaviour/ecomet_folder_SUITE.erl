@@ -335,9 +335,9 @@ on_delete_test(_Config) ->
   % We delete Folder1
   % Because Folder1 contain other Folders, other Folders will be deleted with Folder1%
   ecomet:delete_object(Folder1),
-  ?assertError({badmatch,{error,invalid_path}}, ?OID(<<"/root/Chester">>)),
-  ?assertError({badmatch,{error,invalid_path}}, ?OID(<<"/root/Chester/LightBringer">>)),
-  ?assertError({badmatch,{error,invalid_path}},  ?OID(<<"/root/Chester/Arthas">>)),
-  ?assertError({badmatch,{error,invalid_path}}, ?OID(<<"/root/Chester/Arthas/Illidan">>)),
+  ?assertError({badmatch,{error,{invalid_path,<<"/root/Chester">>}}}, ?OID(<<"/root/Chester">>)),
+  ?assertError({badmatch,{error,{invalid_path,<<"/root/Chester/LightBringer">>}}}, ?OID(<<"/root/Chester/LightBringer">>)),
+  ?assertError({badmatch,{error,{invalid_path,<<"/root/Chester/Arthas">>}}},  ?OID(<<"/root/Chester/Arthas">>)),
+  ?assertError({badmatch,{error,{invalid_path,<<"/root/Chester/Arthas/Illidan">>}}}, ?OID(<<"/root/Chester/Arthas/Illidan">>)),
   ok
 .

@@ -188,12 +188,9 @@ lock(?LOCKKEY(_,_,_,_)=LockKey,Level,Timeout) when is_integer(Timeout)->
   case get(?TKEY) of
     undefined->?ERROR(no_transaction);
     #state{locks=Locks,type=TType}=State->
-      case add_lock(LockKey,Level,Locks,TType,Timeout) of
-        {ok,Lock}->
-          put(?TKEY,State#state{locks=Locks#{LockKey=>Lock}}),
-          {ok,Lock#lock.value};
-        {error,Error}->{error,Error}
-      end
+      Lock = add_lock(LockKey,Level,Locks,TType,Timeout),
+      put(?TKEY,State#state{locks=Locks#{LockKey=>Lock}}),
+      Lock#lock.value
   end;
 lock(?LOCKKEY(_,_,_,_)=LockKey,Level,_Timeout)->
   lock(LockKey,Level,?LOCKTIMEOUT).
@@ -206,8 +203,8 @@ add_lock(Key,LockLevel,Locks,TType,Timeout)->
     {ok,Lock}->
       case {LockLevel,Lock#lock.level} of
         % No need to upgrade
-        {read,_}->{ok,Lock};
-        {write,write}->{ok,Lock};
+        {read,_}->Lock;
+        {write,write}->Lock;
         % Upgrade needed
         {write,read}->upgrade_lock(TType,Key,LockLevel,Lock,Timeout)
       end
@@ -215,20 +212,31 @@ add_lock(Key,LockLevel,Locks,TType,Timeout)->
 
 % Acquire lock for internal transaction
 get_lock(internal,?LOCKKEY(DB,Storage,Type,Key),LockLevel,_Timeout)->
-  Value= ecomet_backend:read(DB,Storage,Type,Key,LockLevel),
-  {ok,#lock{value=Value,level=LockLevel,pid=internal}};
+  case ecomet_backend:read(DB,Storage,Type,Key,LockLevel) of
+    not_found->
+      ?ERROR(not_found);
+    Value->
+      #lock{value=Value,level=LockLevel,pid=internal}
+  end;
 % External transaction uses stick locks
 get_lock(external,Key,LockLevel,Timeout)->
   Self=self(),
   PID=spawn(fun()->stick_lock(Self,Key,LockLevel) end),
   wait_stick_lock(PID,Timeout).
 wait_stick_lock(PID,Timeout)->
+  Trap = process_flag(trap_exit,true),
   receive
-    {ecomet_stick_lock,Lock} when Lock#lock.pid==PID->{ok,Lock}
+    {ecomet_stick_lock,Lock} when Lock#lock.pid==PID->
+      process_flag(trap_exit,Trap),
+      Lock;
+    {'EXIT',PID,Reason}->
+      process_flag(trap_exit,Trap),
+      ?ERROR(Reason)
   after
     Timeout->
+      process_flag(trap_exit,Trap),
       exit(PID,timeout),
-      {error,timeout}
+      ?ERROR(timeout)
   end.
 
 upgrade_lock(internal,Key,LockLevel,_Lock,Timeout)->
@@ -239,24 +247,31 @@ upgrade_lock(external,_Key,LockLevel,#lock{pid=PID},Timeout)->
 
 % Executed in context of linked process
 stick_lock(Holder,Key,LockLevel)->
-  ecomet_backend:transaction(fun()->
-    {ok,Lock}=get_lock(internal,Key,LockLevel,timeout_not_used),
+  link(Holder),
+  case ecomet_backend:transaction(fun()->
+    Lock=get_lock(internal,Key,LockLevel,timeout_not_used),
     Holder!{ecomet_stick_lock,Lock#lock{pid=self()}},
     wait_release(Key,Holder)
-  end).
+  end) of
+    {ok,_}->
+      unlink(Holder);
+    {error, not_found}->
+      exit(not_found);
+    {error, {not_found,_Stack}}->
+      exit(not_found);
+    {error, Error}->
+      exit(Error)
+  end.
 wait_release(Key,Holder)->
-  link(Holder),
   process_flag(trap_exit,true),
   receive
   % Finish process
     release->ok;
-  % Parent finished
+    % Parent finished
     {'EXIT',Holder,Reason}->exit(Reason);
     {upgrade,NewLockLevel}->
       % Use unlink because this process can be killed by timeout
-      process_flag(trap_exit,false),
-      unlink(Holder),
-      {ok,Lock}=get_lock(internal,Key,NewLockLevel,timeout_not_used),
+      Lock=get_lock(internal,Key,NewLockLevel,timeout_not_used),
       Holder!{ecomet_stick_lock,Lock#lock{pid=self()}},
       wait_release(Key,Holder)
   end.

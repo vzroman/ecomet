@@ -262,6 +262,37 @@ open(OID,Lock,Timeout)->
   end,
   Object.
 
+%%open_stick( OID )->
+%%
+%%  Object0 = #object{
+%%    db = DB,
+%%    map = Map
+%%  } =
+%%    case ecomet:is_transaction() of
+%%      true-> ?ERROR( is_transaction );
+%%      _->
+%%        Obj0 = construct( OID ),
+%%        case check_rights( Obj0 ) of
+%%          write->Obj0#object{edit=true};
+%%          _->?ERROR(access_denied)
+%%        end
+%%    end,
+%%
+%%  % Load storage types that are not loaded yet
+%%  Storage=
+%%    [ case ecomet_backend:dirty_read(DB,?DATA,Type,OID) of
+%%        not_found -> { Type, #{} };
+%%        Loaded -> { Type, Loaded }
+%%      end || Type <- ecomet_pattern:get_storage_types(Map) ],
+%%
+%%  BackTags =
+%%    [ { Type, Tags } || { Type, #{ tags := Tags} } <- Storage ],
+%%
+%%  {[], Tags, [], _ }= ecomet_index:build_index(OID,Map,[], maps:from_list(BackTags) ),
+%%  Rights = [ V || {<<".readgroups">>,V,_} <- Tags],
+%%
+%%  Object.
+
 % Read field value
 read_field(#object{oid=OID,map=Map}=Object,Field)->
   case ?SERVICE_FIELDS of
@@ -895,15 +926,12 @@ get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
   Key = ecomet_transaction:lock_key(DB,?DATA,Type,OID),
 
   % Set lock on main backtag storage
-  case ecomet_transaction:lock(Key,Lock,Timeout) of
-    {ok,Storage}->
-      % Put object and loaded storage to dict
-      ecomet_transaction:dict_put([
-        {{OID,object},Object},
-        {{OID,Type},Storage}
-      ]);
-    { error, Error }->?ERROR(Error)
-  end.
+  Storage = ecomet_transaction:lock(Key,Lock,Timeout),
+
+  ecomet_transaction:dict_put([
+    {{OID,object},Object},
+    {{OID,Type},Storage}
+  ]).
 
 get_lock_key(OID,Map)->
   DB = get_db_name(OID),
