@@ -53,6 +53,7 @@
   read_field/2,read_field/3,read_fields/2,read_fields/3,
   read_all/1,read_all/2,
   field_changes/2,
+  object_changes/1,
   field_type/2,
   is_object/1,
   is_oid/1,
@@ -224,6 +225,7 @@ delete(#object{oid=OID}=Object)->
         none->
           % Queue the procedure.
           ?TRANSACTION( fun()->
+            get_lock( write, Object, none ),
             save(Object#object{ deleted=true },Fields,on_delete)
           end );
         _->
@@ -261,6 +263,37 @@ open(OID,Lock,Timeout)->
     true->ok
   end,
   Object.
+
+%%open_stick( OID )->
+%%
+%%  Object0 = #object{
+%%    db = DB,
+%%    map = Map
+%%  } =
+%%    case ecomet:is_transaction() of
+%%      true-> ?ERROR( is_transaction );
+%%      _->
+%%        Obj0 = construct( OID ),
+%%        case check_rights( Obj0 ) of
+%%          write->Obj0#object{edit=true};
+%%          _->?ERROR(access_denied)
+%%        end
+%%    end,
+%%
+%%  % Load storage types that are not loaded yet
+%%  Storage=
+%%    [ case ecomet_backend:dirty_read(DB,?DATA,Type,OID) of
+%%        not_found -> { Type, #{} };
+%%        Loaded -> { Type, Loaded }
+%%      end || Type <- ecomet_pattern:get_storage_types(Map) ],
+%%
+%%  BackTags =
+%%    [ { Type, Tags } || { Type, #{ tags := Tags} } <- Storage ],
+%%
+%%  {[], Tags, [], _ }= ecomet_index:build_index(OID,Map,[], maps:from_list(BackTags) ),
+%%  Rights = [ V || {<<".readgroups">>,V,_} <- Tags],
+%%
+%%  Object.
 
 % Read field value
 read_field(#object{oid=OID,map=Map}=Object,Field)->
@@ -393,7 +426,10 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
   NewFields=ecomet_field:merge(Map,OldFields,Fields),
   case ecomet_transaction:dict_get({OID,handler},none) of
     none->
-      ?TRANSACTION(fun()->save(Object,NewFields,on_edit) end );
+      ?TRANSACTION(fun()->
+        get_lock(write,Object,none),
+        save(Object,NewFields,on_edit)
+      end );
     _->
       % If object is under behaviour handlers, just save changes to the dict
       ecomet_transaction:dict_put([{{OID,fields},NewFields}])
@@ -440,6 +476,10 @@ parse_fields(Formatter,Map,Fields)->
 field_changes(#object{oid=OID,map=Map},Field)->
   Fields=ecomet_transaction:dict_get({OID,fields},#{}),
   ecomet_field:field_changes(Map,Fields,OID,Field).
+
+% Check changes for the field within the transaction
+object_changes(#object{oid=OID})->
+  ecomet_transaction:dict_get({OID,fields},#{}).
 
 field_type(#object{map=Map},Field)->
   case ?SERVICE_FIELDS of
@@ -895,15 +935,12 @@ get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
   Key = ecomet_transaction:lock_key(DB,?DATA,Type,OID),
 
   % Set lock on main backtag storage
-  case ecomet_transaction:lock(Key,Lock,Timeout) of
-    {ok,Storage}->
-      % Put object and loaded storage to dict
-      ecomet_transaction:dict_put([
-        {{OID,object},Object},
-        {{OID,Type},Storage}
-      ]);
-    { error, Error }->?ERROR(Error)
-  end.
+  Storage = ecomet_transaction:lock(Key,Lock,Timeout),
+
+  ecomet_transaction:dict_put([
+    {{OID,object},Object},
+    {{OID,Type},Storage}
+  ]).
 
 get_lock_key(OID,Map)->
   DB = get_db_name(OID),

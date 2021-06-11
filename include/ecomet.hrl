@@ -35,6 +35,7 @@
 
 -define(BITSTRING_LENGTH,65536).
 -define(MAX_NODES,65535).
+-define(ROUTER_POOL_SIZE, 128).
 
 -record(kv,{key,value}).
 -record(ecomet_log,{
