@@ -409,6 +409,9 @@ init([])->
   ok = ecomet_session:on_start_node(node()),
 
   % Initialize subscriptions optimization
+  ok = ecomet_router:on_init( ?ENV( router_pool_size, ?ROUTER_POOL_SIZE ) ),
+
+  % Initialize subscriptions optimization
   ok = ecomet_resultset:on_init(),
 
   Cycle=?ENV(schema_server_cycle,?DEFAULT_SCHEMA_CYCLE),
