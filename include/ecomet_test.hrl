@@ -36,7 +36,8 @@
 -define(START_DEPENDENCIES,[
   begin
     ct:pal("starting ~p",[D]),
-    ok = application:start(D)
+    {ok,_} = application:ensure_all_started(D),
+    ok = application:ensure_started(D)
   end|| D <- ?DEPENDENCIES ]).
 
 -define(STOP_DEPENDENCIES,[
