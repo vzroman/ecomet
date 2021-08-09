@@ -110,7 +110,12 @@ set_ready(Node,Value)->
 is_master()->
   is_master(node()).
 is_master(Node)->
-  case get_ready_nodes() of
+  Nodes =
+    [ N || N <- get_ready_nodes(), case ecomet:read_field(ecomet:open(<<"/root/.nodes/",(atom_to_binary(N,utf8))/binary>>), <<"is_ready">> ) of
+      {ok, true}-> true;
+      _ -> false
+      end],
+  case Nodes of
     [Node|_]->
       % The master is the first node in the list of ready nodes
       true;
