@@ -139,6 +139,10 @@ from_string(integer,Value) when is_binary(Value)->
   binary_to_integer(Value);
 from_string(integer,Value) when is_list(Value)->
   list_to_integer(Value);
+from_string(integer,true)->
+  1;
+from_string(integer,false)->
+  0;
 from_string(integer,Invalid)->
   ?ERROR(Invalid);
 %---------Float----------------------
@@ -156,6 +160,10 @@ from_string(float,Value) when is_list(Value)->
   catch
     _:_->1.0*list_to_integer(Value)
   end;
+from_string(float,true)->
+  1.0;
+from_string(float,false)->
+  0.0;
 from_string(float,Invalid)->
   ?ERROR(Invalid);
 %---------Bool----------------------
