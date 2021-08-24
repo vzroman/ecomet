@@ -78,6 +78,19 @@ get_attached_nodes()->
 get_ready_nodes()->
   dlss:get_ready_nodes().
 
+update_ready( Node )->
+  case [N || N <- get_configured_nodes(), N=:=Node] of
+    [Node]->
+      IsReady =
+        case [N || N <- get_ready_nodes(), N=:=Node] of
+          [Node] -> true;
+          _ -> false
+        end,
+      set_ready( Node, IsReady );
+    _->
+      ?LOGWARNING("~p is not in the schema yet",[Node])
+  end.
+
 attach_node(Node) when is_atom(Node)->
   dlss:add_node(Node);
 attach_node(Node) when is_binary(Node)->
@@ -125,6 +138,9 @@ is_master(Node)->
 
 
 sync()->
+
+  update_ready( node() ),
+
   case is_master() of
     true->
       % Schema synchronization. Project ecomet schema objects into dlss configuration
@@ -136,10 +152,6 @@ sync()->
 
       % Detach removed nodes
       [detach_node(N) || N <- Attached -- Configured],
-
-      % Update ready nodes
-      Ready = get_ready_nodes(),
-      [set_ready(N, lists:member(N, Ready) ) || N <- Configured ],
 
       ok;
     _->
