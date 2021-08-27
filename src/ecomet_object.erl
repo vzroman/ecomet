@@ -49,7 +49,7 @@
   construct/1,
   edit/2,edit/3,
   dirty_edit/2,dirty_edit/3,
-  copy/2,
+  copy/2, copy/3,
   read_field/2,read_field/3,read_fields/2,read_fields/3,
   read_all/1,read_all/2,
   field_changes/2,
@@ -464,6 +464,10 @@ copy(Object, Replace)->
   Original = read_all(Object),
   New = maps:merge(Original, Replace),
   create(New).
+copy(Object, Replace, Params)->
+  Original = read_all(Object),
+  New = maps:merge(Original, Replace),
+  create(New, Params).
 
 parse_fields(Formatter,Map,Fields)->
   maps:map(fun(Name,Value)->

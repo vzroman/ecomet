@@ -41,7 +41,7 @@
   edit_object/2,edit_object/3,
   dirty_edit_object/2,dirty_edit_object/3,
   delete_object/1,
-  copy_object/2
+  copy_object/2, copy_object/3
 ]).
 
 
@@ -246,6 +246,10 @@ delete_object(Object)->
 copy_object(ID, Overwrite)->
   Object = ecomet_lib:to_object(ID),
   ecomet_object:copy(Object, Overwrite).
+
+copy_object(ID, Overwrite, Params)->
+  Object = ecomet_lib:to_object(ID),
+  ecomet_object:copy(Object, Overwrite, Params).
 
 %%=================================================================
 %%	Query API
