@@ -36,6 +36,7 @@
 -define(BITSTRING_LENGTH,65536).
 -define(MAX_NODES,65535).
 -define(ROUTER_POOL_SIZE, 128).
+-define(PROCESS_MEMORY_LIMIT, 100). %MB
 
 -record(kv,{key,value}).
 -record(ecomet_log,{

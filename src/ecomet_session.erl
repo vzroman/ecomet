@@ -22,6 +22,8 @@
 -behaviour(gen_server).
 
 -define(TIMEOUT,30000).
+-define(MB,1048576).
+
 %%=================================================================
 %%	Service API
 %%=================================================================
@@ -104,6 +106,16 @@ remove_subscription(ID)->
 %%	OTP
 %%=================================================================
 start_link(Context,Info)->
+
+  % Limit the user process by memory
+  WordSize = erlang:system_info(wordsize),
+  MemoryLimit = ?ENV(process_memory_limit, ?PROCESS_MEMORY_LIMIT),
+  process_flag(max_heap_size, #{
+    size => (MemoryLimit div WordSize) * ?MB,
+    kill => true,
+    error_logger => true
+  }),
+
   gen_server:start_link(?MODULE, [Context,Info,self()], []).
 
 stop(Session,Reason)->
