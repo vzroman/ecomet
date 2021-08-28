@@ -544,6 +544,7 @@ check_rights(Read,Write,Move)->
   end.
 
 check_move( #object{move=CanMove}=Object, EditFields )->
+  % check folder
   case EditFields of
     #{<<".folder">>:=NewFolder}->
       case read_field( Object, <<".folder">> ) of
@@ -566,7 +567,23 @@ check_move( #object{move=CanMove}=Object, EditFields )->
       end;
     _->
       ok
-  end.
+  end,
+
+  % check name
+  case EditFields of
+    #{<<".name">>:=NewName}->
+      case read_field( Object, <<".name">> ) of
+        {ok, NewName}-> ok;
+        _ when CanMove->
+          ok;
+        _->
+          ?ERROR(access_denied)
+      end;
+    _->
+      ok
+  end,
+
+  ok.
 
 get_behaviours(#object{map=Map})->
   ecomet_pattern:get_behaviours(Map).
