@@ -241,5 +241,5 @@ is_admin([GID|Rest])->
     <<".administrators">>->true;
     _->is_admin(Rest)
   end;
-is_admin([])->
+is_admin(_)->
   false.

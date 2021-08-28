@@ -102,7 +102,7 @@
 }).
 
 % @edoc handler of ecomet object
--record(object, {oid, edit, map, deleted=false, db}).
+-record(object, {oid, edit, move, map, deleted=false, db}).
 
 -type object_handler() :: #object{}.
 -export_type([object_handler/0]).
@@ -179,8 +179,8 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
     <<".contentreadgroups">>=>none,
     <<".contentwritegroups">>=>none
   }),
-  case check_rights(Read,Write) of
-    write ->
+  case check_rights(Read,Write,none) of
+    {write,_} ->
       % Get the schema of the object type
       Map=ecomet_pattern:get_map(PatternID),
       % Inherit rights
@@ -207,34 +207,23 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
 
 % Delete an object
 delete(#object{edit=false})->?ERROR(access_denied);
+delete(#object{move=false})->?ERROR(access_denied);
 delete(#object{oid=OID}=Object)->
-  % Check the rights on the containing folder
-  {ok,FolderID}=read_field(Object,<<".folder">>),
-  #{
-    <<".contentreadgroups">>:=Read,
-    <<".contentwritegroups">>:=Write
-  } = read_fields(construct(FolderID),#{
-    <<".contentreadgroups">>=>none,
-    <<".contentwritegroups">>=>none
-  }),
-  case check_rights(Read,Write) of
-    write ->
-      % Check if the object is under on_create or on_edit procedure at the moment
-      Fields=ecomet_transaction:dict_get({OID,fields},#{}),
-      case ecomet_transaction:dict_get({OID,handler},none) of
-        none->
-          % Queue the procedure.
-          ?TRANSACTION( fun()->
-            get_lock( write, Object, none ),
-            save(Object#object{ deleted=true },Fields,on_delete)
-          end );
-        _->
-          % Object can not be deleted? if it is under behaviour handlers
-          ?ERROR(behaviours_run)
-      end;
-    _->?ERROR(access_denied)
-  end,
-  ok.
+
+  % Check if the object is under on_create or on_edit procedure at the moment
+  Fields=ecomet_transaction:dict_get({OID,fields},#{}),
+  case ecomet_transaction:dict_get({OID,handler},none) of
+    none->
+      % Queue the procedure.
+      ?TRANSACTION( fun()->
+        get_lock( write, Object, none ),
+        save(Object#object{ deleted=true },Fields,on_delete),
+        ok
+      end );
+    _->
+      % Object can not be deleted? if it is under behaviour handlers
+      ?ERROR(behaviours_run)
+  end.
 
 % Open object
 open(OID)->open(OID,none,none).
@@ -248,8 +237,8 @@ open(OID,Lock,Timeout)->
         New=construct(OID),
         case check_rights(New) of
           none->?ERROR(access_denied);
-          read->New#object{edit=false};
-          write->New#object{edit=true}
+          {read,CanMove}->New#object{edit = false, move = CanMove};
+          {write,CanMove}->New#object{edit = true, move = CanMove }
         end;
       % Object is deleted
       #object{deleted=true}->?ERROR(object_deleted);
@@ -424,6 +413,10 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
   OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
 
   NewFields=ecomet_field:merge(Map,OldFields,Fields),
+
+  % Check user rights for moving object
+  check_move( Object, NewFields ),
+
   case ecomet_transaction:dict_get({OID,handler},none) of
     none->
       ?TRANSACTION(fun()->
@@ -450,6 +443,10 @@ dirty_edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
   OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
 
   NewFields=ecomet_field:merge(Map,OldFields,Fields),
+
+  % Check user rights for moving object
+  check_move( Object, NewFields ),
+
   case ecomet_transaction:dict_get({OID,handler},none) of
     none->
       ?DIRTY_TRANSACTION(fun()->save(Object,NewFields,on_edit) end );
@@ -508,31 +505,67 @@ get_oid(#object{oid=OID})->OID.
 check_rights(#object{}=Object)->
   #{
     <<".readgroups">>:=Read,
-    <<".writegroups">>:=Write
+    <<".writegroups">>:=Write,
+    <<".contentwritegroups">>:=Move
   } = read_fields(Object,#{
     <<".readgroups">> => none,
-    <<".writegroups">> => none
+    <<".writegroups">> => none,
+    <<".contentwritegroups">> => none
   }),
-  check_rights(Read,Write);
+  check_rights(Read,Write,Move);
 check_rights(OID)->
   check_rights(construct(OID)).
 
-check_rights(Read,Write)->
+check_rights(Read,Write,Move)->
   case ecomet_user:is_admin() of
     {error,Error}->?ERROR(Error);
-    {ok,true}->write;
+    {ok,true}->{write,true};
     {ok,false}->
+
       {ok,UserGroups}=ecomet_user:get_usergroups(),
+
+      MoveGroups=if is_list(Move)->Move; true->[] end,
+      CanMove =
+        case ordsets:intersection(UserGroups,MoveGroups) of
+          []->false;
+          _->true
+        end,
+
       WriteGroups=if is_list(Write)->Write; true->[] end,
       case ordsets:intersection(UserGroups,WriteGroups) of
         []->
           ReadGroups=if is_list(Read)->Read; true->[] end,
           case ordsets:intersection(UserGroups,ReadGroups) of
             []->none;
-            _->read
+            _->{ read, CanMove}
           end;
-        _->write
+        _->{ write, CanMove}
       end
+  end.
+
+check_move( #object{move=CanMove}=Object, EditFields )->
+  case EditFields of
+    #{<<".folder">>:=NewFolder}->
+      case read_field( Object, <<".folder">> ) of
+        {ok, NewFolder}-> ok;
+        _ when CanMove->
+          % Check rights
+          #{
+            <<".contentreadgroups">>:=Read,
+            <<".contentwritegroups">>:=Write
+          } = read_fields(construct(NewFolder),#{
+            <<".contentreadgroups">>=>none,
+            <<".contentwritegroups">>=>none
+          }),
+          case check_rights( Read, Write, none ) of
+            {write,_}-> ok;
+            _-> ?ERROR(access_denied)
+          end;
+        _->
+          ?ERROR(access_denied)
+      end;
+    _->
+      ok
   end.
 
 get_behaviours(#object{map=Map})->
@@ -956,7 +989,7 @@ construct(OID)->
   PatternID=get_pattern_oid(OID),
   Map=ecomet_pattern:get_map(PatternID),
   DB = get_db_name(OID),
-  #object{oid=OID,edit=false,map=Map,db=DB}.
+  #object{oid=OID,edit=false,move=false,map=Map,db=DB}.
 
 put_empty_storages(OID,Map)->
   StorageTypes = [{{OID,Storage},none} || Storage<-ecomet_pattern:get_storage_types(Map) ],
