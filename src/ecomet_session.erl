@@ -108,13 +108,27 @@ remove_subscription(ID)->
 start_link(Context,Info)->
 
   % Limit the user process by memory
-  WordSize = erlang:system_info(wordsize),
-  MemoryLimit = ?ENV(process_memory_limit, ?PROCESS_MEMORY_LIMIT),
-  process_flag(max_heap_size, #{
-    size => (MemoryLimit div WordSize) * ?MB,
-    kill => true,
-    error_logger => true
-  }),
+  MemoryLimit=
+    case Info of
+      #{memory_limit := false}->
+        false;
+      #{memory_limit := Limit} when is_integer(Limit)->
+        Limit;
+      _->
+        ?ENV(process_memory_limit, ?PROCESS_MEMORY_LIMIT)
+    end,
+
+  if
+    is_integer(MemoryLimit) ->
+      WordSize = erlang:system_info(wordsize),
+      process_flag(max_heap_size, #{
+        size => (MemoryLimit div WordSize) ,%* ?MB,
+        kill => true,
+        error_logger => true
+      });
+    true ->
+      ignore
+  end,
 
   gen_server:start_link(?MODULE, [Context,Info,self()], []).
 
