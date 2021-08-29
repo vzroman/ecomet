@@ -122,7 +122,7 @@ start_link(Context,Info)->
     is_integer(MemoryLimit) ->
       WordSize = erlang:system_info(wordsize),
       process_flag(max_heap_size, #{
-        size => (MemoryLimit div WordSize) ,%* ?MB,
+        size => (MemoryLimit div WordSize) * ?MB,
         kill => true,
         error_logger => true
       });
