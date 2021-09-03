@@ -324,6 +324,11 @@ build_leaf({'=',<<".path">>,Value})->
 		_->
 			?ERROR({invalid_path,Value})
 	end;
+build_leaf({'LIKE',<<".path">>,Value})->
+	{'OR',[
+		build_leaf({'LIKE',<<".name">>,Value})
+		|[build_leaf({'=',<<".folder">>,OID}) || OID <- ecomet_folder:find_recursive( Value )]
+	],'UNDEFINED'};
 build_leaf({'=',<<".oid">>,Value})->
 	Object = ecomet_object:construct(Value),
 	#{

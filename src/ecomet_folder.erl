@@ -29,6 +29,7 @@
   oid2path/1,
   path2oid/1,
   find_object/2,find_object_system/2,
+  find_recursive/1,
   get_db_id/1,
   get_db_name/1,
   find_mount_points/1,
@@ -112,6 +113,18 @@ find_object_system(FolderID,Name)->
     [OID|_]-> { ok, OID };
     _->{ error, not_found }
   end.
+
+find_recursive( Value )->
+  Root = ecomet:get('*',[<<".oid">>],{'AND',[
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.folder">>)},
+    {<<".name">>,'LIKE',Value}
+  ]}),
+  maps:keys(find_recursive( Root, #{} )).
+find_recursive( [FolderID|Rest], Acc )->
+  find_recursive( Rest , find_recursive( get_content( FolderID ), Acc#{ FolderID => true } ) );
+find_recursive( [], Acc )->
+  Acc.
+
 
 get_content(Folder)->
   DB = ecomet_object:get_db_name(Folder),
