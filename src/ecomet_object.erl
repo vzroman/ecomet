@@ -193,7 +193,7 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
 
       % Generate new ID for the object
       OID=new_id(FolderID,PatternID),
-      Object=#object{ oid=OID, edit=true, map=Map, db=get_db_name(OID) },
+      Object=#object{ oid=OID, edit=true, move=true, map=Map, db=get_db_name(OID) },
 
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
