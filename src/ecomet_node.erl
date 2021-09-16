@@ -26,9 +26,10 @@
 %%=================================================================
 -export([
   get_unique_id/0,
-  get_configured_nodes/0,
+  get_configured_nodes/0,get_configured_nodes/1,
   get_attached_nodes/0,
   get_ready_nodes/0,
+  is_master/0, is_master/1,
   attach_node/1,
   detach_node/1,
   set_ready/2,
@@ -69,6 +70,14 @@ get_configured_nodes()->
   {_Header,Result}=ecomet_query:system([?ROOT],[{fun([N])->binary_to_atom(N,utf8) end,[<<".name">>]}],{'AND',[
     {<<".pattern">>,':=',?OID(<<"/root/.patterns/.node">>)},
     {<<".folder">>,'=',?OID(<<"/root/.nodes">>)}
+  ]}),
+  [N||[N]<-Result].
+
+get_configured_nodes( Filter )->
+  {_Header,Result}=ecomet_query:system([?ROOT],[{fun([N])->binary_to_atom(N,utf8) end,[<<".name">>]}],{'AND',[
+    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.node">>)},
+    {<<".folder">>,'=',?OID(<<"/root/.nodes">>)},
+    Filter
   ]}),
   [N||[N]<-Result].
 
@@ -152,6 +161,12 @@ sync()->
 
       % Detach removed nodes
       [detach_node(N) || N <- Attached -- Configured],
+
+      % Update ready nodes
+      BackendReady = get_ready_nodes(),
+      DBReady = get_configured_nodes({<<"is_ready">>,'=',true}),
+      [ set_ready( N, true ) || N <- BackendReady -- DBReady ],
+      [ set_ready( N, false ) || N <- DBReady -- BackendReady ],
 
       ok;
     _->
