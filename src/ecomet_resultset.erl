@@ -325,10 +325,7 @@ build_leaf({'=',<<".path">>,Value})->
 			?ERROR({invalid_path,Value})
 	end;
 build_leaf({'LIKE',<<".path">>,Value})->
-	{'OR',[
-		build_leaf({'LIKE',<<".name">>,Value})
-		|[build_leaf({'=',<<".folder">>,OID}) || OID <- ecomet_folder:find_recursive( Value )]
-	],'UNDEFINED'};
+	path_recursive_search( binary:split(Value, <<"/">>, [global]) );
 build_leaf({'=',<<".oid">>,Value})->
 	Object = ecomet_object:construct(Value),
 	#{
@@ -1167,4 +1164,112 @@ set_query_field({'ANDNOT',Item1,Item2},Field)->
 	{'ANDNOT',{set_query_field(Item1,Field),set_query_field(Item2,Field)},'UNDEFINED'};
 set_query_field(Item,Field)->
 	{'TAG',{Field,Item,datetime},'UNDEFINED'}.
+
+
+%%=====================================================================
+%%	Recursive search by path
+%%=====================================================================
+path_recursive_search([Name])->
+	% Search only by name
+	NameLength = length( unicode:characters_to_list(Name) ),
+	if
+		NameLength >= 3 ->
+			% We use fuzzy search if the string is 3 symbols or more
+			Roots = ecomet:get('*',[<<".oid">>],{'AND',[
+				{<<".pattern">>,'=',?OID(<<"/root/.patterns/.folder">>)},
+				{<<".name">>,'LIKE',Name}
+			]}),
+			{'OR',[
+				build_leaf({'LIKE',<<".name">>,Name})
+				|[build_leaf({'=',<<".folder">>,OID}) || OID <- ecomet_folder:get_content_recursive( Roots )]
+			],'UNDEFINED'};
+		true ->
+			% Otherwise only exact search
+			Roots = ecomet:get('*',[<<".oid">>],{'AND',[
+				{<<".pattern">>,'=',?OID(<<"/root/.patterns/.folder">>)},
+				{<<".name">>,'=',Name}
+			]}),
+			{'OR',[
+				build_leaf({'=',<<".name">>,Name})
+				|[build_leaf({'=',<<".folder">>,OID}) || OID <- ecomet_folder:get_content_recursive( Roots )]
+			],'UNDEFINED'}
+	end;
+
+path_recursive_search( [Root|TailPath] )->
+	case find_roots( Root ) of
+		[]->
+			% There are no folders fitting a root
+			empty_tag();
+		RootFolders->
+
+			% Find possible starting points
+			{ExactTail, [ItemName]} = lists:split(length(TailPath) -1, TailPath),
+			case [F || {ok,F}<-[ ecomet_folder:path2oid(R, ExactTail) || R <- RootFolders ]] of
+				[]->
+					% Nothing can be found as there are no folders with a path that satisfies the query
+					empty_tag();
+				StartPoints->
+					% Find possible entry points
+					TailNameLength = length( unicode:characters_to_list( ItemName ) ),
+					if
+						TailNameLength >= 2 ->
+							case ecomet_query:system('*',[<<".oid">>],{'AND',[
+								{'OR',[{<<".folder">>,'=',OID} || OID <- StartPoints]},
+								{<<".name">>,'LIKE',<<"^",ItemName/binary>>}
+							]}) of
+								[]->
+									% No satisfying entry points, nothing can be found
+									{'TAG',{<<".name">>,none,'simple'},'UNDEFINED'};
+								EntryPoints->
+									% Search through EntryPoints recursively and unite with the result of search in StartPoints by name
+									{'OR',[
+										{'AND',[
+											{'OR',[build_leaf({'=',<<".folder">>,OID})|| OID <- StartPoints],'UNDEFINED'},
+											build_leaf({'LIKE',<<".name">>,<<"^",ItemName/binary>>})
+										],'UNDEFINED'}
+										| [build_leaf({'=',<<".folder">>,OID})|| OID <- ecomet_folder:get_content_recursive( EntryPoints )]
+									],'UNDEFINED'}
+							end;
+						true ->
+							case ecomet_query:system('*',[<<".oid">>],{'AND',[
+								{'OR',[{<<".folder">>,'=',OID} || OID <- StartPoints]},
+								{<<".name">>,'=',ItemName}
+							]}) of
+								[]->
+									% No satisfying entry points, nothing can be found
+									empty_tag();
+								EntryPoints->
+									% Search through EntryPoints recursively and unite with the result of search in StartPoints by name
+									{'OR',[
+										{'AND',[
+											{'OR',[build_leaf({'=',<<".folder">>,OID})|| OID <- StartPoints],'UNDEFINED'},
+											build_leaf({'=',<<".name">>,ItemName})
+										],'UNDEFINED'}
+										| [build_leaf({'=',<<".folder">>,OID})|| OID <- ecomet_folder:get_content_recursive( EntryPoints )]
+									],'UNDEFINED'}
+							end
+					end
+			end
+	end.
+
+find_roots( Name )->
+
+	RootLength = length( unicode:characters_to_list(Name) ),
+	if
+		RootLength >= 2 ->
+			% We can search min by 3 symbols as Root ends we can add a string end symbol '$'
+			% therefore the minimum is 2
+			ecomet_query:system('*',[<<".oid">>],{'AND',[
+				{<<".pattern">>,'=',?OID(<<"/root/.patterns/.folder">>)},
+				{<<".name">>,'LIKE',<<Name/binary,"$">>}
+			]});
+		true ->
+			ecomet_query:system('*',[<<".oid">>],{'AND',[
+				{<<".pattern">>,'=',?OID(<<"/root/.patterns/.folder">>)},
+				{<<".name">>,'=',Name}
+			]})
+	end.
+
+empty_tag()->
+	{'TAG',{<<".name">>,none,'simple'},'UNDEFINED'}.
 

@@ -27,13 +27,13 @@
 %%=================================================================
 -export([
   oid2path/1,
-  path2oid/1,
+  path2oid/1,path2oid/2,
   find_object/2,find_object_system/2,
-  find_recursive/1,
   get_db_id/1,
   get_db_name/1,
   find_mount_points/1,
   get_content/1,get_content_system/1,
+  get_content_recursive/1,
   is_empty/1
 ]).
 
@@ -114,18 +114,6 @@ find_object_system(FolderID,Name)->
     _->{ error, not_found }
   end.
 
-find_recursive( Value )->
-  Root = ecomet:get('*',[<<".oid">>],{'AND',[
-    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.folder">>)},
-    {<<".name">>,'LIKE',Value}
-  ]}),
-  maps:keys(find_recursive( Root, #{} )).
-find_recursive( [FolderID|Rest], Acc )->
-  find_recursive( Rest , find_recursive( get_content( FolderID ), Acc#{ FolderID => true } ) );
-find_recursive( [], Acc )->
-  Acc.
-
-
 get_content(Folder)->
   DB = ecomet_object:get_db_name(Folder),
   ecomet_query:get([DB],[<<".oid">>],{<<".folder">>,'=',Folder}).
@@ -133,6 +121,14 @@ get_content(Folder)->
 get_content_system(Folder)->
   DB = get_db_name(Folder),
   ecomet_query:system([DB],[<<".oid">>],{<<".folder">>,'=',Folder}).
+
+
+get_content_recursive([FolderID|Rest])->
+  [FolderID | get_content_recursive( get_content_system(FolderID))] ++ get_content_recursive( Rest );
+get_content_recursive([])->
+  [];
+get_content_recursive(Folder)->
+  get_content_recursive([Folder]).
 
 is_empty(Folder)->
   DB = get_db_name(Folder),
