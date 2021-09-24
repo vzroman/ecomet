@@ -325,7 +325,9 @@ build_leaf({'=',<<".path">>,Value})->
 			?ERROR({invalid_path,Value})
 	end;
 build_leaf({'LIKE',<<".path">>,Value})->
-	path_recursive_search( binary:split(Value, <<"/">>, [global]) );
+	Path = binary:split(Value, <<"/">>, [global]),
+	Path1 = [ F || F <- Path , length( unicode:characters_to_list(F) ) > 0 ],
+	path_recursive_search( Path1 );
 build_leaf({'=',<<".oid">>,Value})->
 	Object = ecomet_object:construct(Value),
 	#{
