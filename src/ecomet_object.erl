@@ -420,7 +420,22 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
   case ecomet_transaction:dict_get({OID,handler},none) of
     none->
       ?TRANSACTION(fun()->
-        get_lock(write,Object,none),
+        try get_lock(write,Object,none)
+        catch
+          _:not_found->
+            % The key is not found in the storage, check if the object is just created
+            % and the transactions is not committed yet
+            case ecomet_transaction:dict_get({OID,object},none) of
+              none ->
+                % The object is not in the transaction dictionary
+                ?ERROR( not_found );
+              _Object->
+                % The object is just created and not committed yet, we can safely edit it
+                % without locking
+                ok
+            end;
+          _:LockError -> ?ERROR( LockError )
+        end,
         save(Object,NewFields,on_edit)
       end );
     _->
@@ -794,14 +809,17 @@ on_edit(Object)->
   check_path(Object),
   case field_changes(Object,<<".pattern">>) of
     none->ok;
+    {_,none}->ok;
     _->?ERROR(can_not_change_pattern)
   end,
   case field_changes(Object,<<".ts">>) of
     none->ok;
+    {_,none}->ok;
     _->?ERROR(can_not_change_ts)
   end,
   case field_changes(Object,<<".name">>) of
     none->ok;
+    {_,none}->ok;
     {_New, Old}->
       case is_system(Old) of
         true->?ERROR(system_object);
