@@ -422,7 +422,7 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
       ?TRANSACTION(fun()->
         try get_lock(write,Object,none)
         catch
-          _:not_found->
+          throw:not_found->
             % The key is not found in the storage, check if the object is just created
             % and the transactions is not committed yet
             case ecomet_transaction:dict_get({OID,object},none) of
@@ -434,7 +434,11 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
                 % without locking
                 ok
             end;
-          _:LockError -> ?ERROR( LockError )
+          % Preserve other exceptions because they might be handled by the mnesia
+          % https://stackoverflow.com/questions/8099261/unintentionally-intercepting-mnesias-transactional-retries-with-try-catch-resul
+          throw:Other -> throw( Other );
+          error:Other -> error( Other );
+          exit:Other -> exit( Other )
         end,
         save(Object,NewFields,on_edit)
       end );

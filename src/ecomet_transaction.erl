@@ -214,7 +214,7 @@ add_lock(Key,LockLevel,Locks,TType,Timeout)->
 get_lock(internal,?LOCKKEY(DB,Storage,Type,Key),LockLevel,_Timeout)->
   case ecomet_backend:read(DB,Storage,Type,Key,LockLevel) of
     not_found->
-      ?ERROR(not_found);
+      throw(not_found);
     Value->
       #lock{value=Value,level=LockLevel,pid=internal}
   end;
