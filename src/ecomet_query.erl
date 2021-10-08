@@ -171,6 +171,7 @@ run_statement({transaction,Statements},Acc)->
 %%	- page => {Number,ItemsPerPage} - Paginating. Return only items for defined page
 %%	- order => [{Field1,Order},{Field2,Order}] - Sorting results
 %%	- group => [Field1,Field2] - Grouping results
+%%  - format => fun/2 - Function to format field values
 %%	- lock => none|read|write - lock level on objects
 get(DBs,Fields,Conditions)->
   get(DBs,Fields,Conditions,#{}).
