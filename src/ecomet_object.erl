@@ -525,12 +525,15 @@ check_rights(#object{}=Object)->
   #{
     <<".readgroups">>:=Read,
     <<".writegroups">>:=Write,
-    <<".contentwritegroups">>:=Move
+    <<".folder">>:=FolderID
   } = read_fields(Object,#{
     <<".readgroups">> => none,
     <<".writegroups">> => none,
-    <<".contentwritegroups">> => none
+    <<".folder">> => none
   }),
+
+  {ok, Move} = read_field( construct(FolderID), <<".contentwritegroups">> ),
+
   check_rights(Read,Write,Move);
 check_rights(OID)->
   check_rights(construct(OID)).
