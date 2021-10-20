@@ -53,7 +53,12 @@ join([none|_Tail])->
 join([])->
   none;
 join([OID,Field|Tail])->
-  case try ecomet:read_field(?OBJECT(OID),Field) catch
+  FieldName =
+    if
+      is_atom(Field) -> atom_to_binary( Field, utf8 );
+      true-> Field
+    end,
+  case try ecomet:read_field(?OBJECT(OID),FieldName) catch
          _:Error->{error,Error}
   end of
     {ok,NextOID}->join([NextOID|Tail]);
