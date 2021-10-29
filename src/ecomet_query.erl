@@ -1077,7 +1077,7 @@ map_reduce_plan(Params)->
       % Traversing results from the right to optimize ++ operator (assume that RowList < GroupAcc )
       MergedGroups=
         lists:foldr(fun(GroupsTree,Acc)->
-          merge_trees(length(TraverseGroups),GroupsTree,AppendRowFun,Acc)
+          merge_trees(length(TraverseGroups),GroupsTree,Acc,AppendRowFun)
         end,InitTree,Results),
       SortedGroups=sort_leafs(length(Grouping)-1,MergedGroups,LeafSorting),
       if
