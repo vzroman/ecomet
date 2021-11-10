@@ -1,6 +1,6 @@
 {application, ecomet,
  [{description, "A distributed reactive database"},
-  {vsn, "0.0.22"},
+  {vsn, "0.0.23"},
   {registered, []},
   {mod, {ecomet_app, []}},
   {applications,
