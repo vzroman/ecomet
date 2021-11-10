@@ -443,9 +443,6 @@ on_delete(Object)->
 check_name(Object,IsEmpty)->
   case ecomet:field_changes(Object,<<".name">>) of
     none->false;
-    { _NewName, _OldName } when not IsEmpty->
-      % Cannot rename a field if there are already objects created with the schema
-      ?ERROR(has_objects);
     { NewName, OldName }->
       % Check the name for forbidden symbols
       case re:run(NewName,"^\\.?([a-zA-Z0-9_-]+)$") of
@@ -458,6 +455,23 @@ check_name(Object,IsEmpty)->
             true -> ok
           end;
         _->?ERROR(invalid_name)
+      end,
+      if
+        not IsEmpty ->
+          % There are already objects created by the pattern. They potentially have data
+          % in the field. If we change the field's name the data will be lost.
+          #{<<".folder">> := PatternOID} = ecomet:read_fields( Object, [<<".name">>, <<".folder">>] ),
+
+          % Clean old values
+          ecomet:set('*',#{ OldName => none}, {<<".pattern">>,'=', PatternOID}),
+
+          {ok, Pattern} = ecomet:read_field( ecomet:open(PatternOID), <<".name">> ),
+          ?LOGWARNING("Change name for the field ~p in pattern ~p. Field values for existing objects will be lost",[
+            OldName,
+            Pattern
+          ]);
+        true ->
+          ok
       end,
       true
   end.
@@ -475,9 +489,6 @@ check_folder(Object, _IsEmpty)->
 check_storage(Object,IsEmpty)->
   case ecomet:field_changes(Object,<<"storage">>) of
     none->false;
-    { _NewStorage, _OldStorage } when not IsEmpty->
-      % Cannot change the storage for the field if there are already objects created with the schema
-      ?ERROR(has_objects);
     { NewStorage, _OldStorage } when NewStorage=:=?RAMDISC; NewStorage=:=?DISC->
       % Cannot create persistent fields in the memory only pattern
       {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
@@ -494,6 +505,23 @@ check_storage(Object,IsEmpty)->
         true->ok;
         _->?ERROR(invalid_storage_type)
       end,
+      if
+        not IsEmpty ->
+          % There are already objects created by the pattern. They potentially have data
+          % in the field. If we change the field's storage type the data will be lost.
+          #{<<".name">> := Name, <<".folder">> := PatternOID} = ecomet:read_fields( Object, [<<".name">>, <<".folder">>] ),
+
+          % Clean old values
+          ecomet:set('*',#{ Name => none}, {<<".pattern">>,'=', PatternOID}),
+
+          {ok, Pattern} = ecomet:read_field( ecomet:open(PatternOID), <<".name">> ),
+          ?LOGWARNING("Change storage type for the field ~p in pattern ~p. Field values for existing objects will be lost",[
+            Name,
+            Pattern
+          ]);
+        true ->
+          ok
+      end,
       true
   end.
 
@@ -504,9 +532,6 @@ check_type(Object,IsEmpty)->
     ecomet:field_changes(Object,<<"subtype">>) =/=none,
   if
     not IsChanged->false;
-    not IsEmpty ->
-      % Cannot change the type of the field if there are already objects created with the schema
-      ?ERROR(has_objects);
     true ->
       % Check the type for supported types
       Supported = ecomet_types:get_supported_types(),
@@ -516,6 +541,25 @@ check_type(Object,IsEmpty)->
         true->ok;
         _->?ERROR(invalid_type)
       end,
+
+      if
+        not IsEmpty ->
+          % There are already objects created by the pattern. They potentially have data
+          % in the field. If we change the field's type the data will be lost.
+          #{<<".name">> := Name, <<".folder">> := PatternOID} = ecomet:read_fields( Object, [<<".name">>, <<".folder">>] ),
+
+          % Clean old values
+          ecomet:set('*',#{ Name => none}, {<<".pattern">>,'=', PatternOID}),
+
+          {ok, Pattern} = ecomet:read_field( ecomet:open(PatternOID), <<".name">> ),
+          ?LOGWARNING("Change type for field ~p in pattern ~p. Field values for existing objects will be lost",[
+            Name,
+            Pattern
+          ]);
+        true ->
+          ok
+      end,
+
       true
   end.
 
