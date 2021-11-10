@@ -229,6 +229,9 @@ wait_stick_lock(PID,Timeout)->
     {ecomet_stick_lock,Lock} when Lock#lock.pid==PID->
       process_flag(trap_exit,Trap),
       Lock;
+    {'EXIT',PID,{throw, not_found}}->
+      process_flag(trap_exit,Trap),
+      throw(not_found);
     {'EXIT',PID,Reason}->
       process_flag(trap_exit,Trap),
       ?ERROR(Reason)

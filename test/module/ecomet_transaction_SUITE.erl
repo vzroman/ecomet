@@ -348,7 +348,7 @@ internal_nested_locks(_Config)->
     % Commit
     {ok,_}=ecomet_transaction:internal(fun()->
       {lock_value1,read}=ecomet_transaction:find_lock(Key1),
-      ?assertError(not_found,ecomet_transaction:lock(Key2,read,none)),
+      ?assertThrow(not_found,ecomet_transaction:lock(Key2,read,none)),
       % Upgrade lock
       lock_value1=ecomet_transaction:lock(Key1,write,none)
     end),
@@ -588,7 +588,7 @@ external_nested_locks(_Config)->
   % Commit
   ecomet_transaction:start(),
   {lock_value1,read}=ecomet_transaction:find_lock(Key1),
-  ?assertError(not_found,ecomet_transaction:lock(Key2,read,none)),
+  ?assertThrow(not_found,ecomet_transaction:lock(Key2,read,none)),
   % Upgrade lock
   lock_value1=ecomet_transaction:lock(Key1,write,none),
   ecomet_transaction:commit(),
@@ -596,7 +596,7 @@ external_nested_locks(_Config)->
   none = ecomet_transaction:find_lock(Key2),
   % Rollback
   ecomet_transaction:start(),
-  ?assertError(not_found,ecomet_transaction:lock(Key3,read,none)),
+  ?assertThrow(not_found,ecomet_transaction:lock(Key3,read,none)),
   ecomet_transaction:rollback(),
   {lock_value1,write}=ecomet_transaction:find_lock(Key1),
   none=ecomet_transaction:find_lock(Key2),
