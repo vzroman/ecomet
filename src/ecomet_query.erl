@@ -349,7 +349,14 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
                   TagsResult =:= del;RightsResult=:=del ->
                     Self!?SUBSCRIPTION(ID,delete,OID,#{});
                   true ->
-                    Self!?SUBSCRIPTION(ID,update,OID,Read(ordsets:from_list(maps:keys(Changes)),Object))
+                    Updates = Read(ordsets:from_list(maps:keys(Changes)),Object),
+                    case maps:size( Updates ) of
+                      0 ->
+                        % Don't send an update if there were no changes in the requested fields
+                        ignore;
+                      _ ->
+                        Self!?SUBSCRIPTION(ID,update,OID,Updates)
+                    end
                 end
             end
         end
