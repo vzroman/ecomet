@@ -90,7 +90,7 @@ get_segment_info(Segment)->
   dlss:get_segment_info(Segment).
 
 get_segment_params(Segment)->
-  dlss:get_segment_info(Segment).
+  dlss:get_segment_params(Segment).
 
 get_segment_size(Segment)->
   dlss:get_segment_size(Segment).

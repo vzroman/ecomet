@@ -167,7 +167,7 @@ sync_segment(Segment)->
   #{ local:= IsLocal } = ecomet_backend:get_segment_info(Segment),
   if
     not IsLocal ->
-      #{ copies := Copies } = ecomet_backend:get_segment_params(Segment),
+      {ok, #{ copies := Copies }} = ecomet_backend:get_segment_params(Segment),
       Actual = maps:keys( Copies ),
       case ecomet:read_field(Object,<<"nodes">>,#{default=>[]}) of
         {ok,[]}->
