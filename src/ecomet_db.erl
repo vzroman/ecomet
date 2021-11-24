@@ -164,9 +164,11 @@ sync_storage(DB,Storage,Type)->
 sync_segment(Segment)->
   {ok,OID} = get_segment_oid(Segment),
   Object = ecomet:open(OID,none),
-  #{nodes := Actual, local:= IsLocal } = ecomet_backend:get_segment_info(Segment),
+  #{ local:= IsLocal } = ecomet_backend:get_segment_info(Segment),
   if
     not IsLocal ->
+      #{ copies := Copies } = ecomet_backend:get_segment_params(Segment),
+      Actual = maps:keys( Copies ),
       case ecomet:read_field(Object,<<"nodes">>,#{default=>[]}) of
         {ok,[]}->
           ok = ecomet:edit_object(Object,#{<<"nodes">>=>Actual});

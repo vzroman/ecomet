@@ -30,6 +30,7 @@
   get_segments/1,get_segments/3,
   get_root_segment/1,get_root_segment/3,
   get_segment_info/1,
+  get_segment_params/1,
   get_segment_size/1,
   get_storage_type/1,
   add_segment_copy/2, remove_segment_copy/2,
@@ -86,6 +87,9 @@ get_root_segment(Name,Storage,Type)->
   get_root_segment(?NAME(Name,Storage,Type)).
 
 get_segment_info(Segment)->
+  dlss:get_segment_info(Segment).
+
+get_segment_params(Segment)->
   dlss:get_segment_info(Segment).
 
 get_segment_size(Segment)->
