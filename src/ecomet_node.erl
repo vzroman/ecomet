@@ -232,4 +232,18 @@ register_node(Object)->
 
 unregister_node(Object)->
   {ok,Name}=ecomet:read_field(Object,<<".name">>),
-  ecomet_schema:remove_node(binary_to_atom(Name,utf8)).
+  Node = binary_to_atom(Name,utf8),
+
+  % Remove the copies of segments from the node
+  ecomet:set([?ROOT],#{ <<"nodes">> => {fun([SegmentNodes])->
+    if
+      is_list(SegmentNodes) -> SegmentNodes -- [Node];
+      true -> SegmentNodes
+    end
+  end,[<<"nodes">>]}}, {'AND',[
+    {<<".pattern">> ,'=', ?OID(<<"/root/.patterns/.segment">>)},
+    {<<"nodes">>,'=',Node}
+  ]},#{ lock => write }),
+
+  % Remove the node from the schema
+  ecomet_schema:remove_node(Node).
