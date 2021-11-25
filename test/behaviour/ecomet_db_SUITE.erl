@@ -60,7 +60,7 @@ end_per_suite(_Config)->
 % Other fields are not important in this case %
 check_name_test(_Config) ->
 
-  meck:new(ecomet, [no_link]),
+  meck:new(ecomet, [no_link,passthrough]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
 
   % We do not edit name, have to return ok %
@@ -110,7 +110,7 @@ check_name_test(_Config) ->
 % Other fieds are not important in this case%
 check_id_test(_Config) ->
 
-  meck:new(ecomet, [no_link]),
+  meck:new(ecomet, [no_link,passthrough]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
 
   % We do not edit ID, should return OK %

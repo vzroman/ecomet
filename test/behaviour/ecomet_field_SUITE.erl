@@ -71,10 +71,12 @@ end_per_suite(_Config)->
 
 check_name_test(_Config) ->
 
-  meck:new(ecomet, [no_link]),
+  meck:new(ecomet, [no_link,passthrough]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
-  meck:new(ecomet_pattern),
+  meck:expect(ecomet, read_fields, fun(Object, Fields) -> maps:with(Fields,Object) end),
+  meck:expect(ecomet, set, fun(_,_,_) -> 0 end),
+  meck:new(ecomet_pattern,[no_link,passthrough]),
   meck:expect(ecomet_pattern, remove_field, fun(_PatternID, _OldName) -> ok end),
 
   %% #{<<".name">> => {<<"Old">>, <<"New">>}, <<".folder">> => 12},
@@ -84,9 +86,9 @@ check_name_test(_Config) ->
   false = ecomet_field:check_name(#{<<".folder">> => {2, 1}}, IsEmptyTrue),
   false = ecomet_field:check_name(#{<<".notname">> => <<"whysohard">>}, IsEmptyFalse),
 
-  % We are trying to change name, while is_empty == false, error should occur%
-  ?assertError(has_objects, ecomet_field:check_name(#{<<".name">> => {<<"new">>, <<"old">>}}, IsEmptyFalse)),
-  ?assertError(has_objects, ecomet_field:check_name(#{<<".name">> => {<<"help">>, <<"me">>}}, IsEmptyFalse)),
+  % We are trying to change name, while is_empty == false
+  ok= ecomet_field:check_name(#{<<".name">> => {<<"new">>, <<"old">>}, <<".folder">> => {2, 1}}, IsEmptyFalse),
+  ok = ecomet_field:check_name(#{<<".name">> => {<<"help">>, <<"me">>}, <<".folder">> => {2, 1}}, IsEmptyFalse),
 
   % is_empty == true %
   % We are trying to change on incorrect name %
