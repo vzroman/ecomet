@@ -772,18 +772,34 @@ compile_map_reduce(set,Fields,Params)->
   % Fun to read object fields from storage, default lock is none (check rights is performed)
   ReadUp=read_up(maps:get(lock,Params,none)),
   ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
+  Update =
+    fun(OID)->
+      ObjectMap=ReadUp(OID,ReadFields),
+      NewValues=
+        [{Name,
+          case Value of
+            #get{value = Fun}->Fun(ObjectMap);
+            _->Value
+          end}||{Name,Value}<-Updates],
+      ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues))
+    end,
   Map=
     fun(RS)->
       ecomet_resultset:foldr(fun(OID,Acc)->
-        ObjectMap=ReadUp(OID,ReadFields),
-        NewValues=
-          [{Name,
-            case Value of
-              #get{value = Fun}->Fun(ObjectMap);
-              _->Value
-            end}||{Name,Value}<-Updates],
-        ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues)),
-        Acc+1
+        case ecomet:is_transaction() of
+          true ->
+            Update(OID),
+            Acc + 1;
+          _->
+            try
+              Update(OID),
+              Acc+1
+            catch
+              _:Error->
+                ?LOGERROR("unable to update ~p, error ~p",[OID,Error]),
+                Acc
+            end
+        end
       end,0,RS)
     end,
   Reduce=fun lists:sum/1,
