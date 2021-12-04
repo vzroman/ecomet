@@ -142,7 +142,7 @@
   <<"usergroups">>=>#{ type => list, subtype => link, index=> [simple] }
   }).
 -define(USERGROUP_SCHEMA,#{
-  % No additional fields
+  <<"extend_groups">>=>#{ type => list, subtype => link, index=> [simple] }
 }).
 -define(SESSION_SCHEMA,#{
   <<"close">>=>#{ type => integer, index=> [simple,datetime] },
@@ -785,7 +785,8 @@ init_default_users()->
           fields=>#{
             <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
             <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
-          }
+          },
+          children=>init_pattern_fields(?USERGROUP_SCHEMA)
         }},
         % SESSION
         { <<".session">>, #{
