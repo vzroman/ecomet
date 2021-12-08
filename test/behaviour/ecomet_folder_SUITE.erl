@@ -239,8 +239,8 @@ on_create_test(_Config) ->
 
   %ecomet:delete_object(Folder2),
   ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<"database">> => ?OID(NotSoUseless)})) ,
-  ecomet:delete_object(Folder2),
 
+  ecomet:delete_object(Folder2),
   ecomet:delete_object(Folder1),
   ecomet:delete_object(MyUselessDB),
   ecomet:delete_object(NotSoUseless),
