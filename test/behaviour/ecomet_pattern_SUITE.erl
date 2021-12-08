@@ -92,16 +92,16 @@ check_handler_test(_Config) ->
   ok = ecomet_pattern:check_handler(#{ 1.5 => 4.2, <<"old">> => <<"new">> }),
 
   % Changing <<behaviour_module>> to none, should return ok %
-  ok = ecomet_pattern:check_handler(#{ <<".behaviour">> => {none, ecomet_db} }),
-  ok = ecomet_pattern:check_handler(#{ <<".behaviour">> => {none, ecomet_node}, 1 => 2 }),
+  ok = ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {none, ecomet_db} }),
+  ok = ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {none, ecomet_node}, 1 => 2 }),
 
   % Changing <<behaviour_module>> to invalid module or
   % module does not contain on_edit, on_create, on_delete functions %
-  ?assertError(invalid_module, ecomet_pattern:check_handler(#{ <<".behaviour">> => {invalid_module, none}})),
-  ?assertError(undefined_on_create, ecomet_pattern:check_handler(#{ <<".behaviour">> => {ecomet_query, none}})),
+  ?assertError(invalid_module, ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {invalid_module, none}})),
+  ?assertError(undefined_on_create, ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {ecomet_query, none}})),
 
   % Valid module with on_create, on_edit, on_delete functions %
-  ok = ecomet_pattern:check_handler(#{ <<".behaviour">> => {ecomet_field, none}}),
+  ok = ecomet_pattern:check_handler(#{ <<"behaviour_module">> => {ecomet_field, none}}),
   meck:unload(ecomet)
 .
 
@@ -110,7 +110,7 @@ get_parent_test(_Config) ->
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
   meck:expect(ecomet_lib, to_object_system, fun(Pattern) -> Pattern end),
 
-  pattern = ecomet_pattern:get_parent(#{<<".inherit">> => pattern}),
+  pattern = ecomet_pattern:get_parent(#{<<"parent_pattern">> => pattern}),
 
   meck:unload([ecomet, ecomet_lib])
 .
@@ -120,7 +120,7 @@ get_parents_test(_Config) ->
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
   meck:expect(ecomet_lib, to_object_system, fun(Pattern) -> Pattern end),
 
-  parents = ecomet_pattern:get_parent(#{<<".ancestors">> => parents}),
+  parents = ecomet_pattern:get_parent(#{<<"parents">> => parents}),
 
   meck:unload([ecomet, ecomet_lib])
 .
@@ -131,8 +131,8 @@ set_parents_test(_Config) ->
   meck:expect(ecomet, edit_object, fun(_Object, Fields) -> put(side_effect, Fields), ok end),
   meck:expect(ecomet_lib, to_object_system, fun(Pattern) -> Pattern end),
 
-  Object1 = #{<<".inherit">> => #{<<".ancestors">> => [a, b, c]} },
-  Exp = #{<<".ancestors">> => [#{<<".ancestors">> => [a, b, c]}, a, b, c]},
+  Object1 = #{<<"parent_pattern">> => #{<<"parents">> => [a, b, c]} },
+  Exp = #{<<"parents">> => [#{<<"parents">> => [a, b, c]}, a, b, c]},
   ecomet_pattern:set_parents(Object1),
   Exp = get(side_effect),
 
@@ -151,8 +151,8 @@ check_parent_test(_Config) ->
   ok = ecomet_pattern:check_parent(#{ <<"Key">> => value, <<"value">> => key }),
 
   % We are changing parent field, error must occur %
-  ?assertError(cannot_change_parent, ecomet_pattern:check_parent(#{ <<".inherit">> => {{1, 2}, {3, 4}} })),
-  ?assertError(cannot_change_parent, ecomet_pattern:check_parent(#{ <<".inherit">> => {{1, 4}, {123, 100}} })),
+  ?assertError(cannot_change_parent, ecomet_pattern:check_parent(#{ <<"parent_pattern">> => {{1, 2}, {3, 4}} })),
+  ?assertError(cannot_change_parent, ecomet_pattern:check_parent(#{ <<"parent_pattern">> => {{1, 4}, {123, 100}} })),
 
   meck:unload(ecomet),
   ok
@@ -181,12 +181,12 @@ on_create_test(_Config) ->
     <<".name">> => <<"STALKER">>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(<<"/root/.patterns/.folder">>)
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
 
   ct:pal("Object ~p, ", [Object]),
-  {ok, ParentPat} = ecomet:read_field(Object, <<".inherit">>),
-  {ok, Parents} = ecomet:read_field(Object, <<".ancestors">>),
+  {ok, ParentPat} = ecomet:read_field(Object, <<"parent_pattern">>),
+  {ok, Parents} = ecomet:read_field(Object, <<"parents">>),
   % <<parents>> contains <<parent_patterns>> %
   [] = [ParentPat] -- Parents,
 
@@ -195,8 +195,8 @@ on_create_test(_Config) ->
     <<".name">> => <<"ClearSky">>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(<<"/root/.patterns/.folder">>),
-    <<".behaviour">> => qwe
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<"behaviour_module">> => qwe
   })),
 
   % <<behaviour_module>> field contain valid module,
@@ -205,8 +205,8 @@ on_create_test(_Config) ->
     <<".name">> => <<"ClearSky">>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(<<"/root/.patterns/.folder">>),
-    <<".behaviour">> => ecomet_query
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<"behaviour_module">> => ecomet_query
   })),
 
   % <<behaviour_module>> field contain valid module,
@@ -215,8 +215,8 @@ on_create_test(_Config) ->
     <<".name">> => <<"Jaina">>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(<<"/root/.patterns/.folder">>),
-    <<".behaviour">> => ecomet_db
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<"behaviour_module">> => ecomet_db
   }),
 
   ecomet:delete_object(Object),
@@ -232,27 +232,27 @@ on_edit_test(_Config) ->
     <<".name">> => <<"Strelok">>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(<<"/root/.patterns/.folder">>),
-    <<".behaviour">> => ecomet_db
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<"behaviour_module">> => ecomet_db
   }),
   % We cannot change <<parent_pattern>> field %
   ?assertError({cannot_change_parent, _}, ecomet:edit_object(Object, #{
-    <<".inherit">> => ?OID(<<"/root/.patterns/.node">>)
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.node">>)
   })),
 
   % We changing <<behaviour_module>> to invalid module %
   ?assertError({invalid_module, _}, ecomet:edit_object(Object, #{
-    <<".behaviour">> => non_ecomet_module
+    <<"behaviour_module">> => non_ecomet_module
   })),
 
   % We changing <<behaviour_module>> to valid module,
   % but module does not contain on_create function
   ?assertError({undefined_on_create, _}, ecomet:edit_object(Object, #{
-    <<".behaviour">> => ecomet_query})),
+    <<"behaviour_module">> => ecomet_query})),
 
   % We changing <<behaviour_module>> to valid module,
   % and module contain {on_create, on_edit, on_delete} functions
-  ok = ecomet:edit_object(Object, #{<<".behaviour">> => ecomet_object}),
+  ok = ecomet:edit_object(Object, #{<<"behaviour_module">> => ecomet_object}),
   ecomet:delete_object(Object),
   ok.
 
@@ -264,7 +264,7 @@ on_delete_test(_Config) ->
     <<".name">> => <<"Rexxar">>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(<<"/root/.patterns/.database">>)
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.database">>)
   }),
 
   UselessDB = ecomet:create_object(#{
@@ -289,36 +289,36 @@ fields_manipulation(_Config) ->
     <<".name">> => <<"my_pattern">>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(<<"/root/.patterns/.folder">>)
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
   F1 = ecomet:create_object(#{
     <<".name">> => <<"f1">>,
     <<".folder">> => ?OID(ParentPattern),
     <<".pattern">> => ?OID(<<"/root/.patterns/.field">>),
-    <<".type">> => integer
+    <<"type">> => integer
   }),
   #{<<"f1">> := _} = ecomet_pattern:get_map(ParentPattern),
-  ecomet:edit_object(F1, #{<<".storage">> => ?RAMDISC}),
+  ecomet:edit_object(F1, #{<<"storage">> => ?RAMDISC}),
   #{<<"f1">> := #{storage := ?RAMDISC}} = ecomet_pattern:get_map(ParentPattern),
 
   ChildPattern = ecomet:create_object(#{
     <<".name">> => <<"child_pattern">>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(ParentPattern)
+    <<"parent_pattern">> => ?OID(ParentPattern)
   }),
 
   F2 = ecomet:create_object(#{
     <<".name">> => <<"f2">>,
     <<".folder">> => ?OID(ParentPattern),
     <<".pattern">> => ?OID(<<"/root/.patterns/.field">>),
-    <<".type">> => string
+    <<"type">> => string
   }),
   #{<<"f2">> := _} = ecomet_pattern:get_map(ChildPattern),
 
   EditList = [{type, float}, {index, [simple]}, {required, true}],
   [begin
-    ecomet:edit_object(F2, #{<<".", (atom_to_binary(Field, utf8))/binary>> => Value}),
+    ecomet:edit_object(F2, #{<<(atom_to_binary(Field, utf8))/binary>> => Value}),
     #{<<"f2">> := #{Field := Value}} = ecomet_pattern:get_map(ParentPattern),
     #{<<"f2">> := #{Field := Value}} = ecomet_pattern:get_map(ChildPattern),
     ct:pal("Successfully updated ~p ~p~n", [Field, Value])
@@ -327,11 +327,11 @@ fields_manipulation(_Config) ->
 
   ChildFieldF2 = ecomet:open(?OID(<<"/root/.patterns/child_pattern/f2">>)),
   Modifications = [
-    #{<<".name">> => <<"f22">>}, #{<<".type">> => integer}, #{<<".required">> => false}, #{<<".index">> => none}
+    #{<<".name">> => <<"f22">>}, #{<<"type">> => integer}, #{<<"required">> => false}, #{<<"index">> => none}
   ],
   [
     case Map of
-      #{<<".index">> := _} ->
+      #{<<"index">> := _} ->
         ?assertError(
           {parent_index, _},
           ecomet:edit_object(ChildFieldF2, Map)
@@ -356,7 +356,7 @@ fields_manipulation(_Config) ->
     <<"f2">> => 1.0
   }),
   ?assertError({has_objects, _}, ecomet:delete_object(F1) ),
-  ?assertError({has_objects, _}, ecomet:edit_object(F1, #{<<".type">> => string}) ),
+  ok = ecomet:edit_object(F1, #{<<"type">> => string}) ,
   ?assertError({has_objects, _}, ecomet:delete_object(ParentPattern)),
 
   ecomet:delete_object(Object1),
@@ -403,7 +403,7 @@ create_patterns_tree(Level, ChildNum, ID, MaxLevel) when Level == MaxLevel ->
     <<".name">> => <<"pattern_", Suffix/binary>>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(<<"/root/.patterns/.folder">>)
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
   [begin
      ChildID = ChildNum * ID - Child,
@@ -416,7 +416,7 @@ create_patterns_tree(Level, ChildNum, ID, MaxLevel) ->
     <<".name">> => <<"pattern_", Suffix/binary>>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(<<"/root/.patterns/pattern_", ParentID/binary>>)
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/pattern_", ParentID/binary>>)
   }),
   [begin
      ChildID = ChildNum * ID - Child,
