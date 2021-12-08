@@ -163,7 +163,7 @@ find_mount_points(ID)->
   % Folder descendants
   ecomet_query:system(DBs,[<<".oid">>],{'AND',[
     {<<".pattern">>,'=',{?PATTERN_PATTERN,?FOLDER_PATTERN}},
-    {<<".database">>,'=',?OID(ID)}
+    {<<"database">>,'=',?OID(ID)}
   ]}).
 
 
@@ -195,7 +195,7 @@ on_delete(Object)->
     end || ItemID <- get_content_system(?OID(Object)) ],
 
   % Unmount a database if some is mounted
-  case ecomet:read_field(Object,<<".database">>) of
+  case ecomet:read_field(Object,<<"database">>) of
     {ok,DB} when DB=/=none->
       ok = ecomet_schema:unmount_db(?OID(Object));
     _->
@@ -319,7 +319,7 @@ apply_recursion(Object)->
   end.
 
 check_database(Object)->
-  case ecomet:field_changes(Object,<<".database">>) of
+  case ecomet:field_changes(Object,<<"database">>) of
     none->ok;
     { MountedDB, UnmountedDB }->
       FolderID = ?OID(Object),
