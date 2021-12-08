@@ -73,10 +73,10 @@ check_storage_type_test(_Config) ->
     <<".name">> => <<"myfolder">>,
     <<".folder">> => ?OID(<<"/root/.patterns">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
-    <<".inherit">> => ?OID(<<"/root/.patterns/.folder">>)
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>)
   }),
   F = ecomet:open(?OID(<<"/root/.patterns/myfolder/.name">>)),
-  ok = ecomet:edit_object(F, #{<<".storage">> => ?RAM}),
+  ok = ecomet:edit_object(F, #{<<"storage">> => ?RAM}),
 
   ct:pal("Map: ~p~n",[ecomet_pattern:get_map(FolderType)]),
 
@@ -170,7 +170,7 @@ check_db_test(_Config) ->
     <<".name">> => <<"Folder2">>,
     <<".folder">> => ?OID(<<"/root">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
-    <<".database">> => ?OID(RealDB)
+    <<"database">> => ?OID(RealDB)
   }),
   'RealDB' = ecomet_schema:get_mounted_db(?OID(Folder3)),
   ct:pal("RealDB ID ~n~p~n",[ecomet_schema:get_db_id('RealDB')]),
