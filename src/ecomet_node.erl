@@ -26,9 +26,10 @@
 %%=================================================================
 -export([
   get_unique_id/0,
-  get_configured_nodes/0,
+  get_configured_nodes/0,get_configured_nodes/1,
   get_attached_nodes/0,
   get_ready_nodes/0,
+  is_master/0, is_master/1,
   attach_node/1,
   detach_node/1,
   set_ready/2,
@@ -72,11 +73,32 @@ get_configured_nodes()->
   ]}),
   [N||[N]<-Result].
 
+get_configured_nodes( Filter )->
+  {_Header,Result}=ecomet_query:system([?ROOT],[{fun([N])->binary_to_atom(N,utf8) end,[<<".name">>]}],{'AND',[
+    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.node">>)},
+    {<<".folder">>,'=',?OID(<<"/root/.nodes">>)},
+    Filter
+  ]}),
+  [N||[N]<-Result].
+
 get_attached_nodes()->
   dlss:get_nodes().
 
 get_ready_nodes()->
   dlss:get_ready_nodes().
+
+update_ready( Node )->
+  case [N || N <- get_configured_nodes(), N=:=Node] of
+    [Node]->
+      IsReady =
+        case [N || N <- get_ready_nodes(), N=:=Node] of
+          [Node] -> true;
+          _ -> false
+        end,
+      set_ready( Node, IsReady );
+    _->
+      ?LOGWARNING("~p is not in the schema yet",[Node])
+  end.
 
 attach_node(Node) when is_atom(Node)->
   dlss:add_node(Node);
@@ -110,7 +132,12 @@ set_ready(Node,Value)->
 is_master()->
   is_master(node()).
 is_master(Node)->
-  case get_ready_nodes() of
+  Nodes =
+    [ N || N <- get_ready_nodes(), case ecomet:read_field(ecomet:open(<<"/root/.nodes/",(atom_to_binary(N,utf8))/binary>>), <<"is_ready">> ) of
+      {ok, true}-> true;
+      _ -> false
+      end],
+  case Nodes of
     [Node|_]->
       % The master is the first node in the list of ready nodes
       true;
@@ -120,6 +147,9 @@ is_master(Node)->
 
 
 sync()->
+
+  update_ready( node() ),
+
   case is_master() of
     true->
       % Schema synchronization. Project ecomet schema objects into dlss configuration
@@ -133,8 +163,10 @@ sync()->
       [detach_node(N) || N <- Attached -- Configured],
 
       % Update ready nodes
-      Ready = get_ready_nodes(),
-      [set_ready(N, lists:member(N, Ready) ) || N <- Configured ],
+      BackendReady = get_ready_nodes(),
+      DBReady = get_configured_nodes({<<"is_ready">>,'=',true}),
+      [ set_ready( N, true ) || N <- BackendReady -- DBReady ],
+      [ set_ready( N, false ) || N <- DBReady -- BackendReady ],
 
       ok;
     _->
@@ -200,4 +232,18 @@ register_node(Object)->
 
 unregister_node(Object)->
   {ok,Name}=ecomet:read_field(Object,<<".name">>),
-  ecomet_schema:remove_node(binary_to_atom(Name,utf8)).
+  Node = binary_to_atom(Name,utf8),
+
+  % Remove the copies of segments from the node
+  ecomet:set([?ROOT],#{ <<"nodes">> => {fun([SegmentNodes])->
+    if
+      is_list(SegmentNodes) -> SegmentNodes -- [Node];
+      true -> SegmentNodes
+    end
+  end,[<<"nodes">>]}}, {'AND',[
+    {<<".pattern">> ,'=', ?OID(<<"/root/.patterns/.segment">>)},
+    {<<"nodes">>,'=',Node}
+  ]},#{ lock => write }),
+
+  % Remove the node from the schema
+  ecomet_schema:remove_node(Node).

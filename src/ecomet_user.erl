@@ -225,7 +225,11 @@ set_context(User)->
   logout(),
 
   % save the context
-  {ok,UserGroups} = ecomet:read_field(User,<<"usergroups">>),
+  #{<<"usergroups">> := Groups} = ecomet:read_fields(User,#{<<"usergroups">> => [] }),
+  ExtendGroups =
+    [ maps:get(<<"extend_groups">>, ecomet:read_fields(?OBJECT(G), #{<<"extend_groups">> => []}))  || G <- Groups],
+  UserGroups = ordsets:from_list( Groups ++ lists:flatten(ExtendGroups) ),
+
   IsAdmin=is_admin(UserGroups),
   put(?CONTEXT,#state{
     uid=?OID(User),
@@ -241,5 +245,5 @@ is_admin([GID|Rest])->
     <<".administrators">>->true;
     _->is_admin(Rest)
   end;
-is_admin([])->
+is_admin(_)->
   false.

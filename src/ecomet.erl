@@ -36,11 +36,12 @@
   read_field/2,read_field/3,read_fields/2,read_fields/3,
   read_all/1,read_all/2,
   field_changes/2,
+  object_changes/1,
   field_type/2,
   edit_object/2,edit_object/3,
   dirty_edit_object/2,dirty_edit_object/3,
   delete_object/1,
-  copy_object/2
+  copy_object/2, copy_object/3
 ]).
 
 
@@ -209,9 +210,11 @@ read_all(Object)->
 read_all(Object,Params)->
   ecomet_object:read_all(Object,Params).
 
-
 field_changes(Object, Field)->
   ecomet_object:field_changes(Object,Field).
+
+object_changes( Object )->
+  ecomet_object:object_changes(Object).
 
 field_type(Object, Field)->
   ecomet_object:field_type(Object,Field).
@@ -243,6 +246,10 @@ delete_object(Object)->
 copy_object(ID, Overwrite)->
   Object = ecomet_lib:to_object(ID),
   ecomet_object:copy(Object, Overwrite).
+
+copy_object(ID, Overwrite, Params)->
+  Object = ecomet_lib:to_object(ID),
+  ecomet_object:copy(Object, Overwrite, Params).
 
 %%=================================================================
 %%	Query API

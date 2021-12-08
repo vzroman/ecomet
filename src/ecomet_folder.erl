@@ -27,12 +27,13 @@
 %%=================================================================
 -export([
   oid2path/1,
-  path2oid/1,
+  path2oid/1,path2oid/2,
   find_object/2,find_object_system/2,
   get_db_id/1,
   get_db_name/1,
   find_mount_points/1,
   get_content/1,get_content_system/1,
+  get_content_recursive/1,
   is_empty/1
 ]).
 
@@ -80,13 +81,16 @@ path2oid(<<"/root",_/binary>> = Path)->
   <<MountPath:HeadSize/binary,Tail/binary>> = Path,
   Tokens = string:tokens(unicode:characters_to_list(Tail),"/"),
   Path1= [ unicode:characters_to_binary(Name) || Name <- Tokens],
-  path2oid(FolderID,Path1);
+  case path2oid(FolderID,Path1) of
+    {ok,OID}->{ok, OID};
+    error -> {error, {invalid_path,Path}}
+  end;
 path2oid(Path)->
   {error,{invalid_path,Path}}.
 path2oid(FolderID,[Name|Tail])->
   case find_object_system(FolderID,Name) of
     {ok,ItemID} -> path2oid(ItemID,Tail);
-    _->{ error, {invalid_path , <<(oid2path(FolderID))/binary,"/",Name/binary>> } }
+    _->error
   end;
 path2oid(OID,[])->
   {ok,OID}.
@@ -117,6 +121,14 @@ get_content(Folder)->
 get_content_system(Folder)->
   DB = get_db_name(Folder),
   ecomet_query:system([DB],[<<".oid">>],{<<".folder">>,'=',Folder}).
+
+
+get_content_recursive([FolderID|Rest])->
+  [FolderID | get_content_recursive( get_content_system(FolderID))] ++ get_content_recursive( Rest );
+get_content_recursive([])->
+  [];
+get_content_recursive(Folder)->
+  get_content_recursive([Folder]).
 
 is_empty(Folder)->
   DB = get_db_name(Folder),

@@ -75,6 +75,19 @@
 
 -endif.
 
+-define(TRANSACTION(Fun),
+  case ecomet_transaction:get_type() of
+    _T when _T=:=none;_T=:=dirty->
+      ?LOGDEBUG("start internal transaction"),
+      case ecomet_transaction:internal_sync(Fun) of
+        {ok,_TResult}->_TResult;
+        {error,_TError}->?ERROR(_TError)
+      end;
+    _->
+      ?LOGDEBUG("skip transaction"),
+      Fun()
+  end).
+
 %%=====================================================================
 %%
 %%			API
@@ -158,6 +171,7 @@ run_statement({transaction,Statements},Acc)->
 %%	- page => {Number,ItemsPerPage} - Paginating. Return only items for defined page
 %%	- order => [{Field1,Order},{Field2,Order}] - Sorting results
 %%	- group => [Field1,Field2] - Grouping results
+%%  - format => fun/2 - Function to format field values
 %%	- lock => none|read|write - lock level on objects
 get(DBs,Fields,Conditions)->
   get(DBs,Fields,Conditions,#{}).
@@ -166,7 +180,14 @@ get(DBs,Fields,Conditions,Params) when is_list(Params)->
 get(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(get,Fields,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-  execute(CompiledQuery,DBs,Union).
+  case maps:get(lock,Params,none) of
+    none ->
+      % All operations are dirty - no need to start transaction
+      execute(CompiledQuery,DBs,Union);
+    _->
+      % Operations require locks - wrap the query into transactions
+      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
+  end.
 
 system(DBs,Fields,Conditions)->
   Conditions1=ecomet_resultset:prepare(Conditions),
@@ -328,7 +349,14 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
                   TagsResult =:= del;RightsResult=:=del ->
                     Self!?SUBSCRIPTION(ID,delete,OID,#{});
                   true ->
-                    Self!?SUBSCRIPTION(ID,update,OID,Read(ordsets:from_list(maps:keys(Changes)),Object))
+                    Updates = Read(ordsets:from_list(maps:keys(Changes)),Object),
+                    case maps:size( Updates ) of
+                      0 ->
+                        % Don't send an update if there were no changes in the requested fields
+                        ignore;
+                      _ ->
+                        Self!?SUBSCRIPTION(ID,update,OID,Updates)
+                    end
                 end
             end
         end
@@ -455,12 +483,12 @@ on_commit(#ecomet_log{
   Dependencies =
     {'OR',[{<<"dependencies">>,'=',F} || F <- [<<"@ANY@">>|ChangedFields1]]},
 
-  Query = ecomet_resultset:subscription_compile({'AND',[
+  Query = {'AND',[
     Dependencies,
     Index,
     Rights,
     {<<"databases">>,'=',DB}
-  ]}),
+  ]},
 
   % Log with sorted items
   Log1=Log#ecomet_log{
@@ -477,12 +505,14 @@ on_commit(#ecomet_log{
 
   ok.
 
-notify( Query, Log )->
+notify( Filter, Log )->
   Session =
     case ecomet_user:get_session() of
       {ok,S}->S;
       _->none
     end,
+
+  Query = ecomet_resultset:subscription_compile( Filter ),
 
   ecomet_resultset:execute_local(?ROOT,Query, fun(RS)->
     ecomet_resultset:foldl(fun(OID,Acc)->
@@ -519,7 +549,15 @@ set(DBs,Fields,Conditions,Params) when is_list(Params)->
 set(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(set,Fields,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-  execute(CompiledQuery,DBs,Union).
+
+  case maps:get(lock,Params,none) of
+    none ->
+      % All operations are dirty - no need to start transaction
+      execute(CompiledQuery,DBs,Union);
+    _->
+      % Operations require locks - wrap the query into transactions
+      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
+  end.
 
 %%=====================================================================
 %%	INSERT
@@ -565,7 +603,15 @@ delete(DBs,Conditions,Params) when is_list(Params)->
 delete(DBs,Conditions,Params)->
   CompiledQuery=compile(delete,none,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-  execute(CompiledQuery,DBs,Union).
+
+  case maps:get(lock,Params,none) of
+    none ->
+      % All operations are dirty - no need to start transaction
+      execute(CompiledQuery,DBs,Union);
+    _->
+      % Operations require locks - wrap the query into transactions
+      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
+  end.
 %%=====================================================================
 %%	COMPILE
 %%=====================================================================
@@ -588,7 +634,12 @@ compile(Type,Fields,Conditions,Params)->
 execute(CompiledQuery,DBs)->
   execute(CompiledQuery,DBs,{'OR',ecomet_resultset:new()}).
 execute(#compiled_query{conditions = Conditions,map = Map,reduce = Reduce},DBs,Union)->
-  ecomet_resultset:execute(DBs,Conditions,Map,Reduce,Union).
+  DBs1=
+    case DBs of
+      '*'-> ecomet_db:get_databases();
+      _-> DBs
+    end,
+  ecomet_resultset:execute(DBs1,Conditions,Map,Reduce,Union).
 
 %%-------------GET------------------------------------------------
 %% Search params is a map:
@@ -721,18 +772,34 @@ compile_map_reduce(set,Fields,Params)->
   % Fun to read object fields from storage, default lock is none (check rights is performed)
   ReadUp=read_up(maps:get(lock,Params,none)),
   ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
+  Update =
+    fun(OID)->
+      ObjectMap=ReadUp(OID,ReadFields),
+      NewValues=
+        [{Name,
+          case Value of
+            #get{value = Fun}->Fun(ObjectMap);
+            _->Value
+          end}||{Name,Value}<-Updates],
+      ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues))
+    end,
   Map=
     fun(RS)->
       ecomet_resultset:foldr(fun(OID,Acc)->
-        ObjectMap=ReadUp(OID,ReadFields),
-        NewValues=
-          [{Name,
-            case Value of
-              #get{value = Fun}->Fun(ObjectMap);
-              _->Value
-            end}||{Name,Value}<-Updates],
-        ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues)),
-        Acc+1
+        case ecomet:is_transaction() of
+          true ->
+            Update(OID),
+            Acc + 1;
+          _->
+            try
+              Update(OID),
+              Acc+1
+            catch
+              _:Error->
+                ?LOGERROR("unable to update ~p, error ~p",[OID,Error]),
+                Acc
+            end
+        end
       end,0,RS)
     end,
   Reduce=fun lists:sum/1,
@@ -1033,7 +1100,7 @@ map_reduce_plan(Params)->
       % Traversing results from the right to optimize ++ operator (assume that RowList < GroupAcc )
       MergedGroups=
         lists:foldr(fun(GroupsTree,Acc)->
-          merge_trees(length(TraverseGroups),GroupsTree,AppendRowFun,Acc)
+          merge_trees(length(TraverseGroups),GroupsTree,Acc,AppendRowFun)
         end,InitTree,Results),
       SortedGroups=sort_leafs(length(Grouping)-1,MergedGroups,LeafSorting),
       if

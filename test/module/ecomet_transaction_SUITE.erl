@@ -194,13 +194,13 @@ internal_simple_locks(_Config)->
   Key={?ROOT,?DATA,ramdisc,lock_key},
   ?assertError(no_transaction,ecomet_transaction:lock(Key,read,none)),
   {ok,_}=ecomet_transaction:internal(fun()->
-    {ok,lock_value}=ecomet_transaction:lock(Key,read,none),
+    lock_value=ecomet_transaction:lock(Key,read,none),
     {lock_value,read}=ecomet_transaction:find_lock(Key),
     % shared lock
     Parent=self(),
     ReadChild=spawn_link(fun()->
       ecomet_transaction:internal(fun()->
-        {ok,lock_value}=ecomet_transaction:lock(Key,read,none),
+        lock_value=ecomet_transaction:lock(Key,read,none),
         Parent!{lock_acquired,self()}
       end)
     end),
@@ -224,7 +224,7 @@ internal_simple_locks(_Config)->
     end,
 
     % Upgrade lock
-    {ok,lock_value}=ecomet_transaction:lock(Key,write,none),
+    lock_value=ecomet_transaction:lock(Key,write,none),
     {lock_value,write}=ecomet_transaction:find_lock(Key),
 
     ReadChild1=spawn_link(fun()->
@@ -344,25 +344,25 @@ internal_nested_locks(_Config)->
   Key2={?ROOT,?DATA,ramdisc,lock_key2},
   Key3={?ROOT,?DATA,ramdisc,lock_key3},
   {ok,_}=ecomet_transaction:internal(fun()->
-    {ok,lock_value1}=ecomet_transaction:lock(Key1,read,none),
+    lock_value1=ecomet_transaction:lock(Key1,read,none),
     % Commit
     {ok,_}=ecomet_transaction:internal(fun()->
       {lock_value1,read}=ecomet_transaction:find_lock(Key1),
-      {ok,not_found}=ecomet_transaction:lock(Key2,read,none),
+      ?assertThrow(not_found,ecomet_transaction:lock(Key2,read,none)),
       % Upgrade lock
-      {ok,lock_value1}=ecomet_transaction:lock(Key1,write,none)
+      lock_value1=ecomet_transaction:lock(Key1,write,none)
     end),
     {lock_value1,write}=ecomet_transaction:find_lock(Key1),
-    {not_found,read}=ecomet_transaction:find_lock(Key2),
+    none=ecomet_transaction:find_lock(Key2),
     % Rollback
     ecomet_transaction:internal(fun()->
-      {ok,not_found}=ecomet_transaction:lock(Key3,read,none),
+      ?assertError(not_found,ecomet_transaction:lock(Key3,read,none)),
       ?ERROR(rollback)
     end),
     {lock_value1,write}=ecomet_transaction:find_lock(Key1),
-    {not_found,read}=ecomet_transaction:find_lock(Key2),
+    none=ecomet_transaction:find_lock(Key2),
     % We hold locks even if transaction failed until main transaction finish
-    {not_found,read}=ecomet_transaction:find_lock(Key3)
+    none=ecomet_transaction:find_lock(Key3)
   end),
   ecomet_backend:dirty_delete(?ROOT,?DATA,ramdisc,lock_key).
 
@@ -391,14 +391,14 @@ external_simple_locks(_Config)->
   Key1={?ROOT,?DATA,ramdisc,lock_key1},
 
   ecomet_transaction:start(),
-  {ok,lock_value1}=ecomet_transaction:lock(Key1,read,2000),
+  lock_value1=ecomet_transaction:lock(Key1,read,2000),
 
   {lock_value1,read}=ecomet_transaction:find_lock(Key1),
   Parent=self(),
   % Shared lock
   ReadChild1=spawn_link(fun()->
     ecomet_transaction:internal(fun()->
-      {ok,lock_value1}=ecomet_transaction:lock(Key1,read,none),
+      lock_value1=ecomet_transaction:lock(Key1,read,none),
       Parent!{lock_acquired,self()}
     end)
   end),
@@ -409,13 +409,15 @@ external_simple_locks(_Config)->
     2000->?ERROR(lock_timeout)
   end,
   % Write lock
-  {ok,lock_value1}=ecomet_transaction:lock(Key1,write,2000),
+  lock_value1=ecomet_transaction:lock(Key1,write,2000),
   ReadChild2=spawn_link(fun()->
     ecomet_transaction:start(),
-    case ecomet_transaction:lock(Key1,read,2000) of
-      {error,timeout}->Parent!{lock_timeout,self()};
-      {ok,lock_value1}->Parent!{lock_acquired,self()};
-      Invalid->Parent!{invalid_result,Invalid,self()}
+    try
+      lock_value1 = ecomet_transaction:lock(Key1,read,2000),
+      Parent!{lock_acquired,self()}
+    catch
+        _:timeout->Parent!{lock_timeout,self()};
+        _:Invalid->Parent!{invalid_result,Invalid,self()}
     end,
     ecomet_transaction:rollback()
   end),
@@ -428,12 +430,12 @@ external_simple_locks(_Config)->
     5000->?ERROR(wait_child_timeour)
   end,
   % obtain same lock
-  {ok,lock_value1}=ecomet_transaction:lock(Key1,write,2000),
+  lock_value1=ecomet_transaction:lock(Key1,write,2000),
   ecomet_transaction:commit(),
   % Check locks are released
   ReadChild3=spawn_link(fun()->
     ecomet_transaction:internal(fun()->
-      {ok,lock_value1}=ecomet_transaction:lock(Key1,read,none),
+      lock_value1=ecomet_transaction:lock(Key1,read,none),
       Parent!{lock_acquired,self()}
     end)
   end),
@@ -447,7 +449,7 @@ external_simple_locks(_Config)->
   %-------------------------------------------------------
   WriteChild1=spawn(fun()->
     ecomet_transaction:start(),
-    {ok,lock_value1}=ecomet_transaction:lock(Key1,write,2000),
+    lock_value1=ecomet_transaction:lock(Key1,write,2000),
     Parent!{locked,self()},
     ecomet_transaction:rollback(),
     receive
@@ -460,7 +462,7 @@ external_simple_locks(_Config)->
     2000->?ERROR(child_timeout)
   end,
   ecomet_transaction:start(),
-  {ok,lock_value1}=ecomet_transaction:lock(Key1,write,1000),
+  lock_value1=ecomet_transaction:lock(Key1,write,1000),
   WriteChild1!{stop,self()},
   ecomet_transaction:rollback(),
   %-------------------------------------------------------
@@ -468,7 +470,7 @@ external_simple_locks(_Config)->
   %-------------------------------------------------------
   WriteChild2=spawn(fun()->
     ecomet_transaction:start(),
-    {ok,lock_value1}=ecomet_transaction:lock(Key1,write,2000),
+    lock_value1=ecomet_transaction:lock(Key1,write,2000),
     Parent!{locked,self()},
     ?ERROR(test_crash)
   end),
@@ -478,14 +480,14 @@ external_simple_locks(_Config)->
     2000->?ERROR(child_timeout)
   end,
   ecomet_transaction:start(),
-  {ok,lock_value1}=ecomet_transaction:lock(Key1,write,1000),
+  lock_value1=ecomet_transaction:lock(Key1,write,1000),
   ecomet_transaction:rollback(),
   %-------------------------------------------------------
   % Normal terminating
   %-------------------------------------------------------
   WriteChild3=spawn(fun()->
     ecomet_transaction:start(),
-    {ok,lock_value1}=ecomet_transaction:lock(Key1,write,2000),
+    lock_value1=ecomet_transaction:lock(Key1,write,2000),
     Parent!{locked,self()}
   end),
   receive
@@ -494,16 +496,16 @@ external_simple_locks(_Config)->
     2000->?ERROR(child_timeout)
   end,
   ecomet_transaction:start(),
-  {ok,lock_value1}=ecomet_transaction:lock(Key1,write,1000),
+  lock_value1=ecomet_transaction:lock(Key1,write,1000),
   ecomet_transaction:rollback(),
   %-------------------------------------------------------
   % Release lock
   %-------------------------------------------------------
   WriteChild4=spawn(fun()->
     ecomet_transaction:start(),
-    {ok,lock_value1}=ecomet_transaction:lock(Key1,read,2000),
+    lock_value1=ecomet_transaction:lock(Key1,read,2000),
     % test upgrade by the way
-    {ok,lock_value1}=ecomet_transaction:lock(Key1,write,2000),
+    lock_value1=ecomet_transaction:lock(Key1,write,2000),
     Parent!{locked,self()},
     ecomet_transaction:release_lock(Key1),
     timer:sleep(5000)
@@ -514,7 +516,7 @@ external_simple_locks(_Config)->
     2000->?ERROR(child_timeout)
   end,
   ecomet_transaction:start(),
-  {ok,lock_value1}=ecomet_transaction:lock(Key1,write,1000),
+  lock_value1=ecomet_transaction:lock(Key1,write,1000),
   ecomet_transaction:rollback().
 
 
@@ -582,24 +584,24 @@ external_nested_locks(_Config)->
   Key2={?ROOT,?DATA,ramdisc,lock_key2},
   Key3={?ROOT,?DATA,ramdisc,lock_key3},
   ecomet_transaction:start(),
-  {ok,lock_value1}=ecomet_transaction:lock(Key1,read,none),
+  lock_value1=ecomet_transaction:lock(Key1,read,none),
   % Commit
   ecomet_transaction:start(),
   {lock_value1,read}=ecomet_transaction:find_lock(Key1),
-  {ok,not_found}=ecomet_transaction:lock(Key2,read,none),
+  ?assertThrow(not_found,ecomet_transaction:lock(Key2,read,none)),
   % Upgrade lock
-  {ok,lock_value1}=ecomet_transaction:lock(Key1,write,none),
+  lock_value1=ecomet_transaction:lock(Key1,write,none),
   ecomet_transaction:commit(),
   {lock_value1,write}=ecomet_transaction:find_lock(Key1),
-  {not_found,read}=ecomet_transaction:find_lock(Key2),
+  none = ecomet_transaction:find_lock(Key2),
   % Rollback
   ecomet_transaction:start(),
-  {ok,not_found}=ecomet_transaction:lock(Key3,read,none),
+  ?assertThrow(not_found,ecomet_transaction:lock(Key3,read,none)),
   ecomet_transaction:rollback(),
   {lock_value1,write}=ecomet_transaction:find_lock(Key1),
-  {not_found,read}=ecomet_transaction:find_lock(Key2),
+  none=ecomet_transaction:find_lock(Key2),
   % We hold locks even if transaction failed until main transaction finish
-  {not_found,read}=ecomet_transaction:find_lock(Key3),
+  none=ecomet_transaction:find_lock(Key3),
   ecomet_transaction:rollback(),
   ecomet_backend:dirty_delete(?ROOT,?DATA,ramdisc,lock_key).
 

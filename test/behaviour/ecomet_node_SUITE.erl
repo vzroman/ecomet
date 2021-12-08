@@ -111,6 +111,7 @@ register_node_test(_Config) ->
   meck:new(ecomet),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field ,Object)} end),
   meck:expect(ecomet, edit_object, fun(_Object, IDMapper) -> put(id, maps:get(<<"id">>, IDMapper)), ok end),
+  meck:expect(ecomet, set, fun(_,_,_,_) -> 0 end),
 
   ok = ecomet_node:register_node(#{<<".name">> => <<"jSparrow">>, <<"value">> => 123}),
   ID1 = get(id),
@@ -138,6 +139,7 @@ on_create_test(_Config) ->
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, element(1, maps:get(Field ,Object, none))} end),
   meck:expect(ecomet, edit_object, fun(_Object, IDMapper) -> put(id, maps:get(<<"id">>, IDMapper)), ok end),
+  meck:expect(ecomet, set, fun(_,_,_,_) -> 0 end),
 
   ?assertError(invalid_node_name, ecomet_node:on_create(#{<<".name">> => {<<"invalidname">>, none}})),
   ok = ecomet_node:on_create(#{<<".name">> => {<<"iwasbornin1998@faceplate.com">>, none}}),

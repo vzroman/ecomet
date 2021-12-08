@@ -96,22 +96,22 @@
 -define(FOLDER_SCHEMA,?OBJECT_SCHEMA#{
   <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
   <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
-  <<".recursive">> =>#{ type => bool },
-  <<".database">> =>#{ type => link, index=> [simple] }
+  <<"recursive_rights">> =>#{ type => bool },
+  <<"database">> =>#{ type => link, index=> [simple] }
 }).
 -define(PATTERN_SCHEMA,?FOLDER_SCHEMA#{
-  <<".behaviour">>=>#{ type => atom , index=> [simple] },
-  <<".inherit">>=>#{ type => link, index=> [simple], required => true },
-  <<".ancestors">>=>#{ type => list, subtype => link, index=> [simple] }
+  <<"behaviour_module">>=>#{ type => atom , index=> [simple] },
+  <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
+  <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
 }).
 -define(FIELD_SCHEMA,?OBJECT_SCHEMA#{
-  <<".type">>=>#{ type => atom, required => true, index=> [simple] },
-  <<".subtype">>=>#{ type => atom, index=> [simple] },
-  <<".index">>=>#{ type => list, subtype => atom, index=> [simple] },
-  <<".required">>=>#{ type => bool, index=> [simple] },
-  <<".default">> =>#{ type => term },
-  <<".storage">>=>#{ type => atom, default_value => disc, index=> [simple]  },
-  <<".autoincrement">>=>#{ type => bool, index=> [simple] }
+  <<"type">>=>#{ type => atom, required => true, index=> [simple] },
+  <<"subtype">>=>#{ type => atom, index=> [simple] },
+  <<"index">>=>#{ type => list, subtype => atom, index=> [simple] },
+  <<"required">>=>#{ type => bool, index=> [simple] },
+  <<"default">> =>#{ type => term },
+  <<"storage">>=>#{ type => atom, default_value => disc, index=> [simple]  },
+  <<"autoincrement">>=>#{ type => bool, index=> [simple] }
 }).
 %-------------STORAGE PATTERNS--------------------------------------------
 -define(DATABASE_SCHEMA,#{
@@ -142,7 +142,7 @@
   <<"usergroups">>=>#{ type => list, subtype => link, index=> [simple] }
   }).
 -define(USERGROUP_SCHEMA,#{
-  % No additional fields
+  <<"extend_groups">>=>#{ type => list, subtype => link, index=> [simple] }
 }).
 -define(SESSION_SCHEMA,#{
   <<"close">>=>#{ type => integer, index=> [simple,datetime] },
@@ -154,7 +154,7 @@
   <<"PID">>=>#{ type => term, required => true, index=> [simple], storage => ?RAMLOCAL },
   <<"rights">>=>#{ type => list, subtype => term, required => true,index=> [simple], storage => ?RAMLOCAL },
   <<"databases">>=>#{ type => list, subtype => atom, required => true,index=> [simple], storage => ?RAMLOCAL },
-  <<".index">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
+  <<"index">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
   <<"dependencies">>=>#{ type => list, subtype => string, required => true, index=> [simple], storage => ?RAMLOCAL },
   <<"no_feedback">>=>#{ type => bool, subtype => none, storage => ?RAMLOCAL }
 }).
@@ -409,6 +409,9 @@ init([])->
   ok = ecomet_session:on_start_node(node()),
 
   % Initialize subscriptions optimization
+  ok = ecomet_router:on_init( ?ENV( router_pool_size, ?ROUTER_POOL_SIZE ) ),
+
+  % Initialize subscriptions optimization
   ok = ecomet_resultset:on_init(),
 
   Cycle=?ENV(schema_server_cycle,?DEFAULT_SCHEMA_CYCLE),
@@ -609,9 +612,9 @@ init_base_types_objects()->
             { <<".object">>, #{
               fields=>#{
                 <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-                <<".behaviour">>=>ecomet_object,
-                <<".inherit">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
-                <<".ancestors">>=>[]
+                <<"behaviour_module">>=>ecomet_object,
+                <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
+                <<"parents">>=>[]
               },
               children=>init_pattern_fields(?OBJECT_SCHEMA)
             }},
@@ -619,9 +622,9 @@ init_base_types_objects()->
             { <<".folder">>, #{
               fields=>#{
                 <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-                <<".behaviour">>=>ecomet_folder,
-                <<".inherit">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
-                <<".ancestors">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}]
+                <<"behaviour_module">>=>ecomet_folder,
+                <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
+                <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}]
               },
               children=>init_pattern_fields(?FOLDER_SCHEMA)
             }},
@@ -630,9 +633,9 @@ init_base_types_objects()->
             { <<".pattern">>, #{
               fields=>#{
                 <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-                <<".behaviour">>=>ecomet_pattern,
-                <<".inherit">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN},
-                <<".ancestors">>=>[{?PATTERN_PATTERN,?FOLDER_PATTERN},{?PATTERN_PATTERN,?OBJECT_PATTERN}]
+                <<"behaviour_module">>=>ecomet_pattern,
+                <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN},
+                <<"parents">>=>[{?PATTERN_PATTERN,?FOLDER_PATTERN},{?PATTERN_PATTERN,?OBJECT_PATTERN}]
               },
               children=>init_pattern_fields(?PATTERN_SCHEMA)
             }},
@@ -640,9 +643,9 @@ init_base_types_objects()->
             { <<".field">>, #{
               fields=>#{
                 <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-                <<".behaviour">>=>ecomet_field,
-                <<".inherit">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
-                <<".ancestors">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}]
+                <<"behaviour_module">>=>ecomet_field,
+                <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN},
+                <<"parents">>=>[{?PATTERN_PATTERN,?OBJECT_PATTERN}]
               },
               children=>init_pattern_fields(?FIELD_SCHEMA)
             }}
@@ -691,14 +694,14 @@ init_storage_objects()->
         { <<".database">>, #{
           fields=>#{
             <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<".inherit">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
           },
           children=>init_pattern_fields(?DATABASE_SCHEMA)
         }},
         { <<".storage">>, #{
           fields=>#{
             <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<".inherit">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
           },
           children=>init_pattern_fields(?DATABASE_STORAGE_SCHEMA)
         }},
@@ -706,7 +709,7 @@ init_storage_objects()->
         { <<".segment">>, #{
           fields=>#{
             <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<".inherit">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
           },
           children=>init_pattern_fields(?SEGMENT_SCHEMA)
         }},
@@ -714,7 +717,7 @@ init_storage_objects()->
         { <<".node">>, #{
           fields=>#{
             <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<".inherit">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
           },
           children=>init_pattern_fields(?NODE_SCHEMA)
         }}
@@ -755,10 +758,10 @@ init_storage_objects()->
 
   % Step 3. Attach behaviours
   ok = ecomet:edit_object(ecomet:open(<<"/root/.patterns/.node">>),#{
-    <<".behaviour">>=>ecomet_node
+    <<"behaviour_module">>=>ecomet_node
   }),
   ok = ecomet:edit_object(ecomet:open(<<"/root/.patterns/.database">>),#{
-    <<".behaviour">>=>ecomet_db
+    <<"behaviour_module">>=>ecomet_db
   }),
 
   ok.
@@ -772,8 +775,8 @@ init_default_users()->
         { <<".user">>, #{
           fields=>#{
             <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<".inherit">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN},
-            <<".behaviour">>=>ecomet_user
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN},
+            <<"behaviour_module">>=>ecomet_user
           },
           children=>init_pattern_fields(?USER_SCHEMA)
         }},
@@ -781,14 +784,15 @@ init_default_users()->
         { <<".usergroup">>, #{
           fields=>#{
             <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<".inherit">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
-          }
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
+          },
+          children=>init_pattern_fields(?USERGROUP_SCHEMA)
         }},
         % SESSION
         { <<".session">>, #{
           fields=>#{
             <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<".inherit">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
           },
           children=>
             [ { Name, #{ edit => true, fields=> ecomet_field:from_schema(Config)} }
@@ -801,7 +805,7 @@ init_default_users()->
         { <<".subscription">>, #{
           fields=>#{
             <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<".inherit">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
+            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
           },
           children=>
           [ begin

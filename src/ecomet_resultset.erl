@@ -104,9 +104,15 @@ prepare(Conditions)->
 on_init()->
 	% Store the subscription pattern as a persistent term for optimized access
 	PatternID = ?OID(<<"/root/.patterns/.subscription">>),
-	ID=ecomet_object:get_id(PatternID),
-	Bit=ecomet_bitmap:set_bit(none,ID),
+
+	% Calculate the ServiceID
+	DB = ecomet_schema:get_db_id(?ROOT),
+	ServiceID = ecomet_object:get_service_id( DB, PatternID ),
+	Bit=ecomet_bitmap:set_bit(none,ServiceID),
+
+	% Register the ServiceID for the subscriptions
 	persistent_term:put({?MODULE,subscription_pattern},Bit),
+
 	ok.
 
 subscription_prepare(Conditions)->
@@ -318,6 +324,10 @@ build_leaf({'=',<<".path">>,Value})->
 		_->
 			?ERROR({invalid_path,Value})
 	end;
+build_leaf({'LIKE',<<".path">>,Value})->
+	Path = binary:split(Value, <<"/">>, [global]),
+	Path1 = [ F || F <- Path , length( unicode:characters_to_list(F) ) > 0 ],
+	path_recursive_search( Path1 );
 build_leaf({'=',<<".oid">>,Value})->
 	Object = ecomet_object:construct(Value),
 	#{
@@ -1156,4 +1166,112 @@ set_query_field({'ANDNOT',Item1,Item2},Field)->
 	{'ANDNOT',{set_query_field(Item1,Field),set_query_field(Item2,Field)},'UNDEFINED'};
 set_query_field(Item,Field)->
 	{'TAG',{Field,Item,datetime},'UNDEFINED'}.
+
+
+%%=====================================================================
+%%	Recursive search by path
+%%=====================================================================
+path_recursive_search([Name])->
+	% Search only by name
+	NameLength = length( unicode:characters_to_list(Name) ),
+	if
+		NameLength >= 3 ->
+			% We use fuzzy search if the string is 3 symbols or more
+			Roots = ecomet:get('*',[<<".oid">>],{'AND',[
+				{<<".pattern">>,'=',?OID(<<"/root/.patterns/.folder">>)},
+				{<<".name">>,'LIKE',Name}
+			]}),
+			{'OR',[
+				build_leaf({'LIKE',<<".name">>,Name})
+				|[build_leaf({'=',<<".folder">>,OID}) || OID <- ecomet_folder:get_content_recursive( Roots )]
+			],'UNDEFINED'};
+		true ->
+			% Otherwise only exact search
+			Roots = ecomet:get('*',[<<".oid">>],{'AND',[
+				{<<".pattern">>,'=',?OID(<<"/root/.patterns/.folder">>)},
+				{<<".name">>,'=',Name}
+			]}),
+			{'OR',[
+				build_leaf({'=',<<".name">>,Name})
+				|[build_leaf({'=',<<".folder">>,OID}) || OID <- ecomet_folder:get_content_recursive( Roots )]
+			],'UNDEFINED'}
+	end;
+
+path_recursive_search( [Root|TailPath] )->
+	case find_roots( Root ) of
+		[]->
+			% There are no folders fitting a root
+			empty_tag();
+		RootFolders->
+
+			% Find possible starting points
+			{ExactTail, [ItemName]} = lists:split(length(TailPath) -1, TailPath),
+			case [F || {ok,F}<-[ ecomet_folder:path2oid(R, ExactTail) || R <- RootFolders ]] of
+				[]->
+					% Nothing can be found as there are no folders with a path that satisfies the query
+					empty_tag();
+				StartPoints->
+					% Find possible entry points
+					TailNameLength = length( unicode:characters_to_list( ItemName ) ),
+					if
+						TailNameLength >= 2 ->
+							case ecomet_query:system('*',[<<".oid">>],{'AND',[
+								{'OR',[{<<".folder">>,'=',OID} || OID <- StartPoints]},
+								{<<".name">>,'LIKE',<<"^",ItemName/binary>>}
+							]}) of
+								[]->
+									% No satisfying entry points, nothing can be found
+									{'TAG',{<<".name">>,none,'simple'},'UNDEFINED'};
+								EntryPoints->
+									% Search through EntryPoints recursively and unite with the result of search in StartPoints by name
+									{'OR',[
+										{'AND',[
+											{'OR',[build_leaf({'=',<<".folder">>,OID})|| OID <- StartPoints],'UNDEFINED'},
+											build_leaf({'LIKE',<<".name">>,<<"^",ItemName/binary>>})
+										],'UNDEFINED'}
+										| [build_leaf({'=',<<".folder">>,OID})|| OID <- ecomet_folder:get_content_recursive( EntryPoints )]
+									],'UNDEFINED'}
+							end;
+						true ->
+							case ecomet_query:system('*',[<<".oid">>],{'AND',[
+								{'OR',[{<<".folder">>,'=',OID} || OID <- StartPoints]},
+								{<<".name">>,'=',ItemName}
+							]}) of
+								[]->
+									% No satisfying entry points, nothing can be found
+									empty_tag();
+								EntryPoints->
+									% Search through EntryPoints recursively and unite with the result of search in StartPoints by name
+									{'OR',[
+										{'AND',[
+											{'OR',[build_leaf({'=',<<".folder">>,OID})|| OID <- StartPoints],'UNDEFINED'},
+											build_leaf({'=',<<".name">>,ItemName})
+										],'UNDEFINED'}
+										| [build_leaf({'=',<<".folder">>,OID})|| OID <- ecomet_folder:get_content_recursive( EntryPoints )]
+									],'UNDEFINED'}
+							end
+					end
+			end
+	end.
+
+find_roots( Name )->
+
+	RootLength = length( unicode:characters_to_list(Name) ),
+	if
+		RootLength >= 2 ->
+			% We can search min by 3 symbols as Root ends we can add a string end symbol '$'
+			% therefore the minimum is 2
+			ecomet_query:system('*',[<<".oid">>],{'AND',[
+				{<<".pattern">>,'=',?OID(<<"/root/.patterns/.folder">>)},
+				{<<".name">>,'LIKE',<<Name/binary,"$">>}
+			]});
+		true ->
+			ecomet_query:system('*',[<<".oid">>],{'AND',[
+				{<<".pattern">>,'=',?OID(<<"/root/.patterns/.folder">>)},
+				{<<".name">>,'=',Name}
+			]})
+	end.
+
+empty_tag()->
+	{'TAG',{<<".name">>,none,'simple'},'UNDEFINED'}.
 
