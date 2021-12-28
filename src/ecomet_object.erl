@@ -163,7 +163,7 @@ create(Fields,Params) when is_list(Params)->
 create(#{<<".pattern">>:=Pattern} = Fields,#{format:=Format}=Params)->
   PatternID = Format(link,Pattern),
   Map=ecomet_pattern:get_map(PatternID),
-  ParsedFields = parse_fields(Format,Map,maps:remove(<<".pattern">>,Fields)),
+  ParsedFields = parse_fields(Format,Map,maps:without([<<".pattern">>,<<".oid">>], Fields)),
   Params1 = maps:remove(format,Params),
   Fields1 = ParsedFields#{<<".pattern">>=>PatternID},
   create(Fields1,Params1);
