@@ -228,7 +228,7 @@ inherit_rights(Object)->
   }).
 
 recursive_rights(Object)->
-  Recursion=ecomet:field_changes(Object,<<".recursive">>),
+  Recursion=ecomet:field_changes(Object,<<"recursive_rights">>),
   case Recursion of
     {true,_}->
       Read=rights_changes(Object,<<".readgroups">>),
@@ -282,7 +282,7 @@ apply_rights(Object,Changes,Additional)->
   Object1.
 
 apply_recursion(Object)->
-  Recursion=ecomet:field_changes(Object,<<".recursive">>),
+  Recursion=ecomet:field_changes(Object,<<"recursive_rights">>),
   case Recursion of
     {true,_}->
       Read=rights_changes(Object,<<".contentreadgroups">>),
@@ -305,8 +305,8 @@ apply_recursion(Object)->
             [begin
                Item=ecomet:open_nolock(ItemID),
                Additional=
-                 case ecomet:read_field(Item,<<".recursive">>) of
-                   {ok,_}->[{<<".recursive">>,true}];
+                 case ecomet:read_field(Item,<<"recursive_rights">>) of
+                   {ok,_}->[{<<"recursive_rights">>,true}];
                    _->[]
                  end,
                apply_rights(Item,Changes,Additional)
@@ -314,7 +314,7 @@ apply_recursion(Object)->
           end);
         true -> ok
       end,
-      ok = ecomet:edit_object(Object,#{<<".recursive">> => false});
+      ok = ecomet:edit_object(Object,#{<<"recursive_rights">> => false});
     _ ->ok
   end.
 
