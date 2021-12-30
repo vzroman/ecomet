@@ -700,7 +700,7 @@ read_up(Config)->
     ],
 
   % no lock
-  ReadFun1=ecomet_query:read_up(none),
+  ReadFun1=ecomet_query:read_up(none, get),
   lists:foreach(fun({OID,{Pattern,Name}})->
     #{
       <<".pattern">>:=Pattern,
@@ -709,7 +709,7 @@ read_up(Config)->
   end,lists:zip(OIDList,Fields)),
 
   % dirty
-  ReadFun2=ecomet_query:read_up(none),
+  ReadFun2=ecomet_query:read_up(none, get),
   lists:foreach(fun({OID,{Pattern,Name}})->
     #{
       <<".pattern">>:=Pattern,
@@ -718,7 +718,7 @@ read_up(Config)->
   end,lists:zip(OIDList,Fields)),
 
   %-----ReadLock-----------
-  ReadFun3=ecomet_query:read_up(read),
+  ReadFun3=ecomet_query:read_up(read, get),
   % No transaction
   ?assertError(no_transaction,lists:foreach(fun({OID,{Pattern,Name}})->
     #{
@@ -737,7 +737,7 @@ read_up(Config)->
                                      end),
 
   %-----WriteLock-----------
-  ReadFun4=ecomet_query:read_up(write),
+  ReadFun4=ecomet_query:read_up(write, set),
   {ok,_}=ecomet_transaction:internal(fun()->
     lists:foreach(fun({OID,{Pattern,Name}})->
       #{

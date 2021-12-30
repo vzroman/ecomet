@@ -61,7 +61,7 @@
   read_fun/2,
   read_map/2,
   is_aggregate/1,
-  read_up/1,
+  read_up/2,
   insert_to_group/4,
   sort_groups/2,
   merge_trees/4,
@@ -725,7 +725,7 @@ compile_map_reduce(get,Fields,Params)->
   % Paginating
   Page=maps:get(page,Params,none),
   % Fun to read object fields from storage, default lock is none (dirty operations)
-  ReadUp=read_up(maps:get(lock,Params,none)),
+  ReadUp=read_up(maps:get(lock,Params,none), get),
 
   % Build Map/Reduce plan
   {Map,Reduce}=map_reduce_plan(#{
@@ -770,7 +770,7 @@ compile_map_reduce(set,Fields,Params)->
          {Field,Value}
      end || {Field,Value} <- maps:to_list(Fields) ],
   % Fun to read object fields from storage, default lock is none (check rights is performed)
-  ReadUp=read_up(maps:get(lock,Params,none)),
+  ReadUp=read_up(maps:get(lock,Params,none), set),
   ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
   Update =
     fun(OID)->
@@ -807,7 +807,7 @@ compile_map_reduce(set,Fields,Params)->
 
 compile_map_reduce(delete,none,Params)->
   % Fun to read object fields from storage, default lock is none (check rights is performed)
-  ReadUp=read_up(maps:get(lock,Params,none)),
+  ReadUp=read_up(maps:get(lock,Params,none), delete),
   Map=
     fun(RS)->
       ecomet_resultset:foldr(fun(OID,Acc)->
@@ -1229,8 +1229,13 @@ is_aggregate([Field|Rest],Result)->
   end;
 is_aggregate([],Result)->Result.
 
-
-read_up(Lock)->
+read_up(none, get)->
+  % Optimized for reading case
+  fun(OID,Fields)->
+    Object=ecomet_object:construct(OID),
+    object_map(Object,ecomet_object:read_fields(Object,Fields))
+  end;
+read_up(Lock, _Any)->
   fun(OID,Fields)->
     Object=ecomet_object:open(OID,Lock),
     object_map(Object,ecomet_object:read_fields(Object,Fields))
