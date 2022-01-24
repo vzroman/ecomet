@@ -877,11 +877,8 @@ new_db_id(_Other,Id)->
 
 new_node_id()->
   new_node_id(mnesia:dirty_next(?SCHEMA, #nodeId{k=-1}), -1).
-new_node_id(#nodeId{k=NextID}=Node,Id)->
-  if
-    (NextID - Id) > 1 -> Id + 1 ;
-    true -> new_node_id( mnesia:dirty_next(?SCHEMA,Node), NextID )
-  end;
+new_node_id(#nodeId{k=NextID}=Node,_Id)->
+  new_node_id( mnesia:dirty_next(?SCHEMA,Node), NextID );
 new_node_id(_Other,Id)->
   % '$end_of_table' or other keys range
   Id + 1.
