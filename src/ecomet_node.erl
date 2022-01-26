@@ -246,4 +246,4 @@ unregister_node(Object)->
   ]},#{ lock => write }),
 
   % Remove the node from the schema
-  ecomet_schema:remove_node(Node).
+  ok = ecomet_schema:remove_node(Node).
