@@ -291,7 +291,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
     <<".name">>=>ID,
     <<"rights">>=>Rights,
     <<"databases">>=>DBs,
-    <<".index">>=>Index,
+    <<"index">>=>Index,
     <<"dependencies">>=>Deps,
     <<"no_feedback">>=>NoFeedback
   }),
@@ -472,9 +472,9 @@ on_commit(#ecomet_log{
   %-----------------------The SEARCH phase-------------------------------------
   Tags = TAdd1 ++ TOld1 ++ TDel1,
   Index = {'AND',[
-    {'OR',[ {<<".index">>,'=',{T,1}}  || T<-Tags ]},
-    {'OR',[ {<<".index">>,'=',{T,2}} || T<-[none|Tags] ]},
-    {'OR',[ {<<".index">>,'=',{T,3}} || T<-[none|Tags] ]}
+    {'OR',[ {<<"index">>,'=',{T,1}}  || T<-Tags ]},
+    {'OR',[ {<<"index">>,'=',{T,2}} || T<-[none|Tags] ]},
+    {'OR',[ {<<"index">>,'=',{T,3}} || T<-[none|Tags] ]}
   ]},
 
   Rights =

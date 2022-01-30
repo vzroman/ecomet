@@ -30,8 +30,6 @@
   syntax_tools,
   goldrush,
   lager,
-  eleveldb,
-  mnesia_eleveldb,
   dlss
 ]).
 
