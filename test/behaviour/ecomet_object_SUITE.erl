@@ -60,33 +60,42 @@ end_per_suite(_Config)->
   ok.
 
 check_storage_type_test(_Config) ->
-  meck:new([ecomet, ecomet_pattern]),
-  meck:expect(ecomet, read_field,
-    fun(Object, Field) ->
-      {ok, maps:get(Field, element(2, Object))}
-    end),
-  meck:expect(ecomet_pattern, get_storage, fun(Object) -> element(2, Object) end),
+  ecomet_user:on_init_state(),
+  Object1 = ecomet:create_object(#{
+    <<".name">> => <<"Name1">>,
+    <<".folder">> => ?OID(<<"/root">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.object">>)
+  }),
+  ok = ecomet_object:check_storage_type(Object1),
+  ecomet:delete_object(Object1),
 
-  % Create meck object %
-  % ?RAM, ?RAMLOCAL, ?RAMDISC, ?DISC%
-  % {
-  %    ?RAM,
-  %   #{<<".folder">> => {?RAM, <<"nomatter">>}},
-  % },
-  % <<.folder>> contain FolderStorage
+  FolderType = ecomet:create_object(#{
+    <<".name">> => <<"myfolder">>,
+    <<".folder">> => ?OID(<<"/root/.patterns">>),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.pattern">>),
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.folder">>)
+  }),
+  F = ecomet:open(?OID(<<"/root/.patterns/myfolder/.name">>)),
+  ok = ecomet:edit_object(F, #{<<"storage">> => ?RAM}),
 
-  % Persistent folders can contain any types of objects %
-  % Persistent means FolderStorage != ?RAM %
-  ok = ecomet_object:check_storage_type({ ?RAM, #{<<".folder">> => {?DISC, none}}}),
-  ok = ecomet_object:check_storage_type({ ?RAMDISC, #{<<".folder">> => {?RAMLOCAL, none}} }),
+  ct:pal("Map: ~p~n",[ecomet_pattern:get_map(FolderType)]),
 
-  % Ram only folders cannot contain persistent objects %
-  % It means in case FolderStorage == ?RAM, object storage could be only ?RAM%
-  ok = ecomet_object:check_storage_type({ ?RAM, #{<<".folder">> => {?RAM, none}} }),
-  ?assertError(ram_only_folder, ecomet_object:check_storage_type({ ?DISC, #{<<".folder">> => {?RAM, none}} })),
 
-  meck:unload([ecomet, ecomet_pattern]),
+  ct:pal("~nStorage: ~p~n",[ecomet_pattern:get_storage(FolderType)]),
 
+  MyFolder = ecomet:create_object(#{
+    <<".name">> => <<"folder1">>,
+    <<".folder">> => ?OID(<<"/root">>),
+    <<".pattern">> => ?OID(FolderType)
+  }),
+
+  ?assertError({ram_only_folder, _} ,ecomet:create_object(#{
+    <<".name">> => <<"Name2">>,
+    <<".folder">> => ?OID(MyFolder),
+    <<".pattern">> => ?OID(<<"/root/.patterns/.object">>)
+  })),
+
+  ecomet:delete_object(MyFolder),
   ok.
 
 check_path_test(_Config) ->

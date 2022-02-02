@@ -239,8 +239,8 @@ on_create_test(_Config) ->
 
   %ecomet:delete_object(Folder2),
   ?assertError({contains_objects, _}, ecomet:edit_object(Folder1, #{<<"database">> => ?OID(NotSoUseless)})) ,
-  ecomet:delete_object(Folder2),
 
+  ecomet:delete_object(Folder2),
   ecomet:delete_object(Folder1),
   ecomet:delete_object(MyUselessDB),
   ecomet:delete_object(NotSoUseless),
@@ -250,13 +250,13 @@ on_create_test(_Config) ->
 on_edit_test(_Config) ->
   ecomet_user:on_init_state(),
   MyUselessDB = ecomet:create_object(#{
-    <<".name">> => <<"VeryUseless">>,
+    <<".name">> => <<"VeryUseless1">>,
     <<".folder">> => ?OID(<<"/root/.databases">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.database">>)
   }),
 
   NotSoUseless = ecomet:create_object(#{
-    <<".name">> => <<"NotSoUseless">>,
+    <<".name">> => <<"NotSoUseless1">>,
     <<".folder">> => ?OID(<<"/root/.databases">>),
     <<".pattern">> => ?OID(<<"/root/.patterns/.database">>)
   }),
@@ -269,7 +269,7 @@ on_edit_test(_Config) ->
   }),
 
   %ct:pal("db for /root/Chester ~p",[ecomet_schema:get_mounted_folder(<<"/root/Chester/some">>)]),
-  'VeryUseless' = ecomet_schema:get_mounted_db(?OID(Folder1)),
+  'VeryUseless1' = ecomet_schema:get_mounted_db(?OID(Folder1)),
 
   Folder2 = ecomet:create_object(#{
     <<".name">> => <<"LightBringer">>,
@@ -284,7 +284,7 @@ on_edit_test(_Config) ->
   % Folder2 deleted and here Folder1 is empty
   % So we can change <<database>> field %
   ecomet:edit_object(Folder1, #{<<"database">> => ?OID(NotSoUseless)}),
-  'NotSoUseless' = ecomet_schema:get_mounted_db(?OID(Folder1)),
+  'NotSoUseless1' = ecomet_schema:get_mounted_db(?OID(Folder1)),
 
   ecomet:delete_object(Folder1),
   ecomet:delete_object(MyUselessDB),

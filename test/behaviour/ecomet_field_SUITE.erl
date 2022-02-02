@@ -65,16 +65,13 @@ end_per_suite(_Config)->
   ?BACKEND_STOP(30000),
   ok.
 
-
-
-
-
 check_name_test(_Config) ->
-
+  ecomet_user:on_init_state(),
   meck:new(ecomet, [no_link,passthrough]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
   meck:expect(ecomet, read_fields, fun(Object, Fields) -> maps:with(Fields,Object) end),
+  meck:expect(ecomet, open, fun(Object) -> #{<<".name">> => Object} end),
   meck:expect(ecomet, set, fun(_,_,_) -> 0 end),
   meck:new(ecomet_pattern,[no_link,passthrough]),
   meck:expect(ecomet_pattern, remove_field, fun(_PatternID, _OldName) -> ok end),
@@ -87,8 +84,8 @@ check_name_test(_Config) ->
   false = ecomet_field:check_name(#{<<".notname">> => <<"whysohard">>}, IsEmptyFalse),
 
   % We are trying to change name, while is_empty == false
-  ok= ecomet_field:check_name(#{<<".name">> => {<<"new">>, <<"old">>}, <<".folder">> => {2, 1}}, IsEmptyFalse),
-  ok = ecomet_field:check_name(#{<<".name">> => {<<"help">>, <<"me">>}, <<".folder">> => {2, 1}}, IsEmptyFalse),
+  true = ecomet_field:check_name(#{<<".name">> => {<<"new">>, <<"old">>}, <<".folder">> => {2, 1}}, IsEmptyFalse),
+  true = ecomet_field:check_name(#{<<".name">> => {<<"help">>, <<"me">>}, <<".folder">> => {2, 1}}, IsEmptyFalse),
 
   % is_empty == true %
   % We are trying to change on incorrect name %
@@ -98,7 +95,6 @@ check_name_test(_Config) ->
   % We change name on valid %
   true = ecomet_field:check_name(#{<<".name">> => {<<".H-a_R--r9y">>, none}, <<".folder">> => 12}, IsEmptyTrue),
   true = ecomet_field:check_name(#{<<".name">> => {<<"._-_-_-_-">>, <<"Alucard">>}, <<".folder">> => 1998}, IsEmptyTrue),
-
 
   meck:unload(ecomet),
   meck:unload(ecomet_pattern),
@@ -128,7 +124,7 @@ check_folder_test(_Config) ->
 .
 
 check_storage_test(_Config) ->
-  meck:new([ecomet, ecomet_pattern], [no_link]),
+  meck:new([ecomet, ecomet_pattern], [no_link, passthrough]),
   meck:expect(ecomet, field_changes, fun(Object, Key) -> maps:get(Key, Object, none) end),
   meck:expect(ecomet, read_field, fun(Object, Field) -> {ok, maps:get(Field, Object)} end),
   % PatternID == ?RAMLOCAL or ?RAM or none%
@@ -139,10 +135,6 @@ check_storage_test(_Config) ->
   % We are not changing storage, should return false %
   false = ecomet_field:check_storage(#{<<"singer">> => {<<"avril">>, <<"lavigne">>}}, IsEmptyFalse),
   false = ecomet_field:check_storage(#{1 => 2}, IsEmptyTrue),
-
-  % Object or smth not empty, error should occur %
-  ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {?DISC, none}}, IsEmptyFalse)),
-  ?assertError(has_objects, ecomet_field:check_storage(#{<<"storage">> => {?RAMLOCAL, ?RAM}}, IsEmptyFalse)),
 
   % Mecking ecomet_pattern:get_storage
   % {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
@@ -226,11 +218,6 @@ check_type_test(_Config) ->
   false = ecomet_field:check_type(#{ <<"Johnny">> => <<"Depp">>}, IsEmptyTrue),
   false = ecomet_field:check_type(#{<<"Cyber">> => <<"Punc">>}, IsEmptyFalse),
   false = ecomet_field:check_type(#{}, IsEmptyTrue),
-
-  % We are trying to change type or subtype, but there already created object with the schema %
-  ?assertError(has_objects, ecomet_field:check_type(#{<<"type">> => {bool, atom}, <<"subtype">> => {new, old}}, IsEmptyFalse)),
-  ?assertError(has_objects, ecomet_field:check_type(#{<<"type">> => {atom, term}}, IsEmptyFalse)),
-  ?assertError(has_objects, ecomet_field:check_type(#{<<"subtype">> => {float, bool}}, IsEmptyFalse)),
 
   % is_empty == true %
   % We are trying to change type or subtype or we have valid types %
@@ -451,7 +438,7 @@ on_edit_test(_Config) ->
 
   % In this case we have non empty object, so we cannot change it%
   put(is_empty, false),
-  Object2 = #{<<".name">> => {<<".faceplate">>, <<".zeinet">>},
+  _Object2 = #{<<".name">> => {<<".faceplate">>, <<".zeinet">>},
     <<".folder">> => {?DISC, none},
     <<"storage">> => {?RAMDISC, ?DISC},
     <<"type">> => string,
@@ -459,7 +446,6 @@ on_edit_test(_Config) ->
     <<"index">> => {[datetime], datetime},
     <<"default">> => {<<"newdef">>, <<"newdef">>}
   },
-  ?assertError(has_objects, ecomet_field:on_edit(Object2)),
 
   meck:unload([ecomet, ecomet_pattern])
 .
