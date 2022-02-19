@@ -38,6 +38,7 @@ Condition
 Operator
 Atom
 Field
+FieldValue
 ConstTerm
 Constant
 ConstantList
@@ -97,6 +98,8 @@ float
 '$'
 '*'
 '='
+'>'
+%'<'
 ':='
 ':>'
 ':<'
@@ -160,12 +163,15 @@ GetFieldList -> '*': ['*'].
 GetFieldList -> GetField: ['$1'].
 GetFieldList -> GetField ',' GetFieldList: ['$1'|'$3'].
 
-GetField -> Field 'AS' text : { get_token('$3'), '$1' }.
-GetField -> Field : '$1'.
+GetField -> FieldValue 'AS' text : { get_token('$3'), field_value('$1') }.
+GetField -> FieldValue : { field_name('$1') ,field_value('$1')}.
 GetField -> Function '(' ')' 'AS' text : { get_token('$5'), compile('$1',[]) }.
 GetField -> Function '(' ')' : compile('$1',[]).
 GetField -> Function '(' VariableList ')' 'AS' text : { get_token('$6'), compile('$1','$3') }.
 GetField -> Function '(' VariableList ')' : compile('$1','$3').
+
+FieldValue -> Field '>' FieldValue : ['$1'|'$3'].
+FieldValue -> Field : ['$1'].
 
 SetFieldList -> SetField: ['$1'].
 SetFieldList -> SetField ',' SetFieldList: ['$1'|'$3'].
@@ -194,7 +200,7 @@ VariableList -> Variable : ['$1'].
 VariableList -> Variable ',' VariableList : ['$1'|'$3'].
 
 Variable -> ConstTerm : '$1'.
-Variable -> '$' Field : get_field('$2').
+Variable -> '$' FieldValue : get_field(field_value('$2')).
 Variable -> '[' VariableList ']': compile('$2').
 Variable -> Function '(' ')' : compile('$1',[]).
 Variable -> Function '(' VariableList ')' : compile('$1','$3').
@@ -281,8 +287,21 @@ Erlang code.
 get_token({Token, _Line})->Token;
 get_token({_Token, _Line, Value}) -> Value.
 
+get_field({Fun,Args}) when is_function(Fun)->
+    {Fun,Args};
 get_field(Field)->
     {fun erlang:hd/1,[Field]}.
+
+field_name([Field])->
+    Field;
+field_name([Field|Rest])->
+    <<Field/binary,">",(field_name(Rest))/binary>>.
+
+
+field_value([Field])->
+    Field;
+field_value([Link|FieldChain])->
+    {fun([OID])-> ecomet_ql_util:join([OID|FieldChain]) end,[Link]}.
 
 compile(VarList)->
     ecomet_query:compile_function(VarList).

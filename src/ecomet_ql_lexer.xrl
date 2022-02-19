@@ -59,6 +59,8 @@ ATOM        = ([a-zA-Z][a-zA-Z0-9_\-]*)
 S           = (\$)
 ALL         = (\*)
 EQ          = (=)
+GT          = (>)
+LT          = (<)
 EQS         = (:=)
 GTS         = (:>)
 LTS         = (:<)
@@ -107,6 +109,8 @@ Rules.
 {S}           : {token, {'$', TokenLine}}.
 {ALL}         : {token, {'*', TokenLine}}.
 {EQ}          : {token, {'=', TokenLine}}.
+{GT}          : {token, {'>',TokenLine}}.
+{LT}          : {token, {'<',TokenLine}}.
 {EQS}         : {token, {':=',TokenLine}}.
 {GTS}         : {token, {':>',TokenLine}}.
 {LTS}         : {token, {':<',TokenLine}}.
