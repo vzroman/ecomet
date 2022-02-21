@@ -164,7 +164,10 @@ GetFieldList -> GetField: ['$1'].
 GetFieldList -> GetField ',' GetFieldList: ['$1'|'$3'].
 
 GetField -> FieldValue 'AS' text : { get_token('$3'), field_value('$1') }.
-GetField -> FieldValue : { field_name('$1') ,field_value('$1')}.
+GetField -> FieldValue : case {field_name('$1') ,field_value('$1')} of
+                            {F,F} -> F;
+                            {Name,Value} -> {Name,Value}
+                         end.
 GetField -> Function '(' ')' 'AS' text : { get_token('$5'), compile('$1',[]) }.
 GetField -> Function '(' ')' : compile('$1',[]).
 GetField -> Function '(' VariableList ')' 'AS' text : { get_token('$6'), compile('$1','$3') }.
