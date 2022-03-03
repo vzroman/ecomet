@@ -786,19 +786,13 @@ compile_map_reduce(set,Fields,Params)->
   Map=
     fun(RS)->
       ecomet_resultset:foldr(fun(OID,Acc)->
-        case ecomet:is_transaction() of
-          true ->
-            Update(OID),
-            Acc + 1;
-          _->
-            try
-              Update(OID),
-              Acc+1
-            catch
-              _:Error->
-                ?LOGERROR("unable to update ~p, error ~p",[OID,Error]),
-                Acc
-            end
+        try
+          Update(OID),
+          Acc+1
+        catch
+          _:Error->
+            ?LOGERROR("unable to update ~p, error ~p",[OID,Error]),
+            Acc
         end
       end,0,RS)
     end,
