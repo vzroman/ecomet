@@ -355,6 +355,11 @@ build_leaf({'LIKE',Field,Value})->
 %-------------datetime index search---------------------------
 build_leaf({'DATETIME',Field,[From,To]})->
 
+	if
+		From > To-> throw( {invalid_time_range, From, To} );
+		true -> ok
+	end,
+
 	% Build an index on the time points
 	FromIndex = ecomet_index:build_dt([From],[]),
 	ToIndex = ecomet_index:build_dt([To],[]),
