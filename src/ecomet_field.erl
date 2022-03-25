@@ -580,15 +580,26 @@ check_index(Object,_IsEmpty)->
   end.
 
 check_default(Object,_IsEmpty)->
-  case ecomet:field_changes(Object,<<"default">>) of
-    none->false;
-    {none,_Old}->true;
-    { NewDefault, _Old}->
+  ChangedFields = lists:foreach(fun(F) -> ecomet:field_changes(Object,F) end, [<<"defautlt">>, <<"type">>, <<"subtype">>]),
+  IsChanged = lists:foldl(fun(Changes, Acc) ->
+    case Changes of
+      {New, _} when New =/= none -> true;
+      _ -> Acc
+    end
+   end, false, ChangedFields),
+  if
+    IsChanged ->
+      {ok, NewDefault} = ecomet:read_field(Object, <<"default">>),
       Type = get_type(to_schema(Object)),
       case ecomet_types:parse_safe(Type,NewDefault) of
         {ok,Parsed}->
           ok = ecomet:edit_object(Object,#{<<"default">>=>Parsed});
         _->?ERROR(invalid_default_value)
       end,
-      true
+      true;
+    true ->
+      case hd(ChangedFields) of
+        none -> false;
+        {none, _Old} -> true
+      end
   end.
