@@ -580,7 +580,7 @@ check_index(Object,_IsEmpty)->
   end.
 
 check_default(Object,_IsEmpty)->
-  ChangedFields = lists:foreach(fun(F) -> ecomet:field_changes(Object,F) end, [<<"defautlt">>, <<"type">>, <<"subtype">>]),
+  ChangedFields = [ecomet:field_changes(Object,F)||F <- [<<"default">>, <<"type">>, <<"subtype">>]],
   IsChanged = lists:foldl(fun(Changes, Acc) ->
     case Changes of
       {New, _} when New =/= none -> true;
