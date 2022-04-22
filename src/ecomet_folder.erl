@@ -177,6 +177,7 @@ on_create(Object)->
 
 on_edit(Object)->
   check_database(Object),
+  check_content_rights(Object),
   recursive_rights(Object),
   apply_recursion(Object),
   ok.
@@ -223,9 +224,43 @@ inherit_rights(Object)->
     <<".contentwritegroups">> => Write
   }),
   ok = ecomet:edit_object(Object,#{
-    <<".contentreadgroups">>=>ContentRead,
-    <<".contentwritegroups">>=>ContentWrite
+    <<".contentreadgroups">>=>
+      if is_list( ContentRead ) ->
+        ordsets:from_list(ContentRead);
+        true -> ContentRead
+      end,
+    <<".contentwritegroups">>=>
+      if is_list( ContentWrite ) ->
+        ordsets:from_list(ContentWrite);
+        true -> ContentWrite
+      end
   }).
+
+check_content_rights(Object)->
+  IsChanged=
+    case ecomet:field_changes(Object,<<".contentwritegroups">>) of
+      none->
+        case ecomet:field_changes(Object,<<".contentreadgroups">>) of
+          none->false;
+          _->true
+        end;
+      _->true
+    end,
+  if
+    IsChanged ->
+      #{
+        <<".contentreadgroups">>:=Read,
+        <<".contentwritegroups">>:=Write
+      } = ecomet:read_fields(Object,#{
+        <<".contentreadgroups">> => [],
+        <<".contentwritegroups">> => []
+      }),
+      ecomet:edit_object(Object,#{
+        <<".contentreadgroups">> => ordsets:from_list(Read++Write),
+        <<".contentwritegroups">> => ordsets:from_list(Write)
+      });
+    true -> ok
+  end.
 
 recursive_rights(Object)->
   Recursion=ecomet:field_changes(Object,<<"recursive_rights">>),

@@ -899,7 +899,8 @@ edit_rights(Object)->
         <<".writegroups">> => []
       }),
       edit(Object,#{
-        <<".readgroups">> => ordsets:from_list(Read++Write)
+        <<".readgroups">> => ordsets:from_list(Read++Write),
+        <<".writegroups">> => ordsets:from_list(Write)
       });
     true -> ok
   end.
