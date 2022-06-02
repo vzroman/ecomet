@@ -105,7 +105,8 @@
 -export([
   ts/0,
   stop/0,
-  get_storage_name/3
+  get_storage_name/3,
+  rebuild_index/1, rebuild_index/2
 ]).
 
 % @edoc ecomet object denotes map where each key is field_key()
@@ -368,3 +369,7 @@ stop()->
 get_storage_name(Name,Storage,Type)->
   ecomet_backend:get_storage_name(Name,Storage,Type).
 
+rebuild_index(OID)->
+  ecomet_object:rebuild_index( OID ).
+rebuild_index(OID, Fields)->
+  ecomet_object:rebuild_index(OID, Fields).
