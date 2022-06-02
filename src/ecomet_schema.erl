@@ -139,7 +139,8 @@
 %-------------USER PATTERNS--------------------------------------------
 -define(USER_SCHEMA,#{
   <<"password">>=>#{ type => string, required => true },
-  <<"usergroups">>=>#{ type => list, subtype => link, index=> [simple] }
+  <<"usergroups">>=>#{ type => list, subtype => link, index=> [simple] },
+  <<"memory_limit">>=>#{ type => integer }
   }).
 -define(USERGROUP_SCHEMA,#{
   <<"extend_groups">>=>#{ type => list, subtype => link, index=> [simple] }

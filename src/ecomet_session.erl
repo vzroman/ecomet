@@ -115,14 +115,20 @@ start_link(Context,Info)->
       #{memory_limit := Limit} when is_integer(Limit)->
         Limit;
       _->
-        ?ENV(process_memory_limit, ?PROCESS_MEMORY_LIMIT)
+        {ok,UID} = ecomet_user:get_user(),
+        case ecomet:read_field(?OBJECT(UID), <<"memory_limit">> ) of
+          {ok, Limit} when is_integer( Limit )->
+            Limit;
+          _ ->
+            ?ENV(process_memory_limit, ?PROCESS_MEMORY_LIMIT)
+        end
     end,
 
   if
     is_integer(MemoryLimit) ->
       WordSize = erlang:system_info(wordsize),
       process_flag(max_heap_size, #{
-        size => (MemoryLimit div WordSize) * ?MB,
+        size => (MemoryLimit * ?MB) div WordSize,
         kill => true,
         error_logger => true
       });
