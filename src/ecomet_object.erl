@@ -1038,7 +1038,12 @@ save(#object{oid=OID,map=Map}=Object,Fields,Handler)->
   ecomet_transaction:queue_commit(OID),
 
   % Run behaviours
-  [ Behaviour:Handler(Object) || Behaviour <- ecomet_pattern:get_behaviours(Map) ],
+  [ case erlang:function_exported(Behaviour,Handler,1) of
+      true ->
+        Behaviour:Handler(Object);
+      _ ->
+        ?LOGWARNING("invalid behaviour ~p:~p",[Behaviour, Handler])
+  end || Behaviour <- ecomet_pattern:get_behaviours(Map) ],
 
   % Release object from under the Handler
   ecomet_transaction:dict_remove([{OID,handler}]),
