@@ -505,12 +505,7 @@ on_commit(#ecomet_log{
 
   ok.
 
-notify( Filter, Log )->
-  Session =
-    case ecomet_user:get_session() of
-      {ok,S}->S;
-      _->none
-    end,
+notify( Filter, #ecomet_log{self = Self} = Log )->
 
   Query = ecomet_resultset:subscription_compile( Filter ),
 
@@ -525,7 +520,7 @@ notify( Filter, Log )->
 
       % TODO. More selective sort out the author of the changes
       if
-        NoFeedback, PID=:=Session-> ok;
+        NoFeedback, PID=:=Self-> ok;
         true ->
           % Run the second (FINAL MATCH) phase
           ecomet_session:on_subscription( PID, ID, Log )

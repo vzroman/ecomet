@@ -434,7 +434,12 @@ merge_log([OID|Rest],Parentlog)->
 merge_log([],Parentlog)->Parentlog.
 
 on_commit(Log,OnCommits)->
-  run_notifications(Log),
+  Session =
+    case ecomet_user:get_session() of
+      {ok, PID} -> PID;
+      _ -> none
+    end,
+  run_notifications([L#ecomet_log{self = Session} || L <- Log]),
   run_oncommits(lists:reverse(OnCommits)).
 
 % Run notifications

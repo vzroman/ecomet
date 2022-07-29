@@ -45,7 +45,8 @@
   ts,
   tags,
   rights,
-  changes
+  changes,
+  self
 }).
 
 -define(ERROR(Error),erlang:error(Error)).
