@@ -253,11 +253,13 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
   #{
     stateless := Stateless,     % No initial query, only updates
     no_feedback := NoFeedback,    % Do not send updates back to the author process
-    format := Formatter         % Format fields according to their types
+    format := Formatter,         % Format fields according to their types
+    timeout := Timeout
   } = maps:merge(#{
     stateless => false,
     no_feedback => false,
-    format => undefined
+    format => undefined,
+    timeout => undefined
   },InParams),
 
   %----------Compile fields---------------------------
@@ -286,15 +288,14 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
   Index = ecomet_resultset:subscription_indexes(CompiledSubscription),
 
   % Register a subscription object for the SEARCH phase.
-  % The TS is a time point from which
-  ok = ecomet_session:register_subscription(#{
+  PID = ecomet_session:register_subscription(#{
     <<".name">>=>ID,
     <<"rights">>=>Rights,
     <<"databases">>=>DBs,
     <<"index">>=>Index,
     <<"dependencies">>=>Deps,
     <<"no_feedback">>=>NoFeedback
-  }),
+  }, Timeout),
 
   % If the subscription is not stateless (default) then we need to
   % perform a traditional search for what is already satisfies the conditions
@@ -363,7 +364,9 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
       end,
 
   % Run the subscription
-  ok = ecomet_session:run_subscription(ID,Match).
+  ecomet_session:run_subscription(PID,Match),
+
+  ok.
 
 compile_subscribe_read([<<".oid">>],_Formatter)->
   { fun(_Changed,_Object)-> #{} end, [<<"@ANY@">>] };
@@ -513,7 +516,6 @@ notify( Filter, #ecomet_log{self = Self} = Log )->
     ecomet_resultset:foldl(fun(OID,Acc)->
       Object = ecomet_object:construct(OID),
       #{
-        <<".name">>:=ID,
         <<"PID">>:=PID,
         <<"no_feedback">>:=NoFeedback
       } = ecomet:read_fields(Object,[<<".name">>,<<"PID">>,<<"no_feedback">>]),
@@ -523,7 +525,7 @@ notify( Filter, #ecomet_log{self = Self} = Log )->
         NoFeedback, PID=:=Self-> ok;
         true ->
           % Run the second (FINAL MATCH) phase
-          ecomet_session:on_subscription( PID, ID, Log )
+          ecomet_session:on_subscription( PID, Log )
       end,
       Acc
     end,none,RS)
