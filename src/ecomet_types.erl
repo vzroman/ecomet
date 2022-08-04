@@ -284,6 +284,12 @@ to_string({list,Type},Value)->
 %% ====================================================================
 from_json(_Type,null)->
   none;
+from_json({list,Type},Value)->
+  [from_json(Type,Item)||Item <- Value];
+from_json(term,Value) when is_list(Value)->
+  [from_json(term,Item)||Item <- Value];
+from_json(term,Value) when is_map(Value)->
+  maps:map(fun(_K,V)->from_json(term,V) end, Value );
 from_json(Type,Value)->
   % The default from_string parser is flexible enough
   from_string(Type,Value).
