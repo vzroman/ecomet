@@ -296,7 +296,7 @@ search_or([T|Tags], Acc)->
     Set when Acc =:= none->
       search_or(Tags,Set);
     Set->
-      search_or( T, gb_sets:union(Set,Acc) )
+      search_or(Tags, gb_sets:union(Set,Acc))
   end;
 search_or([],Acc)->
   Acc.
