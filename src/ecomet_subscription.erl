@@ -24,7 +24,7 @@
 %%=================================================================
 -export([
   on_init/0,
-  start_link/3,
+  start_link/4,
   run/2,
   stop/1,
 
@@ -32,10 +32,10 @@
   notify/2
 ]).
 
--record(subscription,{id, pid }).
+-record(subscription,{id, pid, owner }).
 -record(index,{key, value}).
 
--record(state,{id, owner, params, match}).
+-record(state,{id, session, owner, params, match}).
 
 -define(SUBSCRIPTIONS,ecomet_subscriptions).
 -define(S_INDEX,ecomet_subscriptions_index).
@@ -56,8 +56,8 @@ on_init()->
 
   ok.
 
-start_link( Id, Params, MemoryLimit )->
-  Owner = self(),
+start_link( Id, Owner, Params, MemoryLimit )->
+  Session = self(),
   case ets:lookup(?SUBSCRIPTIONS,{Owner,Id}) of
     []->
 
@@ -66,14 +66,14 @@ start_link( Id, Params, MemoryLimit )->
         MemoryLimit(),
 
         % Register the subscription process
-        ets:insert(?SUBSCRIPTIONS,#subscription{ id = {Owner,Id}, pid = self() }),
+        ets:insert(?SUBSCRIPTIONS,#subscription{ id = {Session,Id}, pid = self(), owner = Owner }),
 
         % Enter the wait loop
-        wait_for_run(#state{id = {Owner,Id}, owner = Owner, params = Params}, [])
+        wait_for_run(#state{id = {Owner,Id}, session = Session, owner = Owner, params = Params}, [])
       end),
 
       % Build subscription index
-      build_index(PID, Params),
+      build_index(PID, Owner, Params),
 
       {ok,PID};
     _->
@@ -89,7 +89,7 @@ stop(PID)->
 %%------------------------------------------------------------
 %%  Search engine
 %%------------------------------------------------------------
-build_index(PID, #{
+build_index(PID, Owner, #{
   rights:=Rights,
   databases:=DBs,
   tags:=Tags,
@@ -97,7 +97,7 @@ build_index(PID, #{
   no_feedback:=NoFeedback
 })->
 
-  Value = {PID,NoFeedback},
+  Value = {PID, Owner, NoFeedback},
 
   % dependencies
   [ case ets:lookup(?S_INDEX,{deps, D}) of
@@ -133,7 +133,7 @@ build_index(PID, #{
 
   ok.
 
-destroy_index(PID,#{
+destroy_index(PID, Owner, #{
   rights:=Rights,
   databases:=DBs,
   tags:=Tags,
@@ -141,7 +141,7 @@ destroy_index(PID,#{
   no_feedback:=NoFeedback
 })->
 
-  Value = {PID,NoFeedback},
+  Value = {PID, Owner, NoFeedback},
 
   % dependencies
   [ case ets:lookup(?S_INDEX,{deps, D}) of
@@ -252,9 +252,9 @@ notify( Query, #ecomet_log{self = Self} = Log )->
   case search( Query ) of
     none -> ignore;
     Set ->
-      gb_sets:fold(fun({PID,NoFeedback}, Acc)->
+      gb_sets:fold(fun({PID, Owner, NoFeedback}, Acc)->
         if
-          NoFeedback, PID=:=Self-> ignore;
+          NoFeedback, Owner=:=Self-> ignore;
           true ->
             % Run the second (FINAL MATCH) phase
             PID ! {match,Log}
@@ -306,7 +306,7 @@ search_or([],Acc)->
 %%  Subscription process
 %%------------------------------------------------------------
 % The subscription is not started yet, stockpile the logs and wait for message to start
-wait_for_run(#state{owner = Owner}=State, Buffer)->
+wait_for_run(#state{session = Session}=State, Buffer)->
   receive
     {match,Log}->
       wait_for_run(State, [Log|Buffer]);
@@ -315,9 +315,9 @@ wait_for_run(#state{owner = Owner}=State, Buffer)->
       % Run the buffer
       [ Match(Log) || Log <- lists:reverse(Buffer) ],
       subscription_loop(State#state{match = Match});
-    {stop, Owner}->
+    {stop, Session}->
       % The exit command
-      unlink(Owner),
+      unlink(Session),
 
       clean_up( State );
     Unexpected->
@@ -326,16 +326,16 @@ wait_for_run(#state{owner = Owner}=State, Buffer)->
   end.
 
 % The subscription is active, wait for log events.
-subscription_loop(#state{owner = Owner,match = Match} = State)->
+subscription_loop(#state{session = Session, match = Match} = State)->
   receive
     {match,Log}->
       try Match(Log) catch
         _:Error->?LOGERROR("subscription matching error, error ~p",[Error])
       end,
       subscription_loop(State);
-    {stop, Owner}->
+    {stop, Session}->
       % The exit command
-      unlink(Owner),
+      unlink(Session),
 
       clean_up( State );
     Unexpected->
@@ -343,12 +343,12 @@ subscription_loop(#state{owner = Owner,match = Match} = State)->
       subscription_loop(State)
   end.
 
-clean_up( #state{ id =Id, params = Params} )->
+clean_up( #state{ id =Id, owner = Owner, params = Params} )->
   % Unregister the subscription process
   ets:delete(?SUBSCRIPTIONS,Id),
 
   % Destroy index
-  destroy_index( self(), Params ),
+  destroy_index( self(), Owner, Params ),
 
   ok.
 

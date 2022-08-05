@@ -157,12 +157,13 @@ init([Name,Info,Owner,MemoryLimit])->
 
 
 handle_call({register_subscription, Id, Params}, _From, #state{
+  owner = Owner,
   user = Name ,
   subs = Subs,
   memory_limit = MemoryLimit
 } = State) ->
 
-  case ecomet_subscription:start_link( Id, Params, MemoryLimit ) of
+  case ecomet_subscription:start_link( Id, Owner, Params, MemoryLimit ) of
     {ok,PID}->
       ?LOGDEBUG("register subscription ~p for user ~ts, PID ~p",[Id,Name,PID]),
       {reply,{ok,PID},State#state{subs = Subs#{Id=>PID}}};
