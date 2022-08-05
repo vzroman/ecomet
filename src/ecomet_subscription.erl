@@ -69,7 +69,7 @@ start_link( Id, Owner, Params, MemoryLimit )->
         ets:insert(?SUBSCRIPTIONS,#subscription{ id = {Session,Id}, pid = self(), owner = Owner }),
 
         % Enter the wait loop
-        wait_for_run(#state{id = {Owner,Id}, session = Session, owner = Owner, params = Params}, [])
+        wait_for_run(#state{id = {Session,Id}, session = Session, owner = Owner, params = Params}, [])
       end),
 
       % Build subscription index
