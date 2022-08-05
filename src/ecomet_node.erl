@@ -172,7 +172,21 @@ sync()->
     _->
       % The node is not the master, it is not to do any schema synchronization
       ok
-  end.
+  end,
+
+  ActualEnv = ecomet_backend:backend_env(),
+  Object = ecomet:open(<<"/root/.nodes/",(atom_to_binary(node(),utf8))/binary>>),
+  case ecomet:read_field( Object, <<"backend_env">> ) of
+    {ok, ActualEnv} ->
+      ignore;
+    {ok, Env} when is_map( Env )->
+      ecomet_backend:backend_env( Env ),
+      ecomet:edit_object( Object, #{<<"backend_env">> => maps:merge(ActualEnv,Env)} );
+    _ ->
+      ecomet:edit_object( Object, #{<<"backend_env">> => ActualEnv} )
+  end,
+
+  ok.
 
 %%=================================================================
 %%	Ecomet object behaviour

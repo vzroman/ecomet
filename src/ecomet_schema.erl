@@ -124,7 +124,8 @@
   <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] },
   <<"segments_count">>=>#{ type => integer },
   <<"size">>=>#{ type => integer },
-  <<"root_segment">>=>#{ type => atom, index=>[simple] }
+  <<"root_segment">>=>#{ type => atom, index=>[simple] },
+  <<"limits">>=>#{ type => term }
 }).
 -define(SEGMENT_SCHEMA,#{
   <<"size">>=>#{ type => integer },
@@ -133,7 +134,8 @@
 }).
 -define(NODE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] },
-  <<"is_ready">>=>#{ type => bool, index=> [simple] }
+  <<"is_ready">>=>#{ type => bool, index=> [simple] },
+  <<"backend_env">>=>#{ type => term }
 }).
 
 %-------------USER PATTERNS--------------------------------------------

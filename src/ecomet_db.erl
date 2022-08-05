@@ -243,7 +243,7 @@ update_storage(OID)->
     {<<".pattern">>,'=',?OID(<<"/root/.patterns/.segment">>)}
   ]}),
 
-  Update =
+  Update0 =
     lists:foldl(fun([Nodes,Size],#{<<"nodes">>:=AccNodes,<<"size">>:=AccSize})->
       #{
         <<"nodes">>=>ordsets:union(AccNodes,ordsets:from_list(Nodes)),
@@ -252,9 +252,13 @@ update_storage(OID)->
     end,#{<<"nodes">>=>[],<<"size">>=>0},Segments),
 
   Object = ecomet:open(OID,none),
-  {ok,Name} = ecomet:read_field(Object,<<".name">>),
+  #{
+    <<".name">> := Name,
+    <<".folder">> := DB_OID,
+    <<"limits">> := Limits
+  } = ecomet:read_fields( Object, [<<".name">>,<<".folder">>,<<"limits">>]),
+
   [S,T] = binary:split(Name,<<"@">>),
-  {ok,DB_OID} = ecomet:read_field(Object,<<".folder">>),
   {ok,DB_Name} = ecomet:read_field( ecomet:open(DB_OID,none), <<".name">> ),
 
   DB = binary_to_atom(DB_Name,utf8),
@@ -262,6 +266,19 @@ update_storage(OID)->
   Type = binary_to_atom(T,utf8),
 
   Root = ecomet_backend:get_root_segment(DB,Storage,Type),
+  ActualLimits = ecomet_backend:storage_limits( DB,Storage,Type ),
+
+  Update =
+    case Limits of
+      ActualLimits -> Update0;
+      _ when is_map( Limits )->
+        % Set storage limits
+        ecomet_backend:storage_limits( DB,Storage,Type, Limits ),
+        Update0;
+      _ ->
+        % Update actual limits
+        Update0#{ <<"limits">> => ActualLimits }
+    end,
 
   ok = ecomet:edit_object(Object,Update#{
     <<"root_segment">> => Root,

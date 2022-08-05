@@ -33,6 +33,8 @@
   get_segment_params/1,
   get_segment_size/1,
   get_storage_type/1,
+  storage_limits/3,storage_limits/4,
+  backend_env/0,backend_env/1,
   add_segment_copy/2, remove_segment_copy/2,
   is_local_storage/1,
   get_supported_types/0
@@ -104,6 +106,16 @@ get_storage_type(Storage)->
       end;
     Other->Other
   end.
+
+storage_limits( DB, Storage, Type )->
+  dlss:storage_limits( ?NAME( DB,Storage,Type) ).
+storage_limits(DB, Storage, Type, Limits)->
+  dlss:storage_limits( ?NAME( DB,Storage,Type), Limits ).
+
+backend_env()->
+  dlss:backend_env().
+backend_env( Env )->
+  dlss:backend_env( Env ).
 
 add_segment_copy(Segment,Node)->
   dlss:add_segment_copy(Segment,Node).
