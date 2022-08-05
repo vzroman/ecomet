@@ -38,7 +38,7 @@ worker_loop()->
   receive
     #ecomet_log{} = Log->
       try
-        ecomet_query:on_commit( Log )
+        ecomet_subscription:on_commit( Log )
       catch
         _:Error:Stack->
           ?LOGERROR("log error ~p, ~p, ~p",[ Log, Error, Stack ])

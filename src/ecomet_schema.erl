@@ -147,20 +147,6 @@
 -define(USERGROUP_SCHEMA,#{
   <<"extend_groups">>=>#{ type => list, subtype => link, index=> [simple] }
 }).
--define(SESSION_SCHEMA,#{
-  <<"close">>=>#{ type => integer, index=> [simple,datetime] },
-  <<"node">>=>#{ type => atom, index=> [simple] },
-  <<"PID">>=>#{ type => term, index=> [simple] },
-  <<"info">> =>#{ type => term }
-}).
--define(SUBSCRIPTION_SCHEMA,#{
-  <<"PID">>=>#{ type => term, required => true, index=> [simple], storage => ?RAMLOCAL },
-  <<"rights">>=>#{ type => list, subtype => term, required => true,index=> [simple], storage => ?RAMLOCAL },
-  <<"databases">>=>#{ type => list, subtype => atom, required => true,index=> [simple], storage => ?RAMLOCAL },
-  <<"index">>=>#{ type => list, subtype => term, required => true, index=> [simple], storage => ?RAMLOCAL },
-  <<"dependencies">>=>#{ type => list, subtype => string, required => true, index=> [simple], storage => ?RAMLOCAL },
-  <<"no_feedback">>=>#{ type => bool, subtype => none, storage => ?RAMLOCAL }
-}).
 
 % Database indexing
 -record(dbId,{k}).
@@ -409,13 +395,8 @@ init([])->
   ?LOGINFO("initialize default users"),
   ok = init_default_users(),
 
-  ok = ecomet_session:on_start_node(node()),
-
   % Initialize subscriptions optimization
-  ok = ecomet_router:on_init( ?ENV( router_pool_size, ?ROUTER_POOL_SIZE ) ),
-
-  % Initialize subscriptions optimization
-  ok = ecomet_resultset:on_init(),
+  ok = ecomet_session:on_init(),
 
   Cycle=?ENV(schema_server_cycle,?DEFAULT_SCHEMA_CYCLE),
 
@@ -790,31 +771,6 @@ init_default_users()->
             <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
           },
           children=>init_pattern_fields(?USERGROUP_SCHEMA)
-        }},
-        % SESSION
-        { <<".session">>, #{
-          fields=>#{
-            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
-          },
-          children=>
-            [ { Name, #{ edit => true, fields=> ecomet_field:from_schema(Config)} }
-             || { Name, Config } <- [
-                {<<".name">>,#{ autoincrement => true } },
-                { <<".ts">> , #{ index=> [ simple, datetime ] }}
-            ]] ++ init_pattern_fields(?SESSION_SCHEMA)
-        }},
-        % SUBSCRIPTION
-        { <<".subscription">>, #{
-          fields=>#{
-            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
-          },
-          children=>
-          [ begin
-              { Name, #{ edit => true, fields=> ecomet_field:from_schema(#{ storage=>?RAMLOCAL })} }
-            end || Name <- maps:keys(?OBJECT_SCHEMA)]
-          ++ init_pattern_fields(?SUBSCRIPTION_SCHEMA)
         }}
       ]
     }}

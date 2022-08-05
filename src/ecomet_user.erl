@@ -78,7 +78,7 @@ login(Login,Pass,Info)->
           end
         end,
         fun(_)->set_context(User) end,
-        fun(_)->create_session(Info) end
+        fun(_)->create_session(User,Info) end
       ],none)
     end
   ],none) of
@@ -96,7 +96,7 @@ dirty_login(Login, Info) ->
     fun(User)->
       ?PIPE([
         fun(_)->set_context(User) end,
-        fun(_)->create_session(Info) end
+        fun(_)->create_session(User,Info) end
       ],none)
     end
   ],none) of
@@ -209,12 +209,10 @@ code_pass(Pass)->
   %% Converts real password to storage format
   base64:encode(erlang:md5(Pass)).
 
-create_session(Info)->
+create_session(User,Info)->
   Context = get(?CONTEXT),
 
-  {ok,PID} = ecomet_session:start_link(fun()->
-    put(?CONTEXT,Context)
-  end,Info),
+  {ok,PID} = ecomet_session:start_link(User,Info),
 
   put(?CONTEXT,Context#state{session = PID}),
   ok.
