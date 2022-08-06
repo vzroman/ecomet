@@ -424,7 +424,7 @@ compile_subscribe_read(Fields,Formatter)->
 
 
 unsubscribe(ID)->
-  ok = ecomet_session:remove_subscription(ID).
+  ecomet_session:remove_subscription(ID).
 
 match_log( New, Old, Del, NewObject, OldObject, Match )->
   Now = Match(ordsets:union(New,Old),NewObject),
