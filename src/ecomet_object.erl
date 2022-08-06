@@ -46,6 +46,7 @@
   create/1,create/2,
   delete/1,
   open/1,open/2,open/3,
+  exists/1,
   construct/1,
   edit/2,edit/3,
   dirty_edit/2,dirty_edit/3,
@@ -253,6 +254,12 @@ open(OID,Lock,Timeout)->
     true->ok
   end,
   Object.
+
+exists(OID)->
+  case try open(OID,none) catch _:_-> error end of
+    error-> false;
+    _-> true
+  end.
 
 % Read field value
 read_field(#object{oid=OID,map=Map}=Object,Field)->

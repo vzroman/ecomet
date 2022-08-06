@@ -34,6 +34,7 @@
 -export([
   create_object/1,create_object/2,
   open/1,open/2,open/3,open_nolock/1,open_rlock/1,open_wlock/1,
+  exists/1,
   read_field/2,read_field/3,read_fields/2,read_fields/3,
   read_all/1,read_all/2,
   field_changes/2,
@@ -176,6 +177,9 @@ open(ID, Lock)->
 
 open(ID,Lock,Timeout)->
   ecomet_lib:to_object(ID, Lock, Timeout).
+
+exists(OID)->
+  ecomet_object:exists(OID).
 
 %----Legacy API---------------------------------------------------
 open_nolock(ID)->
