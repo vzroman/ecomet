@@ -31,7 +31,9 @@
   on_init/0,
   %-------Subscriptions---------------
   register_subscription/3,
-  remove_subscription/1
+  remove_subscription/1,
+
+  get_sesions/0
 ]).
 
 %%=================================================================
@@ -51,7 +53,7 @@
 -define(STOP_TIMEOUT,5000).
 -define(SESSIONS,ecomet_sessions).
 
--record(session,{id, user, info }).
+-record(session,{id, ts, user, user_id, info }).
 -record(state,{ subs, user, owner, memory_limit }).
 
 %%=================================================================
@@ -87,6 +89,22 @@ remove_subscription(ID)->
       ?ERROR(Error)
   end.
 
+get_sesions()->
+  [#{
+    id => Id,
+    user => User,
+    user_id => UserId,
+    ts => TS,
+    info => Info
+  } || #session{
+    id = Id,
+    user = User,
+    user_id = UserId,
+    ts = TS,
+    info = Info
+  } <- ets:tab2list(?SESSIONS)].
+
+
 %%=================================================================
 %%	OTP
 %%=================================================================
@@ -114,7 +132,7 @@ start_link(User,Info)->
   % Set memory limit for the user process
   set_memory_limit( MemoryLimit ),
 
-  gen_server:start_link(?MODULE, [Name,Info,self(),MemoryLimit], []).
+  gen_server:start_link(?MODULE, [Name,?OID(User),Info,self(),MemoryLimit], []).
 
 
 stop(Session,Reason)->
@@ -133,7 +151,7 @@ set_memory_limit( Limit ) when is_integer( Limit )->
 set_memory_limit( _NoLimit )->
   ok.
 
-init([Name,Info,Owner,MemoryLimit])->
+init([Name,UserId,Info,Owner,MemoryLimit])->
 
   % Set memory limit for the session process
   set_memory_limit( MemoryLimit ),
@@ -142,7 +160,13 @@ init([Name,Info,Owner,MemoryLimit])->
   process_flag(trap_exit,true),
 
   % Register session
-  ets:insert(?SESSIONS,#session{id = self(), user = Name, info = Info}),
+  ets:insert(?SESSIONS,#session{
+    id = self(),
+    ts = ecomet_lib:ts(),
+    user = Name,
+    user_id = UserId,
+    info = Info
+  }),
 
   State = #state{
     user = Name,
