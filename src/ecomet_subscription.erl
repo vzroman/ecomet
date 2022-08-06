@@ -28,11 +28,13 @@
   run/2,
   stop/1,
 
+  get_subscriptions/1,
+
   on_commit/1,
   notify/2
 ]).
 
--record(subscription,{id, pid, owner }).
+-record(subscription,{id, pid, ts, owner }).
 -record(index,{key, value}).
 
 -record(state,{id, session, owner, params, match}).
@@ -66,7 +68,12 @@ start_link( Id, Owner, Params, MemoryLimit )->
         MemoryLimit(),
 
         % Register the subscription process
-        ets:insert(?SUBSCRIPTIONS,#subscription{ id = {Session,Id}, pid = self(), owner = Owner }),
+        ets:insert(?SUBSCRIPTIONS,#subscription{
+          id = {Session,Id},
+          ts = ecomet_lib:ts(),
+          pid = self(),
+          owner = Owner
+        }),
 
         % Enter the wait loop
         wait_for_run(#state{id = {Session,Id}, session = Session, owner = Owner, params = Params}, [])
@@ -85,6 +92,9 @@ run(PID, Match)->
 
 stop(PID)->
   PID ! {stop, self()}.
+
+get_subscriptions( Session )->
+  [ #{id => Id, ts => TS, pid => PID} || [Id,TS,PID] <-ets:match(?SUBSCRIPTIONS, #subscription{id = {Session,'$1'}, ts ='$2', pid='$3', _ = '_'})].
 
 %%------------------------------------------------------------
 %%  Search engine

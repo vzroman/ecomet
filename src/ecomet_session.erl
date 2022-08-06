@@ -95,6 +95,7 @@ get_sesions()->
     user => User,
     user_id => UserId,
     ts => TS,
+    subscriptions => ecomet_subscription:get_subscriptions( Id ),
     info => Info
   } || #session{
     id = Id,
