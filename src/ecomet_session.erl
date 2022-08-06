@@ -53,7 +53,7 @@
 -define(STOP_TIMEOUT,5000).
 -define(SESSIONS,ecomet_sessions).
 
--record(session,{id, ts, user, user_id, info }).
+-record(session,{id, pid, ts, user, user_id, info }).
 -record(state,{ subs, user, owner, memory_limit }).
 
 %%=================================================================
@@ -94,6 +94,7 @@ get_sesions()->
     id => Id,
     user => User,
     user_id => UserId,
+    pid => PID,
     ts => TS,
     subscriptions => ecomet_subscription:get_subscriptions( Id ),
     info => Info
@@ -101,6 +102,7 @@ get_sesions()->
     id = Id,
     user = User,
     user_id = UserId,
+    pid = PID,
     ts = TS,
     info = Info
   } <- ets:tab2list(?SESSIONS)].
@@ -166,6 +168,7 @@ init([Name,UserId,Info,Owner,MemoryLimit])->
     ts = ecomet_lib:ts(),
     user = Name,
     user_id = UserId,
+    pid = Owner,
     info = Info
   }),
 
