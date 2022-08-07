@@ -923,8 +923,6 @@ map_reduce_plan(#{group:=[]}=Params)->
     fun(Row,GroupAcc)->
       [Fun(Value,Acc)||{Fun,Value,Acc}<-lists:zip3(AggregateFunList,Row,GroupAcc)]
     end,
-  % Fun for reading from storage
-  ReadUp=maps:get(read_up,Params),
   %-------Fun to build local result--------------
   MapFun=
     fun(RS)->
