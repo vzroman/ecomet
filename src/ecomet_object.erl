@@ -240,7 +240,8 @@ open(OID,Lock,Timeout)->
         case check_rights(New) of
           none->?ERROR(access_denied);
           {read,CanMove}->New#object{edit = false, move = CanMove};
-          {write,CanMove}->New#object{edit = true, move = CanMove }
+          {write,CanMove}->New#object{edit = true, move = CanMove };
+          not_exists->not_exists
         end;
       % Object is deleted
       #object{deleted=true}->?ERROR(object_deleted);
@@ -249,7 +250,7 @@ open(OID,Lock,Timeout)->
     end,
   % Set lock if requested
   if
-    Lock=/=none->
+    Lock=/=none, Object =/= not_exists->
       get_lock(Lock,Object,Timeout);
     true->ok
   end,
@@ -499,19 +500,18 @@ get_oid(#object{oid=OID})->OID.
 
 %% Check context user rights for the object
 check_rights(#object{}=Object)->
-  #{
-    <<".readgroups">>:=Read,
-    <<".writegroups">>:=Write,
-    <<".folder">>:=FolderID
-  } = read_fields(Object,#{
-    <<".readgroups">> => none,
-    <<".writegroups">> => none,
-    <<".folder">> => none
-  }),
-
-  {ok, Move} = read_field( construct(FolderID), <<".contentwritegroups">> ),
-
-  check_rights(Read,Write,Move);
+  case read_fields(Object,[<<".readgroups">>,<<".writegroups">>,<<".folder">>]) of
+    #{ <<".folder">>:=none } ->
+      % The object can not exist without a folder
+      not_exists;
+    #{
+      <<".readgroups">>:=Read,
+      <<".writegroups">>:=Write,
+      <<".folder">>:=FolderID
+    } ->
+      {ok, Move} = read_field( construct(FolderID), <<".contentwritegroups">> ),
+      check_rights(Read,Write,Move)
+  end;
 check_rights(OID)->
   check_rights(construct(OID)).
 

@@ -694,23 +694,23 @@ compile_map_reduce(set,Fields,Params)->
   ReadUp=read_up(maps:get(lock,Params,none), set),
   ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
   Update =
-    fun(OID)->
-      ObjectMap=ReadUp(OID,ReadFields),
-      NewValues=
-        [{Name,
-          case Value of
-            #get{value = Fun}->Fun(ObjectMap);
-            _->Value
-          end}||{Name,Value}<-Updates],
-      ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues))
+    fun(OID, Acc)->
+      case ReadUp(OID,ReadFields) of
+        #{object := not_exists} -> Acc;
+        ObjectMap ->
+          NewValues=
+            [{Name,case Value of
+              #get{value = Fun}->Fun(ObjectMap);
+              _->Value
+             end}||{Name,Value}<-Updates],
+          ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues)),
+          Acc + 1
+      end
     end,
   Map=
     fun(RS)->
       ecomet_resultset:foldr(fun(OID,Acc)->
-        try
-          Update(OID),
-          Acc+1
-        catch
+        try Update(OID, Acc) catch
           _:Error->
             ?LOGERROR("unable to update ~p, error ~p",[OID,Error]),
             Acc
@@ -727,8 +727,13 @@ compile_map_reduce(delete,none,Params)->
     fun(RS)->
       ecomet_resultset:foldr(fun(OID,Acc)->
         #{object:=Object}=ReadUp(OID,[]),
-        ecomet_object:delete(Object),
-        Acc+1
+        if
+          Object =/= not_exists ->
+            ecomet_object:delete(Object),
+            Acc+1;
+          true ->
+            Acc
+        end
       end,0,RS)
     end,
   Reduce=fun lists:sum/1,
@@ -1150,8 +1155,19 @@ read_up(none, get)->
   end;
 read_up(Lock, _Any)->
   fun(OID,Fields)->
-    Object=ecomet_object:open(OID,Lock),
-    object_map(Object,ecomet_object:read_fields(Object,Fields))
+    Object = ecomet_object:open(OID,Lock),
+    if
+      Object =/= not_exists ->
+        object_map(Object,ecomet_object:read_fields(Object,Fields));
+      true ->
+        % TODO. The object doesn't exist.
+        % Currently we return the empty object.
+        % All its fields are none
+        maps:merge(maps:from_list([{F,none}||F<-Fields]),#{
+          <<".oid">>=> OID,
+          object=> not_exists
+        })
+    end
   end.
 
 object_map(Object,Fields)->
