@@ -860,6 +860,10 @@ check_path(Object)->
     Changed->
       {ok,FolderID}=read_field(Object,<<".folder">>),
       {ok,Name}=read_field(Object,<<".name">>),
+      if
+        Name =:= <<>> -> ?ERROR("name can not be empty");
+        true -> ok
+      end,
       OID = get_oid(Object),
       % Check that name does not include the path delimiter
       case binary:split(Name,<<"/">>) of
