@@ -48,13 +48,16 @@
   read/4,read/5,dirty_read/4,dirty_read/5,
   write/5,write/6,dirty_write/5,
   delete/4,delete/5,dirty_delete/4,
-  dirty_select/5, dirty_select/6
+  dirty_select/5, dirty_select/6,
+  dirty_counter/5,
+  get_counter/4,
+  scan_counters/5,scan_counters/6,
+  drop_counter/4
 ]).
 
 -define(NAME(N,S,T),list_to_atom("ecomet_"++atom_to_list(N)++"_"++atom_to_list(S)++"_"++atom_to_list(T))).
 
 -define(DB,[
-  { ?RAMLOCAL, #{ type => ?RAM, local => true } },
   { ?RAM, #{ type => ?RAM } },
   { ?RAMDISC, #{ type => ?RAMDISC } },
   { ?DISC, #{ type => ?DISC } }
@@ -99,14 +102,7 @@ get_segment_size(Segment)->
   dlss:get_segment_size(Segment).
 
 get_storage_type(Storage)->
-  case dlss:get_storage_type(Storage) of
-    ram->
-      case is_local_storage(Storage) of
-        true->?RAMLOCAL;
-        _->?RAM
-      end;
-    Other->Other
-  end.
+  dlss:get_storage_type(Storage).
 
 storage_limits( DB, Storage, Type )->
   dlss:storage_limits( ?NAME( DB,Storage,Type) ).
@@ -179,6 +175,18 @@ dirty_select(DB,Storage,Type,StartKey, EndKey)->
   dlss:dirty_range_select(?NAME(DB,Storage,Type),StartKey, EndKey).
 dirty_select(DB,Storage,Type,StartKey, EndKey, Limit)->
   dlss:dirty_range_select(?NAME(DB,Storage,Type),StartKey, EndKey, Limit).
+
+dirty_counter(DB,Storage,Type,Key, Incr)->
+  dlss:dirty_counter( ?NAME(DB,Storage,Type), Key, Incr ).
+get_counter(DB,Storage,Type,Key)->
+  dlss:get_counter( ?NAME(DB,Storage,Type), Key ).
+scan_counters(DB,Storage,Type,StartKey, EndKey)->
+  dlss:scan_counters( ?NAME(DB,Storage,Type),StartKey, EndKey ).
+scan_counters(DB,Storage,Type,StartKey, EndKey, Limit)->
+  dlss:scan_counters( ?NAME(DB,Storage,Type),StartKey, EndKey, Limit ).
+drop_counter(DB,Storage,Type,Key)->
+  dlss:drop_counter(?NAME(DB,Storage,Type), Key).
+
 
 
 

@@ -27,6 +27,7 @@
   build_index/4,
   delete_object/2,
   read_tag/4,
+  is_exists/2,is_exists/3,
   get_supported_types/0,
 
   build_3gram/2,
@@ -47,7 +48,7 @@
 ]).
 -endif.
 
--define(INDEX_LOG(Storage, Tag, IDP, IDH, IDL),{index_log, Storage, Tag, IDP, IDH, IDL}).
+-define(INDEX_LOG(Storage, Tag, Key, ID),{index_log, Storage, Tag, Key, ID}).
 
 % Build indexes for changed fields. Return:
 % {AddTags,UnchangedTags,DelTags,BackIndex}
@@ -231,57 +232,95 @@ read_tag(DB,Storage,Vector,Tag)->
     Zip -> Zip
   end.
 
+is_exists(DB, Tag)->
+  is_exists(DB, Tag, ?STORAGE_TYPES).
+is_exists(DB, Tag, [Storage|Rest])->
+  case read_tag(DB, Storage,[], Tag) of
+    none -> is_exists( DB, Tag, Rest );
+    _ -> true
+  end;
+is_exists(_DB, _Tag, [])->
+  false.
+
+
 %%==============================================================================================
 %%	Index log
 %%==============================================================================================
 write_log(DB,Storage,IDP,IDH,IDL, Tag, Bit)->
 
-  Key = ?INDEX_LOG(Storage,Tag,IDP,IDH,IDL),
   LogStorage = log_storage( Storage ),
 
-  ok = ecomet_backend:write(DB,?INDEX,LogStorage,Key,Bit,_Lock = none).
+  ok = ecomet_backend:write(DB,?INDEX,LogStorage, ?INDEX_LOG(Storage,Tag,{idl,IDP,IDH},IDL) ,Bit,_Lock = none),
+
+  case ecomet_backend:dirty_counter( DB, ?INDEX, LogStorage, ?INDEX_LOG(Storage,Tag,{idh,IDP},IDH), 1) of
+    1->
+      case ecomet_backend:dirty_counter( DB, ?INDEX, LogStorage, ?INDEX_LOG(Storage,Tag,idp,IDP), 1) of
+        1->
+          ecomet_backend:dirty_counter( DB, ?INDEX, LogStorage, ?INDEX_LOG(Storage,Tag,idp,'$total'), 1);
+        _->
+          ok
+      end;
+    _->
+      ok
+  end,
+
+  ok.
 
 read_log( DB, Storage, Tag, [IDP,IDH])->
-  StartKey = ?INDEX_LOG(Storage, Tag, IDP, IDH, -1),
-  EndKey = ?INDEX_LOG(Storage, Tag, IDP, IDH, 'end'),
 
   LogStorage = log_storage( Storage ),
+  case ecomet_backend:get_counter( DB, ?INDEX, LogStorage, ?INDEX_LOG(Storage,Tag,{idh,IDP},IDH)) of
+    0 ->
+      % Empty
+      {<<>>,<<>>};
+    Count ->
 
-  RawLog =
-    ecomet_backend:dirty_select(DB, ?INDEX, LogStorage, StartKey, EndKey ),
+      StartKey = ?INDEX_LOG(Storage, Tag, {idl,IDP,IDH}, -1),
+      EndKey = ?INDEX_LOG(Storage, Tag, {idl,IDP,IDH}, '$end'),
 
-  Log=
-    [{IDL,Bit} || {?INDEX_LOG(_,_,_,_,IDL),Bit} <- RawLog],
+      RawLog =
+        ecomet_backend:dirty_select(DB, ?INDEX, LogStorage, StartKey, EndKey, Count ),
 
-  sort_log( Log, {[],[]});
+      Log=
+        [{IDL,Bit} || {?INDEX_LOG(_,_,_,IDL),Bit} <- RawLog],
+
+      sort_log( Log, {[],[]})
+  end;
 
 read_log( DB, Storage, Tag, [IDP])->
-  StartKey = ?INDEX_LOG(Storage, Tag, IDP, -1, 'end'),
-  EndKey = ?INDEX_LOG(Storage, Tag, IDP, 'end', -1),
-
   LogStorage = log_storage( Storage ),
+  case ecomet_backend:get_counter( DB, ?INDEX, LogStorage,?INDEX_LOG(Storage,Tag,idp,IDP)) of
+    0 -> {<<>>,<<>>};
+    Count->
+      StartKey = ?INDEX_LOG(Storage, Tag, {idh,IDP}, -1),
+      EndKey = ?INDEX_LOG(Storage, Tag, {idh,IDP}, '$end'),
 
-  RawLog =
-    ecomet_backend:dirty_select(DB, ?INDEX, LogStorage, StartKey, EndKey ),
+      RawLog =
+        ecomet_backend:scan_counters(DB, ?INDEX, LogStorage, StartKey, EndKey, Count ),
 
-  {
-    ecomet_bitmap:set_bit(<<>>,[ IDH || {?INDEX_LOG(_,_,_,IDH,_),_} <- RawLog]),
-    <<>>
-  };
+      {
+        ecomet_bitmap:set_bit(<<>>,[ IDH || {?INDEX_LOG(_,_,_,IDH),_} <- RawLog]),
+        <<>>
+      }
+  end;
 
 read_log( DB, Storage, Tag, [])->
-  StartKey = ?INDEX_LOG(Storage, Tag, -1, 'end', 'end'),
-  EndKey = ?INDEX_LOG(Storage, Tag, 'end', -1, -1),
 
   LogStorage = log_storage( Storage ),
+  case ecomet_backend:get_counter( DB, ?INDEX, LogStorage,?INDEX_LOG(Storage,Tag,idp,'$total')) of
+    0 -> {<<>>,<<>>};
+    Count->
+      StartKey = ?INDEX_LOG(Storage, Tag, idp, -1),
+      EndKey = ?INDEX_LOG(Storage, Tag, idp, '$end'),
 
-  RawLog =
-    ecomet_backend:dirty_select(DB, ?INDEX, LogStorage, StartKey, EndKey ),
+      RawLog =
+        ecomet_backend:scan_counters(DB, ?INDEX, LogStorage, StartKey, EndKey, Count ),
 
-  {
-    ecomet_bitmap:set_bit(<<>>,[ IDP || {?INDEX_LOG(_,_,IDP,_,_),_} <- RawLog]),
-    <<>>
-  }.
+      {
+        ecomet_bitmap:set_bit(<<>>,[ IDP || {?INDEX_LOG(_,_,_,IDP),_} <- RawLog]),
+        <<>>
+      }
+  end.
 
 
 sort_log([{ID,Bit}|Rest],{Add,Del})->
@@ -295,7 +334,7 @@ sort_log([],{Add,Del})->
     ecomet_bitmap:set_bit(<<>>, lists:reverse(Del))
   }.
 
-log_storage( Storage ) when Storage =:= ?RAM; Storage =:= ?RAMLOCAL->
+log_storage( Storage ) when Storage =:= ?RAM->
   Storage;
 log_storage( _Storage )->
   ?RAMDISC.
