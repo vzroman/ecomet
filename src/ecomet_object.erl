@@ -118,13 +118,11 @@
 -define(TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
     _T when _T=:=none;_T=:=dirty->
-      ?LOGDEBUG("start internal transaction"),
       case ecomet_transaction:internal_sync(Fun) of
         {ok,_TResult}->_TResult;
         {error,_TError}->?ERROR(_TError)
       end;
     _->
-      ?LOGDEBUG("skip transaction"),
       Fun()
   end).
 -define(DIRTY_TRANSACTION(Fun),

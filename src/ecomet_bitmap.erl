@@ -47,6 +47,10 @@
 %%  BITWISE OPERATIONS API
 %%------------------------------------------------------------------------------------
 -export([
+  bit_and/2,
+  bit_or/2,
+  bit_andnot/2,
+
   oper/3,
   zip/1
 ]).
@@ -72,10 +76,7 @@
   data_or/2,
   tail/2,
   first/1,
-  split/2,
-  bit_and/2,
-  bit_or/2,
-  bit_andnot/2
+  split/2
 ]).
 -endif.
 

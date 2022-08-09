@@ -20,8 +20,8 @@
 -include("ecomet.hrl").
 -include("ecomet_test.hrl").
 
--define(PROCESSES,2).
--define(OBJECTS,10000).
+-define(PROCESSES,1).
+-define(OBJECTS,1000).
 -define(STORAGE,disc).
 
 %% API
@@ -60,7 +60,6 @@
 all()->
   [
     {group,create}
-    %{group,create_log_index}
     ,{group,search}
   ].
 
@@ -69,10 +68,6 @@ groups()->[
     [parallel],
     [create||_<-lists:seq(1,?PROCESSES)]
   },
-%%  {create_log_index,
-%%    [parallel],
-%%    [create||_<-lists:seq(1,?PROCESSES)]
-%%  },
 
   {search,
     [sequence],
@@ -181,24 +176,6 @@ end_per_suite(_Config)->
   ok.
 
 
-init_per_group(create_log_index,Config)->
-  meck:new(ecomet_index, [non_strict,no_link,passthrough]),
-  meck:expect(ecomet_index, build_bitmap, fun(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN)->
-    %ok
-    ecomet_backend:write(DB,?INDEX,Storage,{index_log,Tag,{PatternID,IDHN,IDLN}},Oper,none)
-  end),
-
-%%  meck:expect(ecomet_index, build_index, fun(_OID,_Map,_ChangedFields,BackTags)->
-%%    {[],[],[],BackTags}
-%%  end),
-
-%%  meck:new(ecomet_backend, [non_strict,no_link,passthrough]),
-%%  meck:expect(ecomet_backend, read, fun(DB,Storage,Type,Key,Lock)->
-%%    ecomet_backend:dirty_read(DB,Storage,Type,Key,Lock)
-%%  end),
-
-  Config;
-
 init_per_group(_,Config)->
   Config.
 
@@ -216,16 +193,21 @@ create(Config)->
   Pattern=?config(pattern, Config),
   Folder=?config(folder, Config),
 
+  ?LOGDEBUG("run..."),
+  io:format("io run..."),
+
   ecomet_user:on_init_state(),
 
   PID = integer_to_binary(erlang:unique_integer([positive])),
 
   ct:timetrap(12*3600*1000),
 
+  ?LOGDEBUG("run ~p...",[PID]),
   %put(index_off,true),
 
   [begin
-     if I rem 1000=:=0->ct:pal("create ~p",[I]); true->ok end,
+     if I =:=1->?LOGDEBUG("first..."); true->ok end,
+     if I rem 1000=:=0->?LOGDEBUG("create ~p",[I]); true->ok end,
      IB=integer_to_binary(I),
      S1=integer_to_binary(I rem 100),
      String1= <<"value",S1/binary>>,
@@ -251,6 +233,8 @@ create(Config)->
        <<"bool">> => Bool
      })
    end||I<-lists:seq(1,?OBJECTS)],
+
+  ?LOGDEBUG("run ~p...",[PID]),
 
   ok.
 

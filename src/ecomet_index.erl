@@ -30,10 +30,8 @@
   get_supported_types/0,
 
   build_3gram/2,
-  build_dt/2,
+  build_dt/2
 
-  % only for tests
-  build_bitmap/7
 ]).
 
 %%====================================================================
@@ -48,6 +46,8 @@
   get_unchanged/2
 ]).
 -endif.
+
+-define(INDEX_LOG(Storage, Tag, IDP, IDH, IDL),{index_log, Storage, Tag, IDP, IDH, IDL}).
 
 % Build indexes for changed fields. Return:
 % {AddTags,UnchangedTags,DelTags,BackIndex}
@@ -179,25 +179,20 @@ merge_backtags(Updated,Old)->
 %%------------------------------------------------------------------------------
 dump_log(OID,Log)->
   DB=ecomet_object:get_db_name(OID),
-  PatternID=ecomet_object:get_pattern(OID),
+  IDP=ecomet_object:get_pattern(OID),
   ObjectID=ecomet_object:get_id(OID),
-  IDHN=ObjectID div ?BITSTRING_LENGTH,
-  IDLN=ObjectID rem ?BITSTRING_LENGTH,
-  % Sorting solves next issues:
-  % 1. log has structure {  field, value , type, storage, oper }. So, we sort fields by their names first.
-  % When we run through log, we obtain locks on tags we change. If two concurrent processes want a couple of same tags,
-  % then they will try obtain locks on these tags in the same order. So we exclude states when process1 locked tag1 and tries
-  % to lock tag2, and this time process2 locked tag2 and tries to lock tag1. Mnesia as backend is deadlock free, but it is time consuming.
-  % 2. We reverse sorted tag_logs. So, system fields such as ".folder", ".pattern" and so on are in the tail and  locked after others.
-  % We do not hold locks on them while indexing other fields.
+  IDH=ObjectID div ?BITSTRING_LENGTH,
+  IDL=ObjectID rem ?BITSTRING_LENGTH,
+
   lists:foldl(fun(#log{field=Field,value=Value,type=Type,storage=Storage,oper=Oper},{Add,Del})->
     Tag={Field,Value,Type},
-    ecomet_index:build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN),
+    Bit = if Oper =:= add-> 1; true -> 0 end,
+    write_log( DB,Storage,IDP,IDH,IDL, Tag, Bit ),
     case Oper of
       add->{[Tag|Add],Del};
       del->{Add,[Tag|Del]}
     end
-  end,{[],[]},lists:reverse(ordsets:from_list(Log))).
+  end,{[],[]},Log).
 
 %%------------------------------------------------------------------------------
 %%	Step 4. Calculate unchanged tags
@@ -211,56 +206,6 @@ get_unchanged(New,Old)->
     end,SAcc,maps:with(maps:keys(NewFields),Fields))
   end,[],maps:with(maps:keys(New),Old)).
 
-%%------------------------------------------------------------------------------
-%%		Bitmap indexes
-%%------------------------------------------------------------------------------
-build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN)->
-  case bitmap_level(Oper,DB,Storage,{Tag,{idl,PatternID,IDHN}},IDLN) of
-    stop->ok;
-    up->
-      case bitmap_level(Oper,DB,Storage,{Tag,{idh,PatternID}},IDHN) of
-        stop->ok;
-        up->bitmap_level(Oper,DB,Storage,{Tag,patterns},PatternID)
-      end
-  end.
-
-%%--------------Add an ID to the index level--------------------------------------
-bitmap_level(add,DB,Storage,Tag,ID)->
-  case ecomet_backend:read(DB,?INDEX,Storage,Tag,write) of
-    not_found->
-      Value = ecomet_bitmap:zip(ecomet_bitmap:set_bit(<<>>,ID)),
-      ok = ecomet_backend:write(DB,?INDEX,Storage,Tag,Value),
-      % The index didn't exist before, we need to add the value to the upper level also
-      up;
-    LevelValue->
-      Value = ecomet_bitmap:zip(ecomet_bitmap:set_bit(LevelValue,ID)),
-      ok = ecomet_backend:write(DB,?INDEX,Storage,Tag,Value),
-      % The index already exists, no need to update the upper level
-      stop
-  end;
-%%--------------Remove an ID from the index level--------------------------------------
-bitmap_level(del,DB,Storage,Tag,ID)->
-  case ecomet_backend:read(DB,?INDEX,Storage,Tag,write) of
-    not_found->
-      % Why are we here?
-      ?LOGWARNING("an attempt to delete an ID in the absent index level, ID ~p, DB ~p, storage type ~p, tag ~p",[
-        ID,DB,Storage,Tag
-      ]),
-      % We are not sure if the upper level index exits, so we need to try to update it too
-      up;
-    LevelValue->
-      LeftValue = ecomet_bitmap:zip(ecomet_bitmap:reset_bit(LevelValue,ID)),
-      case ecomet_bitmap:is_empty(LeftValue) of
-        true->
-          ok = ecomet_backend:delete(DB,?INDEX,Storage,Tag),
-          % The level is deleted, we need to update the upper level index
-          up;
-        _->
-          ok = ecomet_backend:write(DB,?INDEX,Storage,Tag,LeftValue),
-          % The level is updated (not removed) therefore there is no need to update the upper level
-          stop
-      end
-  end.
 
 %%==============================================================================================
 %%	Search
@@ -273,10 +218,88 @@ read_tag(DB,Storage,Vector,Tag)->
       [PatternID]->{Tag,{idh,PatternID}};
       []->{Tag,patterns}
     end,
-  case ecomet_backend:dirty_read(DB,?INDEX,Storage,Key) of
-    not_found->none;
-    IndexValue-> IndexValue
+
+  {Add,Del} = read_log( DB, Storage, Tag, Vector ),
+
+  Result =
+    case ecomet_backend:dirty_read(DB,?INDEX,Storage,Key) of
+      not_found-> ecomet_bitmap:bit_andnot( Add, Del );
+      Index-> ecomet_bitmap:bit_andnot(ecomet_bitmap:bit_or(Index, Add), Del)
+    end,
+  case ecomet_bitmap:zip(Result) of
+    <<>> -> none;
+    Zip -> Zip
   end.
+
+%%==============================================================================================
+%%	Index log
+%%==============================================================================================
+write_log(DB,Storage,IDP,IDH,IDL, Tag, Bit)->
+
+  Key = ?INDEX_LOG(Storage,Tag,IDP,IDH,IDL),
+  LogStorage = log_storage( Storage ),
+
+  ok = ecomet_backend:write(DB,?INDEX,LogStorage,Key,Bit,_Lock = none).
+
+read_log( DB, Storage, Tag, [IDP,IDH])->
+  StartKey = ?INDEX_LOG(Storage, Tag, IDP, IDH, -1),
+  EndKey = ?INDEX_LOG(Storage, Tag, IDP, IDH, 'end'),
+
+  LogStorage = log_storage( Storage ),
+
+  RawLog =
+    ecomet_backend:dirty_select(DB, ?INDEX, LogStorage, StartKey, EndKey ),
+
+  Log=
+    [{IDL,Bit} || {?INDEX_LOG(_,_,_,_,IDL),Bit} <- RawLog],
+
+  sort_log( Log, {[],[]});
+
+read_log( DB, Storage, Tag, [IDP])->
+  StartKey = ?INDEX_LOG(Storage, Tag, IDP, -1, 'end'),
+  EndKey = ?INDEX_LOG(Storage, Tag, IDP, 'end', -1),
+
+  LogStorage = log_storage( Storage ),
+
+  RawLog =
+    ecomet_backend:dirty_select(DB, ?INDEX, LogStorage, StartKey, EndKey ),
+
+  {
+    ecomet_bitmap:set_bit(<<>>,[ IDH || {?INDEX_LOG(_,_,_,IDH,_),_} <- RawLog]),
+    <<>>
+  };
+
+read_log( DB, Storage, Tag, [])->
+  StartKey = ?INDEX_LOG(Storage, Tag, -1, 'end', 'end'),
+  EndKey = ?INDEX_LOG(Storage, Tag, 'end', -1, -1),
+
+  LogStorage = log_storage( Storage ),
+
+  RawLog =
+    ecomet_backend:dirty_select(DB, ?INDEX, LogStorage, StartKey, EndKey ),
+
+  {
+    ecomet_bitmap:set_bit(<<>>,[ IDP || {?INDEX_LOG(_,_,IDP,_,_),_} <- RawLog]),
+    <<>>
+  }.
+
+
+sort_log([{ID,Bit}|Rest],{Add,Del})->
+  if
+    Bit =:= 1-> sort_log(Rest,{[ID|Add],Del});
+    true -> sort_log(Rest,{Add,[ID|Del]})
+  end;
+sort_log([],{Add,Del})->
+  {
+    ecomet_bitmap:set_bit(<<>>, lists:reverse(Add)),
+    ecomet_bitmap:set_bit(<<>>, lists:reverse(Del))
+  }.
+
+log_storage( Storage ) when Storage =:= ?RAM; Storage =:= ?RAMLOCAL->
+  Storage;
+log_storage( _Storage )->
+  ?RAMDISC.
+
 
 get_supported_types()->
   [

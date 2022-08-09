@@ -47,7 +47,8 @@
   transaction/1, sync_transaction/1,
   read/4,read/5,dirty_read/4,dirty_read/5,
   write/5,write/6,dirty_write/5,
-  delete/4,delete/5,dirty_delete/4
+  delete/4,delete/5,dirty_delete/4,
+  dirty_select/5, dirty_select/6
 ]).
 
 -define(NAME(N,S,T),list_to_atom("ecomet_"++atom_to_list(N)++"_"++atom_to_list(S)++"_"++atom_to_list(T))).
@@ -173,5 +174,11 @@ delete(DB,Storage,Type,Key,Lock)->
 
 dirty_delete(DB,Storage,Type,Key)->
   dlss:dirty_delete(?NAME(DB,Storage,Type),Key).
+
+dirty_select(DB,Storage,Type,StartKey, EndKey)->
+  dlss:dirty_range_select(?NAME(DB,Storage,Type),StartKey, EndKey).
+dirty_select(DB,Storage,Type,StartKey, EndKey, Limit)->
+  dlss:dirty_range_select(?NAME(DB,Storage,Type),StartKey, EndKey, Limit).
+
 
 
