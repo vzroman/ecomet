@@ -220,7 +220,7 @@ get_unchanged(New,Old)->
 %%==============================================================================================
 %% Searching by tag
 read_tag(DB,Storage,Vector,Tag)->
-  Key=
+  Key =
     case Vector of
       [IDP,IDH]-> ?KEY(Tag,IDP,IDH);
       [IDP]->?KEY(Tag,IDP);
@@ -272,18 +272,10 @@ read_log( DB, Storage, Key)->
   StartKey = ?LOG(Storage, Key, -1, -1),
   EndKey = ?LOG(Storage, Key, '$end', '$end'),
 
-  Log = iterate_log(DB, StartKey, EndKey),
-%%  Log =
-%%    ecomet_backend:dirty_select(DB, ?INDEX, ?RAMDISC, StartKey, EndKey ),
+  Log =
+    ecomet_backend:dirty_select(DB, ?INDEX, ?RAMDISC, StartKey, EndKey),
 
   sort_log( filter_log(Log), {[],[]}).
-
-iterate_log(DB, Key, EndKey)->
-  case dlss:dirty_next(?NAME(DB, ?INDEX, ?RAMDISC),Key) of
-    Next when Next =/= '$end_of_table', Next =< EndKey->
-      [{Next,ecomet_backend:dirty_read(DB,?INDEX,?RAMDISC,Next)} | iterate_log(DB, Next, EndKey)];
-    _ ->[]
-  end.
 
 filter_log( Log )->
   % Start from an older version
