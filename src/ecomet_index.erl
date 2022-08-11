@@ -48,8 +48,15 @@
 ]).
 -endif.
 
--define(INDEX_LOG(Storage, Tag, Key, ID),{index_log, Storage, Tag, Key, ID}).
+-define(LOG(Storage,Key,Version,ID),{'$index_log', Storage, Key, Version, ID}).
+-define(KEY(Tag,IDP,IDH),{Tag,{idl,IDP,IDH}}).
+-define(KEY(Tag,IDP),{Tag,{idh,IDP}}).
+-define(KEY(Tag),{Tag,patterns}).
 
+-define(DUMP_VERSION(DB, Storage),{'$dump_version', DB, Storage}).
+
+% DEBUG:
+-define(NAME(N,S,T),list_to_atom("ecomet_"++atom_to_list(N)++"_"++atom_to_list(S)++"_"++atom_to_list(T))).
 % Build indexes for changed fields. Return:
 % {AddTags,UnchangedTags,DelTags,BackIndex}
 % BackIndex structure:
@@ -188,7 +195,7 @@ dump_log(OID,Log)->
   lists:foldl(fun(#log{field=Field,value=Value,type=Type,storage=Storage,oper=Oper},{Add,Del})->
     Tag={Field,Value,Type},
     Bit = if Oper =:= add-> 1; true -> 0 end,
-    write_log( DB,Storage,IDP,IDH,IDL, Tag, Bit ),
+    write_log( DB,Storage,Tag,IDP,IDH,IDL, Bit ),
     case Oper of
       add->{[Tag|Add],Del};
       del->{Add,[Tag|Del]}
@@ -215,12 +222,12 @@ get_unchanged(New,Old)->
 read_tag(DB,Storage,Vector,Tag)->
   Key=
     case Vector of
-      [PatternID,IDH]->{Tag,{idl,PatternID,IDH}};
-      [PatternID]->{Tag,{idh,PatternID}};
-      []->{Tag,patterns}
+      [IDP,IDH]-> ?KEY(Tag,IDP,IDH);
+      [IDP]->?KEY(Tag,IDP);
+      [] -> ?KEY(Tag)
     end,
 
-  {Add,Del} = read_log( DB, Storage, Tag, Vector ),
+  {Add,Del} = read_log( DB, Storage, Key),
 
   Result =
     case ecomet_backend:dirty_read(DB,?INDEX,Storage,Key) of
@@ -246,81 +253,52 @@ is_exists(_DB, _Tag, [])->
 %%==============================================================================================
 %%	Index log
 %%==============================================================================================
-write_log(DB,Storage,IDP,IDH,IDL, Tag, Bit)->
-
-  LogStorage = log_storage( Storage ),
-
-  ok = ecomet_backend:write(DB,?INDEX,LogStorage, ?INDEX_LOG(Storage,Tag,{idl,IDP,IDH},IDL) ,Bit,_Lock = none),
-
-  case ecomet_backend:dirty_counter( DB, ?INDEX, LogStorage, ?INDEX_LOG(Storage,Tag,{idh,IDP},IDH), 1) of
-    1->
-      case ecomet_backend:dirty_counter( DB, ?INDEX, LogStorage, ?INDEX_LOG(Storage,Tag,idp,IDP), 1) of
-        1->
-          ecomet_backend:dirty_counter( DB, ?INDEX, LogStorage, ?INDEX_LOG(Storage,Tag,idp,'$total'), 1);
-        _->
-          ok
-      end;
-    _->
-      ok
-  end,
-
-  ok.
-
-read_log( DB, Storage, Tag, [IDP,IDH])->
-
-  LogStorage = log_storage( Storage ),
-  case ecomet_backend:get_counter( DB, ?INDEX, LogStorage, ?INDEX_LOG(Storage,Tag,{idh,IDP},IDH)) of
-    0 ->
-      % Empty
-      {<<>>,<<>>};
-    Count ->
-
-      StartKey = ?INDEX_LOG(Storage, Tag, {idl,IDP,IDH}, -1),
-      EndKey = ?INDEX_LOG(Storage, Tag, {idl,IDP,IDH}, '$end'),
-
-      RawLog =
-        ecomet_backend:dirty_select(DB, ?INDEX, LogStorage, StartKey, EndKey, Count ),
-
-      Log=
-        [{IDL,Bit} || {?INDEX_LOG(_,_,_,IDL),Bit} <- RawLog],
-
-      sort_log( Log, {[],[]})
-  end;
-
-read_log( DB, Storage, Tag, [IDP])->
-  LogStorage = log_storage( Storage ),
-  case ecomet_backend:get_counter( DB, ?INDEX, LogStorage,?INDEX_LOG(Storage,Tag,idp,IDP)) of
-    0 -> {<<>>,<<>>};
-    Count->
-      StartKey = ?INDEX_LOG(Storage, Tag, {idh,IDP}, -1),
-      EndKey = ?INDEX_LOG(Storage, Tag, {idh,IDP}, '$end'),
-
-      RawLog =
-        ecomet_backend:scan_counters(DB, ?INDEX, LogStorage, StartKey, EndKey, Count ),
-
-      {
-        ecomet_bitmap:set_bit(<<>>,[ IDH || {?INDEX_LOG(_,_,_,IDH),_} <- RawLog]),
-        <<>>
-      }
-  end;
-
-read_log( DB, Storage, Tag, [])->
-
-  LogStorage = log_storage( Storage ),
-  case ecomet_backend:get_counter( DB, ?INDEX, LogStorage,?INDEX_LOG(Storage,Tag,idp,'$total')) of
-    0 -> {<<>>,<<>>};
-    Count->
-      StartKey = ?INDEX_LOG(Storage, Tag, idp, -1),
-      EndKey = ?INDEX_LOG(Storage, Tag, idp, '$end'),
-
-      RawLog =
-        ecomet_backend:scan_counters(DB, ?INDEX, LogStorage, StartKey, EndKey, Count ),
-
-      {
-        ecomet_bitmap:set_bit(<<>>,[ IDP || {?INDEX_LOG(_,_,_,IDP),_} <- RawLog]),
-        <<>>
-      }
+dump_version( DB, Storage )->
+  case ecomet_backend:dirty_read(DB,?INDEX,?RAMDISC,?DUMP_VERSION(DB,Storage)) of
+    not_found -> 0;
+    Version -> Version
   end.
+
+write_log(DB,Storage,Tag,IDP,IDH,IDL,Bit)->
+
+  Version = dump_version( DB, Storage ),
+
+  ok = ecomet_backend:write(DB,?INDEX,?RAMDISC, ?LOG(Storage,?KEY(Tag,IDP,IDH),Version,IDL) ,Bit,_Lock = none),
+  ok = ecomet_backend:write(DB,?INDEX,?RAMDISC, ?LOG(Storage,?KEY(Tag,IDP),Version,IDH), 1,_Lock = none),
+  ok = ecomet_backend:write(DB,?INDEX,?RAMDISC, ?LOG(Storage,?KEY(Tag),Version,IDP), 1,_Lock = none).
+
+read_log( DB, Storage, Key)->
+
+  StartKey = ?LOG(Storage, Key, -1, -1),
+  EndKey = ?LOG(Storage, Key, '$end', '$end'),
+
+  Log = iterate_log(DB, StartKey, EndKey),
+%%  Log =
+%%    ecomet_backend:dirty_select(DB, ?INDEX, ?RAMDISC, StartKey, EndKey ),
+
+  sort_log( filter_log(Log), {[],[]}).
+
+iterate_log(DB, Key, EndKey)->
+  case dlss:dirty_next(?NAME(DB, ?INDEX, ?RAMDISC),Key) of
+    Next when Next =/= '$end_of_table', Next =< EndKey->
+      [{Next,ecomet_backend:dirty_read(DB,?INDEX,?RAMDISC,Next)} | iterate_log(DB, Next, EndKey)];
+    _ ->[]
+  end.
+
+filter_log( Log )->
+  % Start from an older version
+  filter_log( lists:reverse( Log ), #{}).
+
+filter_log([{?LOG(_,_,_,ID),Bit}|Rest], Dict)->
+  case Dict of
+    #{ID:=_}->
+      % ID has a newer version
+      filter_log( Rest, Dict );
+    _->
+      [{ID,Bit} | filter_log(Rest,#{ID=>Bit})]
+  end;
+filter_log([],_Dict)->
+  [].
 
 
 sort_log([{ID,Bit}|Rest],{Add,Del})->
@@ -330,14 +308,9 @@ sort_log([{ID,Bit}|Rest],{Add,Del})->
   end;
 sort_log([],{Add,Del})->
   {
-    ecomet_bitmap:set_bit(<<>>, lists:reverse(Add)),
-    ecomet_bitmap:set_bit(<<>>, lists:reverse(Del))
+    ecomet_bitmap:set_bit(<<>>, Add),
+    ecomet_bitmap:set_bit(<<>>, Del)
   }.
-
-log_storage( Storage ) when Storage =:= ?RAM->
-  Storage;
-log_storage( _Storage )->
-  ?RAMDISC.
 
 
 get_supported_types()->
