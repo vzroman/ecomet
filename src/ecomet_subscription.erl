@@ -158,7 +158,7 @@ destroy_index(PID, Owner, #{
       []->
         ignore;
       [#index{value = Set}]->
-        case gb_sets:delete( Value, Set ) of
+        case gb_sets:delete_any( Value, Set ) of
           {0,nil} ->
             ets:delete(?S_INDEX, {deps, D});
           Set1->
@@ -171,7 +171,7 @@ destroy_index(PID, Owner, #{
       []->
         ignore;
       [#index{value = Set}]->
-        case gb_sets:delete( Value, Set ) of
+        case gb_sets:delete_any( Value, Set ) of
           {0,nil} ->
             ets:delete(?S_INDEX, {rights, R});
           Set1->
@@ -184,7 +184,7 @@ destroy_index(PID, Owner, #{
       []->
         ignore;
       [#index{value = Set}]->
-        case gb_sets:delete( Value, Set ) of
+        case gb_sets:delete_any( Value, Set ) of
           {0,nil} ->
             ets:delete(?S_INDEX, {db, DB});
           Set1->
@@ -197,7 +197,7 @@ destroy_index(PID, Owner, #{
       []->
         ignore;
       [#index{value = Set}]->
-        case gb_sets:delete( Value, Set ) of
+        case gb_sets:delete_any( Value, Set ) of
           {0,nil} ->
             ets:delete(?S_INDEX, {tag, T});
           Set1->
