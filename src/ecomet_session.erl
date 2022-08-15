@@ -95,7 +95,7 @@ get_active_users()->
   get_active_users(ets:next(?SESSIONS,{})).
 get_active_users(UserId) when is_tuple(UserId)->
   case ets:lookup(?SESSIONS,UserId) of
-    [#user{name = Name,sessions_count = Count}]-> [{UserId,Name,Count} | get_active_users(ets:next(?SESSIONS,UserId))];
+    [#user{name = Name,sessions_count = Count}] when Count>0-> [{UserId,Name,Count} | get_active_users(ets:next(?SESSIONS,UserId))];
     _->get_active_users(ets:next(?SESSIONS,UserId))
   end;
 get_active_users(_)->
