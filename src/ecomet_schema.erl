@@ -369,6 +369,9 @@ init([])->
 
   ?LOGINFO("starting ecomet schema server ~p",[self()]),
 
+  ?LOGINFO("initialize sessions"),
+  ok = ecomet_session:on_init(),
+
   ?LOGINFO("initialize local increment table"),
   ok = init_increment_table(),
 
@@ -394,9 +397,6 @@ init([])->
 
   ?LOGINFO("initialize default users"),
   ok = init_default_users(),
-
-  % Initialize subscriptions optimization
-  ok = ecomet_session:on_init(),
 
   Cycle=?ENV(schema_server_cycle,?DEFAULT_SCHEMA_CYCLE),
 

@@ -25,7 +25,8 @@
   logout/0,
   get_user/0,
   is_admin/0,
-  get_sessions/0
+  get_active_users/0,
+  get_sessions/0,get_sessions/1
 ]).
 
 %%=================================================================
@@ -151,8 +152,13 @@ get_user()->
 is_admin()->
   ecomet_user:is_admin().
 
+get_active_users()->
+  ecomet_session:get_active_users().
+
 get_sessions()->
-  ecomet_session:get_sesions().
+  ecomet_session:get_sessions().
+get_sessions(User)->
+  ecomet_session:get_sessions(User).
 
 %%=================================================================
 %%	Object-level CRUD

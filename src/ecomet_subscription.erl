@@ -24,7 +24,7 @@
 %%=================================================================
 -export([
   on_init/0,
-  start_link/4,
+  start_link/3,
   run/2,
   stop/1,
 
@@ -58,14 +58,12 @@ on_init()->
 
   ok.
 
-start_link( Id, Owner, Params, MemoryLimit )->
+start_link( Id, Owner, Params )->
   Session = self(),
-  case ets:lookup(?SUBSCRIPTIONS,{Owner,Id}) of
-    []->
+  case ets:insert_new(?SUBSCRIPTIONS,{Owner,Id}) of
+    true->
 
       PID = spawn_link(fun()->
-        % Set memory limit for the subscription handling process
-        MemoryLimit(),
 
         % Register the subscription process
         ets:insert(?SUBSCRIPTIONS,#subscription{
