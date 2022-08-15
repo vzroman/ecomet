@@ -60,29 +60,31 @@ on_init()->
 
 start_link( Id, Owner, Params )->
   Session = self(),
-  case ets:insert_new(?SUBSCRIPTIONS,{Owner,Id}) of
-    true->
+  PID = spawn_link(fun()->
+    % Register the subscription process
+    case ets:insert_new(?SUBSCRIPTIONS,#subscription{
+      id = {Session,Id},
+      ts = ecomet_lib:ts(),
+      pid = self(),
+      owner = Owner
+    }) of
+      true ->
+        % Build subscription index
+        build_index(self(), Owner, Params),
 
-      PID = spawn_link(fun()->
-
-        % Register the subscription process
-        ets:insert(?SUBSCRIPTIONS,#subscription{
-          id = {Session,Id},
-          ts = ecomet_lib:ts(),
-          pid = self(),
-          owner = Owner
-        }),
+        % I'm ready
+        Session ! {ok,self()},
 
         % Enter the wait loop
-        wait_for_run(#state{id = {Session,Id}, session = Session, owner = Owner, params = Params}, [])
-      end),
-
-      % Build subscription index
-      build_index(PID, Owner, Params),
-
-      {ok,PID};
-    _->
-      {error,{not_unique,Id}}
+        wait_for_run(#state{id = {Session,Id}, session = Session, owner = Owner, params = Params}, []);
+      _->
+        unlink( Session ),
+        Session ! {error,self(),{not_unique,Id}}
+    end
+  end),
+  receive
+    {ok,PID} -> {ok,PID};
+    {error,PID,Error}->{error,Error}
   end.
 
 run(PID, Match)->
