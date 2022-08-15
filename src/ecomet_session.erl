@@ -55,7 +55,7 @@
 -define(SESSIONS,ecomet_sessions).
 
 -record(session,{id, pid, ts, user, user_id, info }).
--record(user,{id, sessions_count }).
+-record(user,{id, name, sessions_count }).
 -record(state,{ subs, user_id, user, owner }).
 
 %%=================================================================
@@ -95,7 +95,7 @@ get_active_users()->
   get_active_users(ets:next(?SESSIONS,{})).
 get_active_users(UserId) when is_tuple(UserId)->
   case ets:lookup(?SESSIONS,UserId) of
-    [#user{sessions_count = Count}]-> [{UserId,Count} | get_active_users(ets:next(?SESSIONS,UserId))];
+    [#user{name = Name,sessions_count = Count}]-> [{UserId,Name,Count} | get_active_users(ets:next(?SESSIONS,UserId))];
     _->get_active_users(ets:next(?SESSIONS,UserId))
   end;
 get_active_users(_)->
@@ -187,7 +187,7 @@ init([Name,UserId,Info,Owner])->
     info = Info
   }),
 
-  ets:update_counter(?SESSIONS,UserId,1,#user{sessions_count = 0}),
+  ets:update_counter(?SESSIONS,UserId,{#user.sessions_count,1},#user{name = Name,sessions_count = 0}),
 
   State = #state{
     user_id = UserId,
@@ -255,7 +255,7 @@ terminate(Reason,#state{
   % Unregister session
   ets:delete(?SESSIONS, self()),
 
-  ets:update_counter(?SESSIONS,UserId,-1,#user{sessions_count = 1}),
+  ets:update_counter(?SESSIONS,UserId,{#user.sessions_count,-1},#user{name = Name,sessions_count = 1}),
 
   % If the session is closed by the normal reason
   % then unlink the owner process before exit to avoid
