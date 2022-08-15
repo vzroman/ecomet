@@ -229,10 +229,11 @@ handle_cast({remove_subscription, Id}, #state{
     #{ Id := PID }->
       ecomet_subscription:stop( PID ),
       ?LOGDEBUG("remove subscription ~p for user ~ts",[ Id,User ]),
-      {reply,ok,State#state{subs = maps:remove(Id,Subs)}};
+      {noreply,State#state{subs = maps:remove(Id,Subs)}};
     _->
-      {reply, {error,not_exists},State}
+      {noreply,State}
   end;
+
 handle_cast(Request,State)->
   ?LOGWARNING("ecomet session got an unexpected cast resquest ~p, state ~p",[Request, State]),
   {noreply,State}.
@@ -264,7 +265,7 @@ terminate(Reason,#state{
     normal->unlink(Owner);
     shutdown->unlink(Owner);
     {shutdown,_}->unlink(Owner);
-    _->ok
+    Other->exit(Owner,Other)
   end,
 
   ok.
