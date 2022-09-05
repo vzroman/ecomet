@@ -24,7 +24,9 @@
   login/2, login/3, dirty_login/1, dirty_login/2,
   logout/0,
   get_user/0,
-  is_admin/0
+  is_admin/0,
+  get_active_users/0,
+  get_sessions/0,get_sessions/1
 ]).
 
 %%=================================================================
@@ -33,6 +35,7 @@
 -export([
   create_object/1,create_object/2,
   open/1,open/2,open/3,open_nolock/1,open_rlock/1,open_wlock/1,
+  exists/1,
   read_field/2,read_field/3,read_fields/2,read_fields/3,
   read_all/1,read_all/2,
   field_changes/2,
@@ -149,6 +152,14 @@ get_user()->
 is_admin()->
   ecomet_user:is_admin().
 
+get_active_users()->
+  ecomet_session:get_active_users().
+
+get_sessions()->
+  ecomet_session:get_sessions().
+get_sessions(User)->
+  ecomet_session:get_sessions(User).
+
 %%=================================================================
 %%	Object-level CRUD
 %%=================================================================
@@ -172,6 +183,9 @@ open(ID, Lock)->
 
 open(ID,Lock,Timeout)->
   ecomet_lib:to_object(ID, Lock, Timeout).
+
+exists(OID)->
+  ecomet_object:exists(OID).
 
 %----Legacy API---------------------------------------------------
 open_nolock(ID)->

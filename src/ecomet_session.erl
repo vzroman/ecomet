@@ -28,12 +28,13 @@
 %%	Service API
 %%=================================================================
 -export([
-  on_start_node/1,
+  on_init/0,
   %-------Subscriptions---------------
-  register_subscription/2,
-  run_subscription/2,
-  on_subscription/2,
-  remove_subscription/1
+  register_subscription/3,
+  remove_subscription/1,
+
+  get_active_users/0,
+  get_sessions/0,get_sessions/1
 ]).
 
 %%=================================================================
@@ -51,31 +52,25 @@
 ]).
 
 -define(STOP_TIMEOUT,5000).
+-define(SESSIONS,ecomet_sessions).
 
--record(state,{ instance, pattern, subs, user, owner, memory_limit }).
+-record(session,{id, pid, ts, user, user_id, info }).
+-record(user,{id, name, sessions_count }).
+-record(state,{ subs, user_id, user, owner }).
 
 %%=================================================================
 %%	Service API
 %%=================================================================
-on_start_node(Node)->
+on_init()->
+  % Prepare the storage for sessions
+  ets:new(?SESSIONS,[named_table,public,ordered_set,{keypos, #session.id}]),
 
-  NotClosed = ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
-    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.session">>)},
-    {<<"node">>,'=',Node},
-    {<<"close">>,'=',-1}
-  ]}),
+  % Initialize subscriptions
+  ecomet_subscription:on_init(),
 
-  [ try
-      ecomet_query:delete([?ROOT],{<<".folder">>,'=',OID}),
-      Object=ecomet:open(OID,none),
-      ecomet:edit_object(Object,#{<<"close">> => ecomet_lib:ts()})
-    catch
-      _:Error->
-        ?LOGERROR("error closing session ~p, error ~p",[OID,Error])
-    end|| OID <- NotClosed],
   ok.
 
-register_subscription(Params, Timeout)->
+register_subscription(Id, Params, Timeout)->
   CallTimeout =
     if
       is_integer(Timeout) -> Timeout;
@@ -83,29 +78,63 @@ register_subscription(Params, Timeout)->
     end,
   case ecomet_user:get_session() of
     {ok,PID}->
-      gen_server:call(PID,{register_subscription,Params},CallTimeout);
+      gen_server:call(PID,{register_subscription,Id,Params},CallTimeout);
     {error,Error}->
       ?ERROR(Error)
   end.
-
-run_subscription(PID, Match)->
-  PID ! {run_subscription,Match}.
-
-on_subscription(PID,Log)->
-  PID ! {on_subscription,Log}.
 
 remove_subscription(ID)->
   case ecomet_user:get_session() of
     {ok,PID}->
-      gen_server:call(PID,{remove_subscription,ID});
+      gen_server:cast(PID,{remove_subscription,ID});
     {error,Error}->
       ?ERROR(Error)
   end.
 
+get_active_users()->
+  get_active_users(ets:next(?SESSIONS,{})).
+get_active_users(UserId) when is_tuple(UserId)->
+  case ets:lookup(?SESSIONS,UserId) of
+    [#user{name = Name,sessions_count = Count}] when Count>0-> [{UserId,Name,Count} | get_active_users(ets:next(?SESSIONS,UserId))];
+    _->get_active_users(ets:next(?SESSIONS,UserId))
+  end;
+get_active_users(_)->
+  [].
+
+get_sessions()->
+  get_sessions( ets:match_object(?SESSIONS,#session{id = '_',pid='_', ts='_', user='_', user_id='_', info='_'})).
+get_sessions(UserId) when is_tuple(UserId)->
+  get_sessions( ets:match_object(?SESSIONS,#session{id = '_',pid='_', ts='_', user='_', user_id=UserId, info='_'}));
+get_sessions(User) when is_binary(User)->
+  get_sessions( ets:match_object(?SESSIONS,#session{id = '_',pid='_', ts='_', user=User, user_id='_', info='_'}));
+get_sessions(Sessions) when is_list(Sessions)->
+  [#{
+    id => Id,
+    user => User,
+    user_id => UserId,
+    pid => PID,
+    ts => TS,
+    subscriptions => ecomet_subscription:get_subscriptions( Id ),
+    info => Info
+  } || #session{
+    id = Id,
+    user = User,
+    user_id = UserId,
+    pid = PID,
+    ts = TS,
+    info = Info
+  } <- Sessions].
+
+
 %%=================================================================
 %%	OTP
 %%=================================================================
-start_link(Context,Info)->
+start_link(User,Info)->
+
+  #{
+    <<".name">> := Name,
+    <<"memory_limit">> := UserMemoryLimit
+  } = ecomet:read_fields( User, [<<".name">>,<<"memory_limit">>] ),
 
   % Limit the user process by memory
   MemoryLimit=
@@ -115,19 +144,16 @@ start_link(Context,Info)->
       #{memory_limit := Limit} when is_integer(Limit)->
         Limit;
       _->
-        {ok,UID} = ecomet_user:get_user(),
-        case ecomet:read_field(?OBJECT(UID), <<"memory_limit">> ) of
-          {ok, Limit} when is_integer( Limit )->
-            Limit;
-          _ ->
-            ?ENV(process_memory_limit, ?PROCESS_MEMORY_LIMIT)
+        if
+          is_integer(UserMemoryLimit) -> UserMemoryLimit;
+          true -> ?ENV(process_memory_limit, ?PROCESS_MEMORY_LIMIT)
         end
     end,
 
   % Set memory limit for the user process
   set_memory_limit( MemoryLimit ),
 
-  gen_server:start_link(?MODULE, [Context,Info,self(),MemoryLimit], []).
+  gen_server:start_link(?MODULE, [Name,?OID(User),Info,self()], []).
 
 
 stop(Session,Reason)->
@@ -146,36 +172,28 @@ set_memory_limit( Limit ) when is_integer( Limit )->
 set_memory_limit( _NoLimit )->
   ok.
 
-init([Context,Info,Owner,MemoryLimit])->
+init([Name,UserId,Info,Owner])->
 
-  % Obtain the user context
-  Context(),
-
-  % Set memory limit for the session process
-  set_memory_limit( MemoryLimit ),
-
-  % We need to trap_exit to run the disconnect process before dieing
+  % We need to trap_exit to run the disconnect process before exit
   process_flag(trap_exit,true),
 
-  % Register the session
-  {ok,UserID} = ecomet_user:get_user(),
-  {ok,Name} = ecomet:read_field(?OBJECT(UserID),<<".name">>),
-  Session = ecomet:create_object(#{
-    <<".folder">> => UserID,
-    <<".pattern">> => ?OID(<<"/root/.patterns/.session">>),
-    <<"close">> => -1, % The time of closing. -1 means still open
-    <<"node">> => node(),
-    <<"PID">> => self(),
-    <<"info">> => Info
+  % Register session
+  true = ets:insert(?SESSIONS,#session{
+    id = self(),
+    ts = ecomet_lib:ts(),
+    user = Name,
+    user_id = UserId,
+    pid = Owner,
+    info = Info
   }),
 
+  ets:update_counter(?SESSIONS,UserId,{#user.sessions_count,1},#user{name = Name,sessions_count = 0}),
+
   State = #state{
-    instance = Session,
-    pattern = ?OID(<<"/root/.patterns/.subscription">>),
-    subs = #{},
+    user_id = UserId,
     user = Name,
     owner = Owner,
-    memory_limit = MemoryLimit
+    subs = #{}
   },
 
   ?LOGINFO("starting a session for user ~p",[Name]),
@@ -183,57 +201,38 @@ init([Context,Info,Owner,MemoryLimit])->
   {ok,State}.
 
 
-handle_call({register_subscription,Params}, _From, #state{
-  user = User ,
-  subs = Subs,
-  pattern = PatternID,
-  instance = Instance,
-  memory_limit = MemoryLimit
+handle_call({register_subscription, Id, Params}, _From, #state{
+  owner = Owner,
+  user = Name ,
+  subs = Subs
 } = State) ->
 
-  ID = maps:get(<<".name">>,Params),
-  Self = self(),
-  PID = spawn_link(fun()->
-    % Set memory limit for the subscription handling process
-    set_memory_limit( MemoryLimit ),
-    % Enter the wait loop
-    wait_for_run(Self, [])
-  end),
-
-  ?LOGDEBUG("register subscription ~ts for user ~ts, PID ~p",[ ID,User,PID ]),
-  ecomet:create_object(Params#{
-    <<".folder">>=>?OID(Instance),
-    <<".pattern">>=>PatternID,
-    <<"PID">>=> PID
-  }),
-
-  {reply,PID,State#state{subs = Subs#{ID=>PID}}};
-
-
-handle_call({remove_subscription, ID}, _From, #state{
-  user = User,
-  subs = Subs,
-  pattern = PatternID,
-  instance = Instance
-} = State) ->
-
-  ?LOGDEBUG("remove subscription ~ts for user ~p",[ ID,User ]),
-  ecomet_query:delete([?ROOT],{'AND',[
-    {<<".pattern">>,':=',PatternID},
-    {<<".folder">>,'=',?OID(Instance)},
-    {<<".name">>,'=',ID}
-  ]}),
-
-  case Subs of
-    #{ID := PID} -> PID ! {stop, self()};
-    _ -> ignore
-  end,
-
-  {reply,ok,State#state{subs = maps:remove(ID,Subs)}};
+  case ecomet_subscription:start_link( Id, Owner, Params ) of
+    {ok,PID}->
+      ?LOGDEBUG("register subscription ~p for user ~ts, PID ~p",[Id,Name,PID]),
+      {reply,{ok,PID},State#state{subs = Subs#{Id=>PID}}};
+    {error,Error} ->
+      ?LOGDEBUG("unable to register subscription ~p for user ~ts, error ~p",[Id,Name,Error]),
+      {reply, {error,Error}, State#state{subs = Subs}}
+  end;
 
 handle_call(Request, From, State) ->
   ?LOGWARNING("ecomet session got an unexpected call resquest ~p from ~p , state ~p",[Request,From, State]),
   {noreply,State}.
+
+handle_cast({remove_subscription, Id}, #state{
+  user = User,
+  subs = Subs
+} = State) ->
+
+  case Subs of
+    #{ Id := PID }->
+      ecomet_subscription:stop( PID ),
+      ?LOGDEBUG("remove subscription ~p for user ~ts",[ Id,User ]),
+      {noreply,State#state{subs = maps:remove(Id,Subs)}};
+    _->
+      {noreply,State}
+  end;
 
 handle_cast(Request,State)->
   ?LOGWARNING("ecomet session got an unexpected cast resquest ~p, state ~p",[Request, State]),
@@ -244,22 +243,20 @@ handle_info(Message,State)->
   {noreply,State}.
 
 terminate(Reason,#state{
-  instance = Session,
-  pattern = PatternID,
+  user_id = UserId,
   user = Name,
   owner = Owner,
   subs = Subs
 })->
-  ?LOGINFO("terminating session for user ~p, reason ~p",[Name ,Reason]),
-  ecomet_query:delete([?ROOT],{'AND',[
-    {<<".pattern">>,':=',PatternID},
-    {<<".folder">>,'=',?OID(Session)}
-  ]}),
-  ok = ecomet:edit_object(Session,#{ <<"close">> => ecomet_lib:ts() }),
+  ?LOGINFO("terminating session for user ~ts, reason ~p",[Name ,Reason]),
 
   % Deactivate all the subscriptions
-  Self = self(),
-  [ PID ! {stop, Self} || {_,PID} <- maps:to_list(Subs)],
+  [ ecomet_subscription:stop(PID) || {_,PID} <- maps:to_list(Subs)],
+
+  % Unregister session
+  ets:delete(?SESSIONS, self()),
+
+  ets:update_counter(?SESSIONS,UserId,{#user.sessions_count,-1},#user{name = Name,sessions_count = 1}),
 
   % If the session is closed by the normal reason
   % then unlink the owner process before exit to avoid
@@ -268,68 +265,13 @@ terminate(Reason,#state{
     normal->unlink(Owner);
     shutdown->unlink(Owner);
     {shutdown,_}->unlink(Owner);
-    _->ok
+    Other->exit(Owner,Other)
   end,
 
   ok.
 
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
-
-%%------------------------------------------------------------
-%%  Subscription process
-%%------------------------------------------------------------
-
-% The subscription is not started yet, stockpile the logs and wait for message to start
-wait_for_run(Owner, Buffer)->
-  receive
-    {on_subscription,Log}->
-      wait_for_run(Owner, [Log|Buffer]);
-    {run_subscription,Match}->
-      % Activate the subscription
-      % Run the buffer
-      [ Match(Log) || Log <- lists:reverse(Buffer) ],
-      subscription_loop(Owner, Match);
-    {stop, Owner}->
-      % The exit command
-      unlink(Owner);
-    Unexpected->
-      ?LOGWARNING("unexpected message ~p",[Unexpected]),
-      wait_for_run(Owner, Buffer)
-  end.
-
-% The subscription is active, wait for log events.
-subscription_loop(Owner, Match)->
-  receive
-    {on_subscription,Log}->
-      try Match(Log) catch
-        _:Error->?LOGERROR("subscription matching error, error ~p",[Error])
-      end,
-      subscription_loop(Owner, Match);
-    {stop, Owner}->
-      % The exit command
-      unlink(Owner);
-    Unexpected->
-      ?LOGWARNING("unexpected message ~p",[Unexpected]),
-      subscription_loop(Owner, Match)
-  end.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

@@ -34,9 +34,7 @@
   set/3,set/4,
   insert/2,
   delete/2,delete/3,
-  on_commit/1,
   object_map/2,
-  notify/2,
   execute/2,execute/3,
   compile/3,compile/4,
   system/3
@@ -285,16 +283,15 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
     end,
 
   % Subscription indexes (for the SEARCH phase)
-  Index = ecomet_resultset:subscription_indexes(CompiledSubscription),
+  Tags = ecomet_resultset:subscription_indexes(CompiledSubscription),
 
   % Register a subscription object for the SEARCH phase.
-  PID = ecomet_session:register_subscription(#{
-    <<".name">>=>ID,
-    <<"rights">>=>Rights,
-    <<"databases">>=>DBs,
-    <<"index">>=>Index,
-    <<"dependencies">>=>Deps,
-    <<"no_feedback">>=>NoFeedback
+  {ok,PID} = ecomet_session:register_subscription(ID, #{
+    rights=>Rights,
+    databases=>DBs,
+    tags=>Tags,
+    dependencies=>Deps,
+    no_feedback=>NoFeedback
   }, Timeout),
 
   % If the subscription is not stateless (default) then we need to
@@ -364,7 +361,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
       end,
 
   % Run the subscription
-  ecomet_session:run_subscription(PID,Match),
+  ecomet_subscription:run(PID,Match),
 
   ok.
 
@@ -427,7 +424,7 @@ compile_subscribe_read(Fields,Formatter)->
 
 
 unsubscribe(ID)->
-  ok = ecomet_session:remove_subscription(ID).
+  ecomet_session:remove_subscription(ID).
 
 match_log( New, Old, Del, NewObject, OldObject, Match )->
   Now = Match(ordsets:union(New,Old),NewObject),
@@ -457,79 +454,6 @@ init_subscription_state(ID,DBs,Deps,Conditions,Read)->
     Self!Msg,
     TS
   end,-1,Objects).
-
-on_commit(#ecomet_log{ changes = undefined })->
-  % No changes
-  ok;
-on_commit(#ecomet_log{
-  db = DB,
-  tags = {TAdd, TOld, TDel},
-  rights = { RAdd, ROld, RDel },
-  changes = Changes
-} = Log)->
-
-  %-----------------------Sorting----------------------------------------------
-  [ TAdd1, TOld1, TDel1, RAdd1, ROld1, RDel1, ChangedFields1]=
-    [ordsets:from_list(I)||I<-[ TAdd, TOld, TDel, RAdd, ROld, RDel, maps:keys(Changes)] ],
-
-  %-----------------------The SEARCH phase-------------------------------------
-  Tags = TAdd1 ++ TOld1 ++ TDel1,
-  Index = {'AND',[
-    {'OR',[ {<<"index">>,'=',{T,1}}  || T<-Tags ]},
-    {'OR',[ {<<"index">>,'=',{T,2}} || T<-[none|Tags] ]},
-    {'OR',[ {<<"index">>,'=',{T,3}} || T<-[none|Tags] ]}
-  ]},
-
-  Rights =
-    {'OR',[{<<"rights">>,'=',T} || T <- [is_admin|RAdd1 ++ ROld1 ++ RDel1] ]},
-
-  Dependencies =
-    {'OR',[{<<"dependencies">>,'=',F} || F <- [<<"@ANY@">>|ChangedFields1]]},
-
-  Query = {'AND',[
-    Dependencies,
-    Index,
-    Rights,
-    {<<"databases">>,'=',DB}
-  ]},
-
-  % Log with sorted items
-  Log1=Log#ecomet_log{
-    tags = {TAdd1, TOld1, TDel1},
-    rights = { RAdd1, ROld1, RDel1 },
-    changes = Changes
-  },
-
-  % Run the search on the other nodes
-  [ rpc:cast( N,?MODULE,notify,[ Query, Log1 ]) || N <-ecomet_node:get_ready_nodes() -- [node()] ],
-
-  % Local search
-  notify( Query, Log1 ),
-
-  ok.
-
-notify( Filter, #ecomet_log{self = Self} = Log )->
-
-  Query = ecomet_resultset:subscription_compile( Filter ),
-
-  ecomet_resultset:execute_local(?ROOT,Query, fun(RS)->
-    ecomet_resultset:foldl(fun(OID,Acc)->
-      Object = ecomet_object:construct(OID),
-      #{
-        <<"PID">>:=PID,
-        <<"no_feedback">>:=NoFeedback
-      } = ecomet:read_fields(Object,[<<".name">>,<<"PID">>,<<"no_feedback">>]),
-
-      % TODO. More selective sort out the author of the changes
-      if
-        NoFeedback, PID=:=Self-> ok;
-        true ->
-          % Run the second (FINAL MATCH) phase
-          ecomet_session:on_subscription( PID, Log )
-      end,
-      Acc
-    end,none,RS)
-  end, {'OR',ecomet_resultset:new()}).
 
 
 %%=====================================================================
@@ -770,23 +694,23 @@ compile_map_reduce(set,Fields,Params)->
   ReadUp=read_up(maps:get(lock,Params,none), set),
   ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
   Update =
-    fun(OID)->
-      ObjectMap=ReadUp(OID,ReadFields),
-      NewValues=
-        [{Name,
-          case Value of
-            #get{value = Fun}->Fun(ObjectMap);
-            _->Value
-          end}||{Name,Value}<-Updates],
-      ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues))
+    fun(OID, Acc)->
+      case ReadUp(OID,ReadFields) of
+        #{object := not_exists} -> Acc;
+        ObjectMap ->
+          NewValues=
+            [{Name,case Value of
+              #get{value = Fun}->Fun(ObjectMap);
+              _->Value
+             end}||{Name,Value}<-Updates],
+          ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues)),
+          Acc + 1
+      end
     end,
   Map=
     fun(RS)->
       ecomet_resultset:foldr(fun(OID,Acc)->
-        try
-          Update(OID),
-          Acc+1
-        catch
+        try Update(OID, Acc) catch
           _:Error->
             ?LOGERROR("unable to update ~p, error ~p",[OID,Error]),
             Acc
@@ -803,8 +727,13 @@ compile_map_reduce(delete,none,Params)->
     fun(RS)->
       ecomet_resultset:foldr(fun(OID,Acc)->
         #{object:=Object}=ReadUp(OID,[]),
-        ecomet_object:delete(Object),
-        Acc+1
+        if
+          Object =/= not_exists ->
+            ecomet_object:delete(Object),
+            Acc+1;
+          true ->
+            Acc
+        end
       end,0,RS)
     end,
   Reduce=fun lists:sum/1,
@@ -999,8 +928,6 @@ map_reduce_plan(#{group:=[]}=Params)->
     fun(Row,GroupAcc)->
       [Fun(Value,Acc)||{Fun,Value,Acc}<-lists:zip3(AggregateFunList,Row,GroupAcc)]
     end,
-  % Fun for reading from storage
-  ReadUp=maps:get(read_up,Params),
   %-------Fun to build local result--------------
   MapFun=
     fun(RS)->
@@ -1228,8 +1155,19 @@ read_up(none, get)->
   end;
 read_up(Lock, _Any)->
   fun(OID,Fields)->
-    Object=ecomet_object:open(OID,Lock),
-    object_map(Object,ecomet_object:read_fields(Object,Fields))
+    Object = ecomet_object:open(OID,Lock),
+    if
+      Object =/= not_exists ->
+        object_map(Object,ecomet_object:read_fields(Object,Fields));
+      true ->
+        % TODO. The object doesn't exist.
+        % Currently we return the empty object.
+        % All its fields are none
+        maps:merge(maps:from_list([{F,none}||F<-Fields]),#{
+          <<".oid">>=> OID,
+          object=> not_exists
+        })
+    end
   end.
 
 object_map(Object,Fields)->

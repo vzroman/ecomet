@@ -46,6 +46,7 @@
   create/1,create/2,
   delete/1,
   open/1,open/2,open/3,
+  exists/1,
   construct/1,
   edit/2,edit/3,
   dirty_edit/2,dirty_edit/3,
@@ -239,7 +240,8 @@ open(OID,Lock,Timeout)->
         case check_rights(New) of
           none->?ERROR(access_denied);
           {read,CanMove}->New#object{edit = false, move = CanMove};
-          {write,CanMove}->New#object{edit = true, move = CanMove }
+          {write,CanMove}->New#object{edit = true, move = CanMove };
+          not_exists->not_exists
         end;
       % Object is deleted
       #object{deleted=true}->?ERROR(object_deleted);
@@ -248,11 +250,17 @@ open(OID,Lock,Timeout)->
     end,
   % Set lock if requested
   if
-    Lock=/=none->
+    Lock=/=none, Object =/= not_exists->
       get_lock(Lock,Object,Timeout);
     true->ok
   end,
   Object.
+
+exists(OID)->
+  case try open(OID,none) catch _:_-> error end of
+    error-> false;
+    _-> true
+  end.
 
 % Read field value
 read_field(#object{oid=OID,map=Map}=Object,Field)->
@@ -492,19 +500,18 @@ get_oid(#object{oid=OID})->OID.
 
 %% Check context user rights for the object
 check_rights(#object{}=Object)->
-  #{
-    <<".readgroups">>:=Read,
-    <<".writegroups">>:=Write,
-    <<".folder">>:=FolderID
-  } = read_fields(Object,#{
-    <<".readgroups">> => none,
-    <<".writegroups">> => none,
-    <<".folder">> => none
-  }),
-
-  {ok, Move} = read_field( construct(FolderID), <<".contentwritegroups">> ),
-
-  check_rights(Read,Write,Move);
+  case read_fields(Object,[<<".readgroups">>,<<".writegroups">>,<<".folder">>]) of
+    #{ <<".folder">>:=none } ->
+      % The object can not exist without a folder
+      not_exists;
+    #{
+      <<".readgroups">>:=Read,
+      <<".writegroups">>:=Write,
+      <<".folder">>:=FolderID
+    } ->
+      {ok, Move} = read_field( construct(FolderID), <<".contentwritegroups">> ),
+      check_rights(Read,Write,Move)
+  end;
 check_rights(OID)->
   check_rights(construct(OID)).
 
@@ -853,6 +860,10 @@ check_path(Object)->
     Changed->
       {ok,FolderID}=read_field(Object,<<".folder">>),
       {ok,Name}=read_field(Object,<<".name">>),
+      if
+        Name =:= <<>> -> ?ERROR("name can not be empty");
+        true -> ok
+      end,
       OID = get_oid(Object),
       % Check that name does not include the path delimiter
       case binary:split(Name,<<"/">>) of
