@@ -12,7 +12,9 @@
    ]},
   {env,[]},
   {modules, []},
-
+  {included_applications,[
+   elock
+  ]},
   {licenses, ["Apache 2.0"]},
   {links, []}
  ]}.
