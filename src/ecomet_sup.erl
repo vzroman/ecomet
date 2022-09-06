@@ -37,6 +37,16 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
+
+  SubsLockServer = #{
+    id=>elock_subs,
+    start=>{elock,start_link,[ '$subsLocks$' ]},
+    restart=>permanent,
+    shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+    type=>worker,
+    modules=>[elock]
+},
+
   SchemaSrv=#{
     id=>ecomet_schema,
     start=>{ecomet_schema,start_link,[]},
@@ -58,7 +68,10 @@ init([]) ->
   },
 
   {ok, {Supervisor,
-    [SchemaSrv|Listeners]
+    [
+      SubsLockServer,
+      SchemaSrv
+      |Listeners]
   }}.
 
 build_listeners([http|Rest],Acc)->

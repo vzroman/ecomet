@@ -34,6 +34,14 @@
   notify/2
 ]).
 
+%%=================================================================
+%%	Internal API
+%%=================================================================
+-export([
+  wait_for_run/2,
+  subscription_loop/1
+]).
+
 -record(subscription,{id, pid, ts, owner }).
 -record(index,{key, value}).
 
@@ -110,36 +118,60 @@ build_index(PID, Owner, #{
   Value = {PID, Owner, NoFeedback},
 
   % dependencies
-  [ case ets:lookup(?S_INDEX,{deps, D}) of
-      []->
-        ets:insert(?S_INDEX, #index{ key = {deps, D}, value = gb_sets:from_list([Value]) });
-      [#index{value = Set}]->
-        ets:insert(?S_INDEX, #index{ key = {deps, D}, value = gb_sets:add_element(Value,Set) })
-    end || D <- Deps ],
+  [ begin
+    {ok,Unlock} = elock:lock('$subsLocks$', {deps, D}, _IsShared = false, [node()], _Timeout = infinity ),
+    try
+      case ets:lookup(?S_INDEX,{deps, D}) of
+        []->
+          ets:insert(?S_INDEX, #index{ key = {deps, D}, value = gb_sets:from_list([Value]) });
+        [#index{value = Set}]->
+          ets:insert(?S_INDEX, #index{ key = {deps, D}, value = gb_sets:add_element(Value,Set) })
+      end
+    after
+      Unlock()
+    end end || D <- Deps ],
 
   % Rights
-  [ case ets:lookup(?S_INDEX,{rights, R}) of
-      []->
-        ets:insert(?S_INDEX, #index{ key = {rights, R}, value = gb_sets:from_list([Value]) });
-      [#index{value = Set}]->
-        ets:insert(?S_INDEX, #index{ key = {rights, R}, value = gb_sets:add_element(Value,Set) })
-    end || R <- Rights ],
+  [ begin
+    {ok,Unlock} = elock:lock('$subsLocks$', {rights, R}, _IsShared = false, [node()], _Timeout = infinity ),
+    try
+      case ets:lookup(?S_INDEX,{rights, R}) of
+        []->
+          ets:insert(?S_INDEX, #index{ key = {rights, R}, value = gb_sets:from_list([Value]) });
+        [#index{value = Set}]->
+          ets:insert(?S_INDEX, #index{ key = {rights, R}, value = gb_sets:add_element(Value,Set) })
+      end
+    after
+      Unlock()
+    end end || R <- Rights ],
 
   % Databases
-  [ case ets:lookup(?S_INDEX,{db, DB}) of
-      []->
-        ets:insert(?S_INDEX, #index{ key = {db, DB}, value = gb_sets:from_list([Value]) });
-      [#index{value = Set}]->
-        ets:insert(?S_INDEX, #index{ key = {db, DB}, value = gb_sets:add_element(Value,Set) })
-    end || DB <- DBs ],
+  [ begin
+    {ok,Unlock} = elock:lock('$subsLocks$', {db, DB}, _IsShared = false, [node()], _Timeout = infinity ),
+    try
+      case ets:lookup(?S_INDEX,{db, DB}) of
+        []->
+          ets:insert(?S_INDEX, #index{ key = {db, DB}, value = gb_sets:from_list([Value]) });
+        [#index{value = Set}]->
+          ets:insert(?S_INDEX, #index{ key = {db, DB}, value = gb_sets:add_element(Value,Set) })
+      end
+    after
+      Unlock()
+    end end|| DB <- DBs ],
 
   % Tags
-  [ case ets:lookup(?S_INDEX,{tag, T}) of
-      []->
-        ets:insert(?S_INDEX, #index{ key = {tag, T}, value = gb_sets:from_list([Value]) });
-      [#index{value = Set}]->
-        ets:insert(?S_INDEX, #index{ key = {tag, T}, value = gb_sets:add_element(Value,Set) })
-    end || T <- Tags ],
+  [ begin
+    {ok,Unlock} = elock:lock('$subsLocks$', {tag, T}, _IsShared = false, [node()], _Timeout = infinity ),
+    try
+      case ets:lookup(?S_INDEX,{tag, T}) of
+        []->
+          ets:insert(?S_INDEX, #index{ key = {tag, T}, value = gb_sets:from_list([Value]) });
+        [#index{value = Set}]->
+          ets:insert(?S_INDEX, #index{ key = {tag, T}, value = gb_sets:add_element(Value,Set) })
+      end
+    after
+      Unlock()
+    end end|| T <- Tags ],
 
   ok.
 
@@ -154,56 +186,81 @@ destroy_index(PID, Owner, #{
   Value = {PID, Owner, NoFeedback},
 
   % dependencies
-  [ case ets:lookup(?S_INDEX,{deps, D}) of
-      []->
-        ignore;
-      [#index{value = Set}]->
-        case gb_sets:delete_any( Value, Set ) of
-          {0,nil} ->
-            ets:delete(?S_INDEX, {deps, D});
-          Set1->
-            ets:insert(?S_INDEX, #index{ key = {deps, D}, value = Set1 })
-        end
-    end || D <- Deps ],
+  [ begin
+    {ok,Unlock} = elock:lock('$subsLocks$', {deps, D}, _IsShared = false, [node()], _Timeout = infinity ),
+    try
+      case ets:lookup(?S_INDEX,{deps, D}) of
+        []->
+          ignore;
+        [#index{value = Set}]->
+          case gb_sets:delete_any( Value, Set ) of
+            {0,nil} ->
+              ets:delete(?S_INDEX, {deps, D});
+            Set1->
+              ets:insert(?S_INDEX, #index{ key = {deps, D}, value = Set1 })
+          end
+      end
+    after
+      Unlock()
+    end end|| D <- Deps ],
 
   % Rights
-  [ case ets:lookup(?S_INDEX,{rights, R}) of
-      []->
-        ignore;
-      [#index{value = Set}]->
-        case gb_sets:delete_any( Value, Set ) of
-          {0,nil} ->
-            ets:delete(?S_INDEX, {rights, R});
-          Set1->
-            ets:insert(?S_INDEX, #index{ key = {rights, R}, value = Set1 })
-        end
-    end || R <- Rights ],
+  [ begin
+    {ok,Unlock} = elock:lock('$subsLocks$', {rights, R}, _IsShared = false, [node()], _Timeout = infinity ),
+    try
+      case ets:lookup(?S_INDEX,{rights, R}) of
+        []->
+          ignore;
+        [#index{value = Set}]->
+          case gb_sets:delete_any( Value, Set ) of
+            {0,nil} ->
+              ets:delete(?S_INDEX, {rights, R});
+            Set1->
+              ets:insert(?S_INDEX, #index{ key = {rights, R}, value = Set1 })
+          end
+      end
+    after
+      Unlock()
+    end end|| R <- Rights ],
 
   % Databases
-  [ case ets:lookup(?S_INDEX,{db, DB}) of
-      []->
-        ignore;
-      [#index{value = Set}]->
-        case gb_sets:delete_any( Value, Set ) of
-          {0,nil} ->
-            ets:delete(?S_INDEX, {db, DB});
-          Set1->
-            ets:insert(?S_INDEX, #index{ key = {db, DB}, value = Set1 })
-        end
-    end || DB <- DBs ],
+  [ begin
+    {ok,Unlock} = elock:lock('$subsLocks$', {db, DB}, _IsShared = false, [node()], _Timeout = infinity ),
+    try
+
+      case ets:lookup(?S_INDEX,{db, DB}) of
+        []->
+          ignore;
+        [#index{value = Set}]->
+          case gb_sets:delete_any( Value, Set ) of
+            {0,nil} ->
+              ets:delete(?S_INDEX, {db, DB});
+            Set1->
+              ets:insert(?S_INDEX, #index{ key = {db, DB}, value = Set1 })
+          end
+      end
+    after
+      Unlock()
+    end end|| DB <- DBs ],
 
   % Tags
-  [ case ets:lookup(?S_INDEX,{tag, T}) of
-      []->
-        ignore;
-      [#index{value = Set}]->
-        case gb_sets:delete_any( Value, Set ) of
-          {0,nil} ->
-            ets:delete(?S_INDEX, {tag, T});
-          Set1->
-            ets:insert(?S_INDEX, #index{ key = {tag, T}, value = Set1 })
-        end
-    end || T <- Tags ],
+  [ begin
+    {ok,Unlock} = elock:lock('$subsLocks$', {tag, T}, _IsShared = false, [node()], _Timeout = infinity ),
+    try
+      case ets:lookup(?S_INDEX,{tag, T}) of
+        []->
+          ignore;
+        [#index{value = Set}]->
+          case gb_sets:delete_any( Value, Set ) of
+            {0,nil} ->
+              ets:delete(?S_INDEX, {tag, T});
+            Set1->
+              ets:insert(?S_INDEX, #index{ key = {tag, T}, value = Set1 })
+          end
+      end
+    after
+      Unlock()
+    end end|| T <- Tags ],
 
   ok.
 
@@ -333,6 +390,8 @@ wait_for_run(#state{session = Session}=State, Buffer)->
     Unexpected->
       ?LOGWARNING("unexpected message ~p",[Unexpected]),
       wait_for_run(State, Buffer)
+  after
+    5-> erlang:hibernate(?MODULE,?FUNCTION_NAME,[ State, Buffer])
   end.
 
 % The subscription is active, wait for log events.
@@ -351,6 +410,8 @@ subscription_loop(#state{session = Session, match = Match} = State)->
     Unexpected->
       ?LOGWARNING("unexpected message ~p",[Unexpected]),
       subscription_loop(State)
+  after
+    5-> erlang:hibernate(?MODULE,?FUNCTION_NAME,[ State ])
   end.
 
 clean_up( #state{ id =Id, owner = Owner, params = Params} )->
