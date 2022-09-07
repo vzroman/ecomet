@@ -231,6 +231,7 @@ handle_cast({remove_subscription, Id}, #state{
       ?LOGDEBUG("remove subscription ~p for user ~ts",[ Id,User ]),
       {noreply,State#state{subs = maps:remove(Id,Subs)}};
     _->
+      ecomet_subscription:stop( Id ),
       {noreply,State}
   end;
 

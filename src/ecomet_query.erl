@@ -246,6 +246,18 @@ subscribe(ID,DBs,Fields,Conditions)->
   subscribe(ID,DBs,Fields,Conditions,#{}).
 subscribe(ID,DBs,Fields,Conditions,InParams) when is_list(InParams)->
   subscribe(ID,DBs,Fields,Conditions,maps:from_list(InParams));
+subscribe(ID,_DBs,Fields,{<<".oid">>,'=',OID},InParams)->
+  % Object subscription
+  case ecomet_object:open(OID) of
+    not_exists->
+      throw({not_exists, OID});
+    {error,Error}->
+      throw(Error);
+    Object->
+      ecomet_subscription:subscribe_object(ID,Object,Fields,InParams)
+  end;
+subscribe(ID,DBs,Fields,{<<".path">>,'=',Path},InParams)->
+  subscribe(ID,DBs, Fields,{<<".oid">>,'=',?OID(Path)}, InParams);
 subscribe(ID,DBs,Fields,Conditions,InParams)->
 
   #{
