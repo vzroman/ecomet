@@ -82,7 +82,7 @@ subscribe_object(ID,Object,Fields,InParams)->
     end
   end),
   receive
-    {ok,PID} -> {ok,PID};
+    {ok,PID} -> ok;
     {error,PID,Error}->throw(Error)
   end.
 
