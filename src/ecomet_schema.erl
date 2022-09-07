@@ -41,6 +41,7 @@
   add_node/1,
   remove_node/1,
   get_node_id/1,
+  get_nodes/0,
 
   %-------Pattern--------------------
   new_pattern_id/0,
@@ -319,6 +320,14 @@ remove_node(Name)->
 get_node_id(Name)->
   [ #kv{ value = Id } ] = mnesia:dirty_read( ?SCHEMA, #nodeName{k=Name} ),
   Id.
+
+get_nodes()->
+  MS=[{
+    #kv{key = #nodeName{k='$1'}, value = '_'},
+    [],
+    ['$1']
+  }],
+  mnesia:dirty_select(?SCHEMA,MS).
 
 %%=================================================================
 %%	PATTERN API

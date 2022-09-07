@@ -19,6 +19,10 @@
 
 -include("ecomet.hrl").
 
+-export([
+  subscribe_object/4
+]).
+
 %%=================================================================
 %%	Service API
 %%=================================================================
@@ -39,16 +43,128 @@
 %%=================================================================
 -export([
   wait_for_run/2,
-  subscription_loop/1
+  subscription_loop/1,
+  object_monitor/1
 ]).
 
 -record(subscription,{id, pid, ts, owner }).
 -record(index,{key, value}).
+-record(monitor,{id,oid,object,owner,fields,format,no_feedback}).
 
 -record(state,{id, session, owner, params, match}).
 
 -define(SUBSCRIPTIONS,ecomet_subscriptions).
 -define(S_INDEX,ecomet_subscriptions_index).
+
+%%=================================================================
+%%	Internal API
+%%=================================================================
+subscribe_object(ID,Object,Fields,InParams)->
+  Owner = self(),
+  PID = spawn(fun()->
+
+    erlang:monitor(process, Owner),
+    OID = ?OID(Object),
+
+    case ets:insert_new(?SUBSCRIPTIONS,#subscription{
+      id = {oid,ID},
+      ts = ecomet_lib:ts(),
+      pid = self(),
+      owner = Owner
+    }) of
+      true ->
+        % I'm ready
+        Owner ! {ok,self()},
+
+        object_monitor(#monitor{id = ID,oid = OID,object = Object, owner = Owner, fields = Fields}, InParams);
+      _->
+        Owner ! {error,self(),{not_unique,ID}}
+    end
+  end),
+  receive
+    {ok,PID} -> ok;
+    {error,PID,Error}->throw(Error)
+  end.
+
+object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object,fields = Fields0} =Monitor0, Params)->
+
+  NoFeedback = maps:get(no_feedback, Params, false),
+
+  Format = maps:get(format, Params, fun(_,V)->V end),
+
+  Fields1 =
+   case Fields0 of
+     ['*'] ->
+       maps:keys( ecomet_object:read_all(Object) )--[<<".oid">>];
+     _->
+       Fields0
+   end,
+
+  Fields =
+    [ case F of
+        <<".oid">> -> {<<".oid">>, term};
+        <<".path">> -> {<<".path">>, string};
+        _-> {F, element(2,ecomet_object:field_type(Object,F)) }
+      end || F <- Fields1],
+
+  Monitor = Monitor0#monitor{
+    no_feedback = NoFeedback,
+    format = Format,
+    fields = Fields
+  },
+
+  esubscribe:subscribe({log,OID}, [node()], self(), infinity),
+
+  case maps:get(stateless, Params, false) of
+    false ->
+      ReadParams =
+        if
+          Format =:= undefined-> #{};
+          true-> #{format => Format}
+        end,
+      Create = ecomet_object:read_fields(Object,Fields1,ReadParams),
+      Owner ! ?SUBSCRIPTION(ID,create,OID, Create);
+    _->
+      ignore
+  end,
+
+  object_monitor( Monitor ).
+
+object_monitor(#monitor{id = ID,oid = OID, owner = Owner, fields = Fields, format = Format, no_feedback = NoFeedback } = Monitor )->
+  receive
+    {'$esubscription', {log,OID}, {_Tags,_Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
+      object_monitor( Monitor );
+    {'$esubscription', {log,OID}, {[],_Changes, _Self}, _Node, _Actor}->
+      Owner! ?SUBSCRIPTION(ID,delete,OID,#{}),
+      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+    {'$esubscription', {log,OID}, {_Tags, Changes, _Self}, _Node, _Actor}->
+      Updates =
+        lists:foldl(fun({Field, Type}, Acc)->
+          case Changes of
+            #{Field := Value}->
+              Acc#{ Field => Format(Type,Value) };
+            _ when Field =:= <<".oid">>->
+              Acc#{Field => Format(Type, OID)};
+            _ when Field =:= <<".path">>->
+              Acc#{Field => Format(Type, ?PATH(OID))};
+            _->
+              Acc
+          end
+        end, #{}, Fields),
+      case maps:size(Updates) of
+        0-> ignore;
+        _-> Owner ! ?SUBSCRIPTION(ID,update,OID,Updates)
+      end,
+      object_monitor( Monitor );
+    {stop, Owner}->
+      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+    {'DOWN', _Ref, process, Owner, _Reason}->
+      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+    _->
+      object_monitor( Monitor )
+  after
+    5->erlang:hibernate(?MODULE,?FUNCTION_NAME,[ Monitor ])
+  end.
 
 %%=================================================================
 %%	Service API
@@ -98,8 +214,14 @@ start_link( Id, Owner, Params )->
 run(PID, Match)->
   PID ! {run,Match}.
 
-stop(PID)->
-  PID ! {stop, self()}.
+stop(PID) when is_pid( PID )->
+  PID ! {stop, self()};
+stop(Id)->
+  case ets:lookup(?SUBSCRIPTIONS,{oid,Id}) of
+    [#subscription{pid = PID,owner = Owner}]->
+      PID ! {stop,Owner};
+    _->ok
+  end.
 
 get_subscriptions( Session )->
   [ #{id => Id, ts => TS, pid => PID} || [Id,TS,PID] <-ets:match(?SUBSCRIPTIONS, #subscription{id = {Session,'$1'}, ts ='$2', pid='$3', _ = '_'})].
@@ -268,11 +390,18 @@ on_commit(#ecomet_log{ changes = undefined })->
   % No changes
   ok;
 on_commit(#ecomet_log{
+  object = #{<<".oid">> := OID} = Object,
   db = DB,
   tags = {TAdd, TOld, TDel},
   rights = { RAdd, ROld, RDel },
-  changes = Changes
+  changes = Changes,
+  self = Self
 } = Log)->
+
+  % Run object monitors
+  Updates = maps:with( maps:keys(Changes), Object ),
+  NewTags = TAdd ++ TOld,
+  [ rpc:cast( N, esubscribe, notify,[ {log,OID}, { NewTags, Updates, Self } ]) || N <-ecomet_node:get_ready_nodes() ],
 
   %-----------------------Sorting----------------------------------------------
   [ TAdd1, TOld1, TDel1, RAdd1, ROld1, RDel1, ChangedFields1]=

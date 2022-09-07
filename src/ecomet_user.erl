@@ -26,6 +26,7 @@
 %%=================================================================
 -export([
   login/2,login/3,dirty_login/1,dirty_login/2,
+  spawn_session/1,
   logout/0,
   get_user/0,
   get_usergroups/0,
@@ -102,6 +103,13 @@ dirty_login(Login, Info) ->
   ],none) of
     {ok,_}->ok;
     _->error
+  end.
+
+spawn_session(Fun)->
+  case get(?CONTEXT) of
+    undefined -> throw( user_undefined );
+    Context->
+      spawn_session(fun()->put(?CONTEXT, Context), Fun()  end)
   end.
 
 logout()->

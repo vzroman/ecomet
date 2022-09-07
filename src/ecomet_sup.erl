@@ -45,7 +45,16 @@ init([]) ->
     shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
     type=>worker,
     modules=>[elock]
-},
+  },
+
+  ESubsriptionsServer = #{
+    id=>esubscribe,
+    start=>{esubscribe,start_link,[]},
+    restart=>permanent,
+    shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+    type=>worker,
+    modules=>[esubscribe]
+  },
 
   SchemaSrv=#{
     id=>ecomet_schema,
@@ -70,6 +79,7 @@ init([]) ->
   {ok, {Supervisor,
     [
       SubsLockServer,
+      ESubsriptionsServer,
       SchemaSrv
       |Listeners]
   }}.
