@@ -119,7 +119,7 @@ build_index(PID, Owner, #{
 
   % dependencies
   [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {deps, D}, _IsShared = false, [node()], _Timeout = infinity ),
+    {ok,Unlock} = elock:lock('$subsLocks$', {deps, D}, _IsShared = false, _Timeout = infinity ),
     try
       case ets:lookup(?S_INDEX,{deps, D}) of
         []->
@@ -133,7 +133,7 @@ build_index(PID, Owner, #{
 
   % Rights
   [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {rights, R}, _IsShared = false, [node()], _Timeout = infinity ),
+    {ok,Unlock} = elock:lock('$subsLocks$', {rights, R}, _IsShared = false, _Timeout = infinity ),
     try
       case ets:lookup(?S_INDEX,{rights, R}) of
         []->
@@ -147,7 +147,7 @@ build_index(PID, Owner, #{
 
   % Databases
   [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {db, DB}, _IsShared = false, [node()], _Timeout = infinity ),
+    {ok,Unlock} = elock:lock('$subsLocks$', {db, DB}, _IsShared = false, _Timeout = infinity ),
     try
       case ets:lookup(?S_INDEX,{db, DB}) of
         []->
@@ -161,7 +161,7 @@ build_index(PID, Owner, #{
 
   % Tags
   [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {tag, T}, _IsShared = false, [node()], _Timeout = infinity ),
+    {ok,Unlock} = elock:lock('$subsLocks$', {tag, T}, _IsShared = false, _Timeout = infinity ),
     try
       case ets:lookup(?S_INDEX,{tag, T}) of
         []->
@@ -187,7 +187,7 @@ destroy_index(PID, Owner, #{
 
   % dependencies
   [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {deps, D}, _IsShared = false, [node()], _Timeout = infinity ),
+    {ok,Unlock} = elock:lock('$subsLocks$', {deps, D}, _IsShared = false, _Timeout = infinity ),
     try
       case ets:lookup(?S_INDEX,{deps, D}) of
         []->
@@ -206,7 +206,7 @@ destroy_index(PID, Owner, #{
 
   % Rights
   [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {rights, R}, _IsShared = false, [node()], _Timeout = infinity ),
+    {ok,Unlock} = elock:lock('$subsLocks$', {rights, R}, _IsShared = false, _Timeout = infinity ),
     try
       case ets:lookup(?S_INDEX,{rights, R}) of
         []->
@@ -225,7 +225,7 @@ destroy_index(PID, Owner, #{
 
   % Databases
   [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {db, DB}, _IsShared = false, [node()], _Timeout = infinity ),
+    {ok,Unlock} = elock:lock('$subsLocks$', {db, DB}, _IsShared = false, _Timeout = infinity ),
     try
 
       case ets:lookup(?S_INDEX,{db, DB}) of
@@ -245,7 +245,7 @@ destroy_index(PID, Owner, #{
 
   % Tags
   [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {tag, T}, _IsShared = false, [node()], _Timeout = infinity ),
+    {ok,Unlock} = elock:lock('$subsLocks$', {tag, T}, _IsShared = false, _Timeout = infinity ),
     try
       case ets:lookup(?S_INDEX,{tag, T}) of
         []->
