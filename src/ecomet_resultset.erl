@@ -125,7 +125,7 @@ direct({'ANDNOT',And,Not}, Fields)->
 				false->true
 			end
 	end;
-direct({Oper,Field,Value}, Fields)->
+direct({Field,Oper,Value}, Fields)->
 	FieldValue = maps:get(Field,Fields,none),
 	direct_compare(Oper,Value,FieldValue).
 

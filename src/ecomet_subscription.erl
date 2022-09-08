@@ -65,7 +65,7 @@ on_init()->
   ets:new(?SUBSCRIPTIONS,[named_table,public,set,{keypos, #subscription.id}]),
 
   % Prepare the storage for index
-  ets:new(?S_INDEX,[named_table,public,set,{keypos, #index.tag}]),
+  ets:new(?S_INDEX,[named_table,public,set]),
 
   ok.
 
@@ -145,7 +145,7 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read =
     Stateless -> ignore;
     true ->
       Fields = ecomet_object:read_all(Object),
-      Update = Read( Fields, Fields ),
+      Update = Read( Fields, ecomet_query:object_map(Object,Fields) ),
       Owner ! ?SUBSCRIPTION(ID,create,OID, Update)
   end,
 
@@ -157,7 +157,7 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
       object_monitor( Monitor );
     {'$esubscription', {log,OID}, {[], _Object, _Changes, _Self}, _Node, _Actor}->
       Owner! ?SUBSCRIPTION(ID,delete,OID,#{}),
-      esubscribe:unsubscribe({log,ID},[node()], self()),
+      esubscribe:unsubscribe({log,OID},[node()], self()),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     {'$esubscription', {log,OID}, {_Tags, Object, Changes, _Self}, _Node, _Actor}->
       Updates = Read( Changes, Object ),
@@ -167,10 +167,10 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
       end,
       object_monitor( Monitor );
     {unsubscribe, Owner}->
-      esubscribe:unsubscribe({log,ID},[node()], self()),
+      esubscribe:unsubscribe({log,OID},[node()], self()),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     {'DOWN', _Ref, process, Owner, _Reason}->
-      esubscribe:unsubscribe({log,ID},[node()], self()),
+      esubscribe:unsubscribe({log,OID},[node()], self()),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     _->
       object_monitor( Monitor )
@@ -211,7 +211,7 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
           Object = ecomet_object:construct( OID ),
 
           Fields = #{<<".ts">>:=ObjectTS} = ecomet_object:read_all( Object ),
-          Update = Read(Fields,Fields),
+          Update = Read(Fields,ecomet_query:object_map(Object,Fields)),
           Owner ! ?SUBSCRIPTION(ID,create,OID, Update),
 
           if
@@ -324,7 +324,7 @@ global_set(Tag)->
     Unlock()
   end.
 global_reset(Tag)->
-  {ok,GlobalUnlock} = elock:lock('$subsLocks$',global, _IsShared = false, _Timeout = infinity),
+  {ok,Unlock} = elock:lock('$subsLocks$',global, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX, global) of
       [{_,Global}]->
@@ -333,7 +333,7 @@ global_reset(Tag)->
         ignore
     end
   after
-    GlobalUnlock()
+    Unlock()
   end.
 
 drop_updates( StartTS )->
@@ -344,6 +344,7 @@ drop_updates( StartTS )->
     0->ok
   end.
 
+% SUBSCRIBE CID=test GET .name, f1 from * where and(.folder=$oid('/root/f1'), .name='o12')
 query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, conditions = Conditions, read = Read, index = Index } = Query )->
   receive
     {log, _OID, _Object, _Changes, Self} when NoFeedback, Self=:=Owner->
@@ -365,11 +366,11 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
       end,
       query_monitor( Query );
     {unsubscribe, Owner}->
-      destroy_index(Index, self()),
+      catch destroy_index(Index, self()),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     {'DOWN', _Ref, process, Owner, _Reason}->
-      destroy_index(Index, self()),
-      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+      catch destroy_index(Index, self()),
+      ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     _->
       query_monitor( Query )
   after
@@ -389,11 +390,11 @@ on_commit(#ecomet_log{
 })->
 
   % Run object monitors
-  Updates = maps:with( maps:keys(Changes), Object ),
-  NewTags = TAdd ++ TOld,
-  esubscribe:notify({log,OID}, { NewTags, Updates, Self }),
+  esubscribe:notify({log,OID}, { TAdd ++ TOld, Object, Changes, Self }),
 
   case ets:lookup(?S_INDEX, global) of
+    [{_,<<>>}]->
+      ignore;
     [{_,Global}]->
       Mask = tags_mask( TAdd ++ TOld ++ TDel,[] ),
       case ?X_BIT(Mask,Global) of

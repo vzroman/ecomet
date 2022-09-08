@@ -58,7 +58,7 @@ function(ecomet,dialogid,errordlg,types) {
                 );
             } else if(query.type=="SUBSCRIBE"){
                 var gridColumns=null;
-                var $grid;
+                var $grid = $('#grid'+dialogId);
                 subscriptionId=ecomet.subscribe(query.text,
                     function(createObject){
                         if (gridColumns=null){
