@@ -41,7 +41,8 @@
 %%	Internal API
 %%=================================================================
 -export([
-  object_monitor/1
+  object_monitor/1,
+  query_monitor/1
 ]).
 
 -record(subscription,{id, pid, ts, owner }).
@@ -119,16 +120,11 @@ do_subscribe(Conditions, Owner, ID, DBs, Read, Params )->
   subscribe_query(ID, Conditions, Owner, DBs, Read, Params ).
 
 unsubscribe(ID)->
-  case ets:lookup(?SUBSCRIPTIONS,{oid,ID}) of
+  case ets:lookup(?SUBSCRIPTIONS,{self(),ID}) of
     [#subscription{pid = PID,owner = Owner}]->
       PID ! {unsubscribe,Owner};
     _->
-      case ets:lookup(?SUBSCRIPTIONS,{query,ID}) of
-        [#subscription{pid = PID,owner = Owner}]->
-          PID ! {unsubscribe,Owner};
-        _->
-          ignore
-      end
+      ignore
   end,
   ok.
 
@@ -165,7 +161,7 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
     {'$esubscription', {log,OID}, {[], _Object, _Changes, _Self}, _Node, _Actor}->
       Owner! ?SUBSCRIPTION(ID,delete,OID,#{}),
       esubscribe:unsubscribe({log,ID},[node()], self()),
-      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+      ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     {'$esubscription', {log,OID}, {_Tags, Object, Changes, _Self}, _Node, _Actor}->
       Updates = Read( Changes, Object ),
       case maps:size(Updates) of
@@ -175,10 +171,10 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
       object_monitor( Monitor );
     {unsubscribe, Owner}->
       esubscribe:unsubscribe({log,ID},[node()], self()),
-      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+      ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     {'DOWN', _Ref, process, Owner, _Reason}->
       esubscribe:unsubscribe({log,ID},[node()], self()),
-      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+      ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     _->
       object_monitor( Monitor )
   after
@@ -188,7 +184,7 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
 %%=================================================================
 %%	Query subscription
 %%=================================================================
--record(query,{id, conditions, read, no_feedback}).
+-record(query,{id, conditions, read,owner, no_feedback, index}).
 subscribe_query(ID, InConditions, Owner, DBs, Read, #{
   stateless := Stateless,     % No initial query, only updates
   no_feedback := NoFeedback    % Do not send updates back to the author process
@@ -230,7 +226,7 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
       drop_updates( StartTS)
   end,
 
-  monitor_query(#query{id = ID, conditions = Conditions, read = Read, no_feedback = NoFeedback}).
+  query_monitor(#query{id = ID, conditions = Conditions, read = Read, owner = Owner, no_feedback = NoFeedback, index = Index}).
 
 compile_index([{[Tag|_]=And,Not}|Rest], DBs)->
   [#index{
@@ -260,15 +256,15 @@ build_index([#index{tag = Tag}=Index|Rest], Self)->
   {ok,TagUnlock} = elock:lock('$subsLocks$',{tag,Tag}, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX,{tag,Tag}) of
-      [Indexes]->
+      [{_,Indexes}]->
         case Indexes of
           #{Index := Subscribers} ->
-            ets:insert(?S_INDEX,{ {tag,Tag}, Indexes#{ Index => gb_sets:add_element(Self,Subscribers) }});
+            ets:insert(?S_INDEX,{ {tag,Tag}, Indexes#{ Index => ordsets:add_element(Self,Subscribers) }});
           _->
-            ets:insert(?S_INDEX,{ {tag,Tag}, Indexes#{ Index => gb_sets:from_list([Self]) }})
+            ets:insert(?S_INDEX,{ {tag,Tag}, Indexes#{ Index => [Self] }})
         end;
       []->
-        ets:insert(?S_INDEX,{ {tag,Tag}, #{ Index => gb_sets:from_list([Self]) }}),
+        ets:insert(?S_INDEX,{ {tag,Tag}, #{ Index => [Self] }}),
         global_set(Tag)
     end
   after
@@ -282,16 +278,16 @@ destroy_index([#index{tag = Tag}=Index|Rest], Self )->
   {ok,TagUnlock} = elock:lock('$subsLocks$',{tag,Tag}, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX,{tag,Tag}) of
-      [Indexes]->
+      [{_,Indexes}]->
         case Indexes of
           #{Index := Subscribers}->
-            case gb_sets:delete_any( Self, Subscribers ) of
-              {0,nil} ->
+            case ordsets:del_element( Self, Subscribers ) of
+              [] ->
                 Indexes1 = maps:remove(Index, Indexes),
                 case maps:size( Indexes1 ) of
                   0 ->
-                    global_reset( Tag ),
-                    ets:delete(?S_INDEX,{tag,Tag});
+                    ets:delete(?S_INDEX,{tag,Tag}),
+                    global_reset( Tag );
                   _->
                     ets:insert(?S_INDEX, { {tag,Tag}, Indexes1 })
                 end;
@@ -301,8 +297,8 @@ destroy_index([#index{tag = Tag}=Index|Rest], Self )->
           _->
             case maps:size(Indexes) of
               0->
-                global_reset( Tag ),
-                ets:delete(?S_INDEX,{tag,Tag});
+                ets:delete(?S_INDEX,{tag,Tag}),
+                global_reset( Tag );
               _->
                 ignore
             end
@@ -344,167 +340,45 @@ global_reset(Tag)->
   end.
 
 drop_updates( StartTS )->
-  todo.
+  receive
+    {log, _OID, #{<<".ts">>:=TS}, _Changes, _Self} when TS =< StartTS->
+      drop_updates( StartTS )
+  after
+    0->ok
+  end.
 
-monitor_query( Query )->
-  todo.
+query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, conditions = Conditions, read = Read, index = Index } = Query )->
+  receive
+    {log, _OID, _Object, _Changes, Self} when NoFeedback, Self=:=Owner->
+      query_monitor( Query );
+    {log, OID, Object, Changes, _Self}->
+      case { ecomet_resultset:direct(Conditions, Object), ecomet_resultset:direct(Conditions, maps:merge(Object,Changes)) } of
+        {true,true}->
+          Updates = Read( Changes, Object ),
+          case maps:size(Updates) of
+            0-> ignore;
+            _-> Owner ! ?SUBSCRIPTION(ID,update,OID,Updates)
+          end;
+        { true, false }->
+          ?SUBSCRIPTION(ID,create,OID, Read( Object, Object ));
+        {false, true}->
+          Owner ! Owner! ?SUBSCRIPTION(ID,delete,OID,#{});
+        _->
+          ignore
+      end,
+      query_monitor( Query );
+    {unsubscribe, Owner}->
+      destroy_index(Index, self()),
+      ets:delete(?SUBSCRIPTIONS,{Owner,ID});
+    {'DOWN', _Ref, process, Owner, _Reason}->
+      destroy_index(Index, self()),
+      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+    _->
+      query_monitor( Query )
+  after
+    5->erlang:hibernate(?MODULE,?FUNCTION_NAME,[ Query ])
+  end.
 
-build_index(PID, Owner, #{
-  rights:=Rights,
-  databases:=DBs,
-  tags:=Tags,
-  dependencies:=Deps,
-  no_feedback:=NoFeedback
-})->
-
-  Value = {PID, Owner, NoFeedback},
-
-  % dependencies
-  [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {deps, D}, _IsShared = false, _Timeout = infinity ),
-    try
-      case ets:lookup(?S_INDEX,{deps, D}) of
-        []->
-          ets:insert(?S_INDEX, #index{ key = {deps, D}, value = gb_sets:from_list([Value]) });
-        [#index{value = Set}]->
-          ets:insert(?S_INDEX, #index{ key = {deps, D}, value = gb_sets:add_element(Value,Set) })
-      end
-    after
-      Unlock()
-    end end || D <- Deps ],
-
-  % Rights
-  [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {rights, R}, _IsShared = false, _Timeout = infinity ),
-    try
-      case ets:lookup(?S_INDEX,{rights, R}) of
-        []->
-          ets:insert(?S_INDEX, #index{ key = {rights, R}, value = gb_sets:from_list([Value]) });
-        [#index{value = Set}]->
-          ets:insert(?S_INDEX, #index{ key = {rights, R}, value = gb_sets:add_element(Value,Set) })
-      end
-    after
-      Unlock()
-    end end || R <- Rights ],
-
-  % Databases
-  [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {db, DB}, _IsShared = false, _Timeout = infinity ),
-    try
-      case ets:lookup(?S_INDEX,{db, DB}) of
-        []->
-          ets:insert(?S_INDEX, #index{ key = {db, DB}, value = gb_sets:from_list([Value]) });
-        [#index{value = Set}]->
-          ets:insert(?S_INDEX, #index{ key = {db, DB}, value = gb_sets:add_element(Value,Set) })
-      end
-    after
-      Unlock()
-    end end|| DB <- DBs ],
-
-  % Tags
-  [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {tag, T}, _IsShared = false, _Timeout = infinity ),
-    try
-      case ets:lookup(?S_INDEX,{tag, T}) of
-        []->
-          ets:insert(?S_INDEX, #index{ key = {tag, T}, value = gb_sets:from_list([Value]) });
-        [#index{value = Set}]->
-          ets:insert(?S_INDEX, #index{ key = {tag, T}, value = gb_sets:add_element(Value,Set) })
-      end
-    after
-      Unlock()
-    end end|| T <- Tags ],
-
-  ok.
-
-destroy_index(PID, Owner, #{
-  rights:=Rights,
-  databases:=DBs,
-  tags:=Tags,
-  dependencies:=Deps,
-  no_feedback:=NoFeedback
-})->
-
-  Value = {PID, Owner, NoFeedback},
-
-  % dependencies
-  [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {deps, D}, _IsShared = false, _Timeout = infinity ),
-    try
-      case ets:lookup(?S_INDEX,{deps, D}) of
-        []->
-          ignore;
-        [#index{value = Set}]->
-          case gb_sets:delete_any( Value, Set ) of
-            {0,nil} ->
-              ets:delete(?S_INDEX, {deps, D});
-            Set1->
-              ets:insert(?S_INDEX, #index{ key = {deps, D}, value = Set1 })
-          end
-      end
-    after
-      Unlock()
-    end end|| D <- Deps ],
-
-  % Rights
-  [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {rights, R}, _IsShared = false, _Timeout = infinity ),
-    try
-      case ets:lookup(?S_INDEX,{rights, R}) of
-        []->
-          ignore;
-        [#index{value = Set}]->
-          case gb_sets:delete_any( Value, Set ) of
-            {0,nil} ->
-              ets:delete(?S_INDEX, {rights, R});
-            Set1->
-              ets:insert(?S_INDEX, #index{ key = {rights, R}, value = Set1 })
-          end
-      end
-    after
-      Unlock()
-    end end|| R <- Rights ],
-
-  % Databases
-  [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {db, DB}, _IsShared = false, _Timeout = infinity ),
-    try
-
-      case ets:lookup(?S_INDEX,{db, DB}) of
-        []->
-          ignore;
-        [#index{value = Set}]->
-          case gb_sets:delete_any( Value, Set ) of
-            {0,nil} ->
-              ets:delete(?S_INDEX, {db, DB});
-            Set1->
-              ets:insert(?S_INDEX, #index{ key = {db, DB}, value = Set1 })
-          end
-      end
-    after
-      Unlock()
-    end end|| DB <- DBs ],
-
-  % Tags
-  [ begin
-    {ok,Unlock} = elock:lock('$subsLocks$', {tag, T}, _IsShared = false, _Timeout = infinity ),
-    try
-      case ets:lookup(?S_INDEX,{tag, T}) of
-        []->
-          ignore;
-        [#index{value = Set}]->
-          case gb_sets:delete_any( Value, Set ) of
-            {0,nil} ->
-              ets:delete(?S_INDEX, {tag, T});
-            Set1->
-              ets:insert(?S_INDEX, #index{ key = {tag, T}, value = Set1 })
-          end
-      end
-    after
-      Unlock()
-    end end|| T <- Tags ],
-
-  ok.
 
 on_commit(#ecomet_log{ changes = undefined })->
   % No changes

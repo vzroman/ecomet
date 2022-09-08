@@ -44,7 +44,8 @@
 %% Subscriptions API
 %%====================================================================
 -export([
-	subscription_prepare/1
+	subscription_prepare/1,
+	direct/2
 ]).
 
 %%====================================================================
@@ -111,20 +112,35 @@ subscription_prepare(Conditions)->
 		}
 	|| {'NORM',{ {{'AND',AND,_},{'OR',ANDNOT,_}}, _Direct }, _} <- Normal ].
 
-direct_and([{Oper,Field,Value}|Rest],Fields)->
+direct({'AND',Conditions}, Fields)->
+	direct_and( Conditions, Fields );
+direct({'OR',Conditions}, Fields)->
+	direct_or( Conditions, Fields );
+direct({'ANDNOT',And,Not}, Fields)->
+	case direct(And, Fields) of
+		false-> false;
+		true->
+			case direct(Not, Fields) of
+				true-> false;
+				false->true
+			end
+	end;
+direct({Oper,Field,Value}, Fields)->
 	FieldValue = maps:get(Field,Fields,none),
-	case direct_compare(Oper,Value,FieldValue) of
-		false->false;
-		_->direct_and(Rest,Fields)
+	direct_compare(Oper,Value,FieldValue).
+
+direct_and([Cond|Rest],Fields)->
+	case direct(Cond, Fields) of
+		false -> false;
+		true -> direct_and(Rest,Fields)
 	end;
 direct_and([],_Fields)->
 	true.
 
-direct_or([{Oper,Field,Value}|Rest],Fields)->
-	FieldValue = maps:get(Field,Fields,none),
-	case direct_compare(Oper,Value,FieldValue) of
-		true->true;
-		_->direct_or(Rest,Fields)
+direct_or([Cond|Rest],Fields)->
+	case direct(Cond, Fields) of
+		true -> true;
+		false-> direct_or(Rest, Fields)
 	end;
 direct_or([],_Fields)->
 	false.
@@ -817,14 +833,14 @@ check_condition({'DIRECT',{Oper,Field,Value},_},Object)->
 	end.
 
 direct_compare(Oper,Value,FieldValue)->
-	case Oper of
-		':='->FieldValue==Value;
-		':>'->FieldValue>Value;
-		':>='->FieldValue>=Value;
-		':<'->FieldValue<Value;
-		':=<'->FieldValue=<Value;
-		':LIKE'->direct_like(FieldValue,Value);
-		':<>'->FieldValue/=Value
+	if
+		Oper =:= ':='; Oper =:= '='->FieldValue==Value;
+		Oper =:= ':>'; Oper=:= '>'->FieldValue>Value;
+		Oper =:= ':>='; Oper=:='>='->FieldValue>=Value;
+		Oper =:= ':<'; Oper=:='<'->FieldValue<Value;
+		Oper=:=':=<'; Oper=:='=<'->FieldValue=<Value;
+		Oper =:=':LIKE'; Oper=:='LIKE'->direct_like(FieldValue,Value);
+		Oper =:= ':<>'; Oper=:='<>'->FieldValue/=Value
 	end.
 
 direct_like(String,Pattern) when (is_binary(Pattern) and is_binary(String))->
