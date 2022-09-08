@@ -200,44 +200,6 @@ system(DBs,Fields,Conditions)->
 %%=====================================================================
 %%	SUBSCRIBE
 %%=====================================================================
-%
-% The subscription matching algorithm is based on query normalization (see normalized lower).
-% The query conditions are coerced to the list of conditions of the next format:
-% [
-%		{ AND, ANDNOT, DirectAND, DirectANDNOT },
-%		{ AND, ANDNOT, DirectAND, DirectANDNOT },
-%		...
-% ]
-% Each item of the list is a tuple of 4 elements (further - cortege).
-% Each element of the cortege is a list of conditions.
-% To satisfy a subscription an object MUST satisfy at least one cortege in the list.
-% To satisfy a cortege an object MUST satisfy ALL the 4 element in the cortege.
-% To satisfy:
-% * AND - list of 'TAG', an object MUST have all the tags in the list
-% * ANDNOT - list of 'TAG', an object MUST NOT have at least ONE
-% * DirectAND - list of direct constraints, an object MUST satisfy ALL
-% * DirectANDNOT - list of direct constraints, an object MUST NOT satisfy at least ONE
-%
-% The matching procedure consists of two phases:
-% 1. SEARCH potential subscriptions.
-% 2. FINAL MATCH an object to constraints of every subscription found at the step 1
-%
-% SEARCH. The goal is optimization. At this step we try to narrow the
-% scope as much as possible. The search is based on premise:
-% 1. An object MAY satisfy a subscription if it has at least 3 tags of the AND in ANY cortege.
-% 		if AND contains less than 3 tags, the tail is filled with 'none'
-% 2. The changed fields MUST include at least ONE field involved either in conditions or
-% 		in the requested fields
-% 3. An object MUST satisfy at least ONE tag among the rights.
-% 4. An object MUST belong to ONE of the requested databases
-%
-% To be able to efficiently perform the SEARCH we create an accordingly indexed object for
-% each subscription. Therefore we can use the standard query engine.
-% The SEARCH is performed by the process making a commit. If a subscription is among the results of SEARCH
-% then the commit log is passed to its handling process for FINAL MATCH
-%
-% FINAL MATCH is performed by the session process (see ecomet_session)
-%
 % Arguments are the same as for 'get' (see get). Not all parameters are supported for
 % subscriptions.
 % Grouping, Sorting, Pagination are not supported.
@@ -246,23 +208,6 @@ subscribe(ID,DBs,Fields,Conditions)->
   subscribe(ID,DBs,Fields,Conditions,#{}).
 subscribe(ID,DBs,Fields,Conditions,InParams) when is_list(InParams)->
   subscribe(ID,DBs,Fields,Conditions,maps:from_list(InParams));
-subscribe(ID,_DBs,Fields,{<<".oid">>,'=',OID},InParams)->
-  % Object subscription
-  case ecomet_object:open(OID) of
-    not_exists->
-      throw({not_exists, OID});
-    {error,Error}->
-      throw(Error);
-    Object->
-      Params= maps:merge(#{
-        stateless => false,
-        no_feedback => false,
-        format => undefined
-      },InParams),
-      ecomet_subscription:subscribe_object(ID,Object,Fields,Params)
-  end;
-subscribe(ID,DBs,Fields,{<<".path">>,'=',Path},InParams)->
-  subscribe(ID,DBs, Fields,{<<".oid">>,'=',?OID(Path)}, InParams);
 subscribe(ID,DBs,Fields,Conditions,InParams)->
 
   Params = #{

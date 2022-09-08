@@ -45,14 +45,15 @@
 ]).
 
 -record(subscription,{id, pid, ts, owner }).
--record(index,{key, value}).
--record(monitor,{id,oid,object,read,owner,no_feedback}).
+-record(index,{tag,'&','!',db}).
 
--record(state,{id, session, owner, params, match}).
 
 -define(SUBSCRIPTIONS,ecomet_subscriptions).
 -define(S_INDEX,ecomet_subscriptions_index).
--define(HASH_BASE, 65535).
+-define(HASH_BASE, 4294836225).
+
+-define(SET_BIT(BM,Tag), ecomet_bitmap:zip(ecomet_bitmap:set_bit(BM,Tag)) ).
+-define(RESET_BIT(BM,Tag), ecomet_bitmap:zip(ecomet_bitmap:reset_bit(BM,Tag)) ).
 
 %%=================================================================
 %%	Service API
@@ -66,7 +67,7 @@ on_init()->
   ets:new(?SUBSCRIPTIONS,[named_table,public,set,{keypos, #subscription.id}]),
 
   % Prepare the storage for index
-  ets:new(?S_INDEX,[named_table,public,set,{keypos, #index.key}]),
+  ets:new(?S_INDEX,[named_table,public,set,{keypos, #index.tag}]),
 
   ok.
 
@@ -77,13 +78,23 @@ subscribe( ID, DBs, Read, Conditions, Params)->
   Owner = self(),
   PID =
     ecomet_user:spawn_session(fun()->
-      erlang:monitor(process, Owner),
-      try
-        do_subscribe(Conditions, Owner, ID, DBs, Read, Params ),
-        Owner ! {ok, self()}
-      catch
-        _:E->
-          Owner ! {error, self(), E}
+      case ets:insert_new(?SUBSCRIPTIONS,#subscription{
+        id = {Owner,ID},
+        ts = ecomet_lib:ts(),
+        pid = self(),
+        owner = Owner
+      }) of
+        true->
+          erlang:monitor(process, Owner),
+
+          Owner ! {ok, self()},
+
+          try do_subscribe(Conditions, Owner, ID, DBs, Read, Params )
+          after
+            ets:delete(?SUBSCRIPTIONS,{Owner,ID})
+          end;
+        _->
+          Owner ! {error, self(), {not_unique,ID}}
       end
     end),
 
@@ -104,27 +115,31 @@ do_subscribe({<<".oid">>,'=',OID}, Owner, ID, _DBs, Read, Params )->
     Object->
       subscribe_object(ID,Object,Owner,Read,Params)
   end;
-do_subscribe({<<".oid">>,'=',OID}, Owner, ID, _DBs, Read, Params )->
-  todo.
+do_subscribe(Conditions, Owner, ID, DBs, Read, Params )->
+  subscribe_query(ID, Conditions, Owner, DBs, Read, Params ).
+
+unsubscribe(ID)->
+  case ets:lookup(?SUBSCRIPTIONS,{oid,ID}) of
+    [#subscription{pid = PID,owner = Owner}]->
+      PID ! {unsubscribe,Owner};
+    _->
+      case ets:lookup(?SUBSCRIPTIONS,{query,ID}) of
+        [#subscription{pid = PID,owner = Owner}]->
+          PID ! {unsubscribe,Owner};
+        _->
+          ignore
+      end
+  end,
+  ok.
 
 %%=================================================================
 %%	Single Object subscription
 %%=================================================================
+-record(monitor,{id,oid,object,read,owner,no_feedback}).
 subscribe_object(ID,Object,Owner,Read,Params)->
 
   OID = ?OID(Object),
-
-  case ets:insert_new(?SUBSCRIPTIONS,#subscription{
-    id = {oid,ID},
-    ts = ecomet_lib:ts(),
-    pid = self(),
-    owner = Owner
-  }) of
-    true ->
-      object_monitor(#monitor{id = ID,oid = OID,object = Object, owner = Owner, read = Read}, Params);
-    _->
-      throw({not_unique,ID})
-  end.
+  object_monitor(#monitor{id = ID,oid = OID,object = Object, owner = Owner, read = Read}, Params).
 
 object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read = Read} =Monitor, #{
   no_feedback := NoFeedback,
@@ -173,15 +188,15 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
 %%=================================================================
 %%	Query subscription
 %%=================================================================
--record(ind,{tag,'&','!',db}).
-subscribe_query(ID, DBs, Fields, InConditions, #{
+-record(query,{id, conditions, read, no_feedback}).
+subscribe_query(ID, InConditions, Owner, DBs, Read, #{
   stateless := Stateless,     % No initial query, only updates
   no_feedback := NoFeedback    % Do not send updates back to the author process
 })->
 
   Conditions =
     case ecomet_user:is_admin() of
-      {ok,true}->Conditions;
+      {ok,true}->InConditions;
       {error,Error}->throw(Error);
       _->
         {ok,UserGroups}=ecomet_user:get_usergroups(),
@@ -192,11 +207,33 @@ subscribe_query(ID, DBs, Fields, InConditions, #{
     end,
   Tags = ecomet_resultset:subscription_prepare( Conditions ),
   Index = compile_index( Tags, DBs ),
+  build_index(Index, self()),
 
-  todo.
+  if
+    Stateless -> ignore;
+    true ->
+      RS = ecomet_query:get(DBs,rs,InConditions),
+      StartTS =
+        ecomet_resultset:foldl(fun(OID,TS)->
+          Object = ecomet_object:construct( OID ),
 
-compile_index([{[Tag|And],Not}|Rest], DBs)->
-  [#ind{
+          Fields = #{<<".ts">>:=ObjectTS} = ecomet_object:read_all( Object ),
+          Update = Read(Fields,Fields),
+          Owner ! ?SUBSCRIPTION(ID,create,OID, Update),
+
+          if
+            ObjectTS > TS-> ObjectTS;
+            true -> TS
+          end
+        end,-1, RS ),
+
+      drop_updates( StartTS)
+  end,
+
+  monitor_query(#query{id = ID, conditions = Conditions, read = Read, no_feedback = NoFeedback}).
+
+compile_index([{[Tag|_]=And,Not}|Rest], DBs)->
+  [#index{
     tag = tag_hash(Tag),
     '&' = tags_mask(And,[]),
     '!'= tags_mask(Not,[]),
@@ -210,92 +247,7 @@ tag_hash( Tag )->
 tags_mask([Tag|Rest],Mask)->
   tags_mask( Rest, [tag_hash(Tag)|Mask] );
 tags_mask([], Mask)->
-  ecomet_bitmap:set_bit(<<>>, lists:usort(Mask)).
-
-
-compile_read([<<".oid">>],_Formatter)->
-  fun(_Changed,_Object)-> #{} end;
-compile_read(['*'],Formatter)->
-  ReadField =
-    if
-      is_function(Formatter,2) ->
-        fun(Object,Field)->
-          Value = maps:get(Field,Object,none),
-          {ok,Type}=ecomet_object:field_type(maps:get(object,Object),Field),
-          Formatter(Type,Value)
-        end;
-      true ->
-        fun(Object,Field)->maps:get(Field,Object,none) end
-    end,
-
-  fun(Changed,Object)->
-      maps:map(fun(Field,_)->ReadField(Object,Field) end,Changed)
-  end;
-
-compile_read(Fields,Formatter)->
-
-  % Per object reading plan
-  ReadMap=read_map(Fields,Formatter),
-
-  Read=
-    fun(Changed,Object)->
-      maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
-        case ordsets:intersection(Changed,Args) of
-          []->
-            % If the changes are not among the function arguments list the the field is not affected
-            Acc;
-          _->
-            % The value has to be recalculated
-            Acc#{Alias=>Fun(Object)}
-        end
-                end,#{},ReadMap)
-    end,
-
-  { Read, FieldsDeps }.
-
-
-
-
-start_link( Id, Owner, Params )->
-  Session = self(),
-  PID = spawn_link(fun()->
-    % Register the subscription process
-    case ets:insert_new(?SUBSCRIPTIONS,#subscription{
-      id = {Session,Id},
-      ts = ecomet_lib:ts(),
-      pid = self(),
-      owner = Owner
-    }) of
-      true ->
-        % Build subscription index
-        build_index(self(), Owner, Params),
-
-        % I'm ready
-        Session ! {ok,self()},
-
-        % Enter the wait loop
-        wait_for_run(#state{id = {Session,Id}, session = Session, owner = Owner, params = Params}, []);
-      _->
-        unlink( Session ),
-        Session ! {error,self(),{not_unique,Id}}
-    end
-  end),
-  receive
-    {ok,PID} -> {ok,PID};
-    {error,PID,Error}->{error,Error}
-  end.
-
-run(PID, Match)->
-  PID ! {run,Match}.
-
-stop(PID) when is_pid( PID )->
-  PID ! {stop, self()};
-stop(Id)->
-  case ets:lookup(?SUBSCRIPTIONS,{oid,Id}) of
-    [#subscription{pid = PID,owner = Owner}]->
-      PID ! {stop,Owner};
-    _->ok
-  end.
+  ?SET_BIT(<<>>, lists:usort(Mask)).
 
 get_subscriptions( Session )->
   [ #{id => Id, ts => TS, pid => PID} || [Id,TS,PID] <-ets:match(?SUBSCRIPTIONS, #subscription{id = {Session,'$1'}, ts ='$2', pid='$3', _ = '_'})].
@@ -303,6 +255,100 @@ get_subscriptions( Session )->
 %%------------------------------------------------------------
 %%  Search engine
 %%------------------------------------------------------------
+build_index([#index{tag = Tag}=Index|Rest], Self)->
+
+  {ok,TagUnlock} = elock:lock('$subsLocks$',{tag,Tag}, _IsShared = false, _Timeout = infinity),
+  try
+    case ets:lookup(?S_INDEX,{tag,Tag}) of
+      [Indexes]->
+        case Indexes of
+          #{Index := Subscribers} ->
+            ets:insert(?S_INDEX,{ {tag,Tag}, Indexes#{ Index => gb_sets:add_element(Self,Subscribers) }});
+          _->
+            ets:insert(?S_INDEX,{ {tag,Tag}, Indexes#{ Index => gb_sets:from_list([Self]) }})
+        end;
+      []->
+        ets:insert(?S_INDEX,{ {tag,Tag}, #{ Index => gb_sets:from_list([Self]) }}),
+        global_set(Tag)
+    end
+  after
+    TagUnlock()
+  end,
+  build_index(Rest, Self);
+build_index([], _Self)->
+  ok.
+
+destroy_index([#index{tag = Tag}=Index|Rest], Self )->
+  {ok,TagUnlock} = elock:lock('$subsLocks$',{tag,Tag}, _IsShared = false, _Timeout = infinity),
+  try
+    case ets:lookup(?S_INDEX,{tag,Tag}) of
+      [Indexes]->
+        case Indexes of
+          #{Index := Subscribers}->
+            case gb_sets:delete_any( Self, Subscribers ) of
+              {0,nil} ->
+                Indexes1 = maps:remove(Index, Indexes),
+                case maps:size( Indexes1 ) of
+                  0 ->
+                    global_reset( Tag ),
+                    ets:delete(?S_INDEX,{tag,Tag});
+                  _->
+                    ets:insert(?S_INDEX, { {tag,Tag}, Indexes1 })
+                end;
+              Subscribers1->
+                ets:insert(?S_INDEX, { {tag,Tag}, Indexes#{ Index => Subscribers1 } })
+            end;
+          _->
+            case maps:size(Indexes) of
+              0->
+                global_reset( Tag ),
+                ets:delete(?S_INDEX,{tag,Tag});
+              _->
+                ignore
+            end
+        end;
+      []->
+        global_reset(Tag)
+    end
+  after
+    TagUnlock()
+  end,
+
+  destroy_index(Rest, Self);
+destroy_index([], _Self)->
+  ok.
+
+global_set(Tag)->
+  {ok,Unlock} = elock:lock('$subsLocks$',global, _IsShared = false, _Timeout = infinity),
+  try
+    case ets:lookup(?S_INDEX,global) of
+      [{_,Global}]->
+        ets:insert(?S_INDEX,{global, ?SET_BIT(Global,Tag) });
+      []->
+        ets:insert(?S_INDEX,{global, ?SET_BIT(<<>>,Tag) })
+    end
+  after
+    Unlock()
+  end.
+global_reset(Tag)->
+  {ok,GlobalUnlock} = elock:lock('$subsLocks$',global, _IsShared = false, _Timeout = infinity),
+  try
+    case ets:lookup(?S_INDEX, global) of
+      [{_,Global}]->
+        ets:insert(?S_INDEX,{ global, ?RESET_BIT( Global, Tag ) });
+      []->
+        ignore
+    end
+  after
+    GlobalUnlock()
+  end.
+
+drop_updates( StartTS )->
+  todo.
+
+monitor_query( Query )->
+  todo.
+
 build_index(PID, Owner, #{
   rights:=Rights,
   databases:=DBs,
