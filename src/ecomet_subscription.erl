@@ -193,12 +193,12 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
 
   Conditions =
     case ecomet_user:is_admin() of
-      {ok,true}->define_patterns( InConditions );
+      {ok,true}->compile_conditions( InConditions );
       {error,Error}->throw(Error);
       _->
         {ok,UserGroups}=ecomet_user:get_usergroups(),
         {'AND',[
-          define_patterns( InConditions ),
+          compile_conditions( InConditions ),
           {'OR',[{<<".readgroups">>,'=',GID}||GID<-UserGroups]}
         ]}
     end,
@@ -229,16 +229,18 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
 
   query_monitor(#query{id = ID, conditions = Conditions, read = Read, owner = Owner, no_feedback = NoFeedback, index = Index}).
 
-define_patterns({<<".pattern">>,'=',PatternID})->
+compile_conditions({<<".pattern">>,'=',PatternID})->
   Patterns = [PatternID|ecomet_pattern:get_children_recursive(PatternID)],
   {'OR',[{<<".pattern">>,':=',P}||P<-Patterns]};
-define_patterns({'AND',Conditions})->
-  {'AND',[ define_patterns(C) || C <- Conditions ]};
-define_patterns({'OR',Conditions})->
-  {'OR',[ define_patterns(C) || C <- Conditions ]};
-define_patterns({'ANDNOT',C1,C2})->
-  {'ANDNOT',define_patterns(C1),define_patterns(C2)};
-define_patterns(Condition)->
+compile_conditions({<<".path">>,'=',Path})->
+  {<<".oid">>,'=',?OID(Path)};
+compile_conditions({'AND',Conditions})->
+  {'AND',[ compile_conditions(C) || C <- Conditions ]};
+compile_conditions({'OR',Conditions})->
+  {'OR',[ compile_conditions(C) || C <- Conditions ]};
+compile_conditions({'ANDNOT',C1,C2})->
+  {'ANDNOT',compile_conditions(C1),compile_conditions(C2)};
+compile_conditions(Condition)->
   Condition.
 
 compile_index([{[Tag|_]=And,Not}|Rest], DBs)->
