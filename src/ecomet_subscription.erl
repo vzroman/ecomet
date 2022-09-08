@@ -41,7 +41,8 @@
 %%=================================================================
 -export([
   object_monitor/1,
-  query_monitor/1
+  query_monitor/1,
+  search/6
 ]).
 
 -record(subscription,{id, pid, ts, owner }).
@@ -60,6 +61,9 @@
 %%	Service API
 %%=================================================================
 on_init()->
+
+  % Initialize subscriptions optimization
+  ok = ecomet_router:on_init( ?ENV( router_pool_size, ?ROUTER_POOL_SIZE ) ),
 
   % Prepare the storage for sessions
   ets:new(?SUBSCRIPTIONS,[named_table,public,set,{keypos, #subscription.id}]),
@@ -389,14 +393,24 @@ on_commit(#ecomet_log{
   self = Self
 })->
 
+  OtherNodes = ecomet_node:get_ready_nodes() -- [node()],
   % Run object monitors
-  esubscribe:notify({log,OID}, { TAdd ++ TOld, Object, Changes, Self }),
+  Update = { TAdd ++ TOld, Object, Changes, Self },
+  [ rpc:cast( N, esubscribe ,notify,[ {log,OID}, Update ]) || N <-OtherNodes ],
+  esubscribe:notify( {log,OID}, Update ),
 
+
+  % Run the search on the other nodes
+  Tags = TAdd ++ TOld ++ TDel,
+  [ rpc:cast( N, ?MODULE ,search,[ OID, DB, Tags, Object, Changes, Self ]) || N <-OtherNodes ],
+  search(OID, DB, Tags, Object, Changes, Self).
+
+search( OID, DB, Tags, Object, Changes, Self )->
   case ets:lookup(?S_INDEX, global) of
     [{_,<<>>}]->
       ignore;
     [{_,Global}]->
-      Mask = tags_mask( TAdd ++ TOld ++ TDel,[] ),
+      Mask = tags_mask( Tags,[] ),
       case ?X_BIT(Mask,Global) of
         <<>> -> ignore;
         XTags->
@@ -429,9 +443,8 @@ on_commit(#ecomet_log{
       end;
     []->
       ignore
-  end,
+  end.
 
-  ok.
 
 
 
