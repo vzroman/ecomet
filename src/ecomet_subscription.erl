@@ -194,7 +194,7 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
       _->
         {ok,UserGroups}=ecomet_user:get_usergroups(),
         {'AND',[
-          Conditions,
+          InConditions,
           {'OR',[{<<".readgroups">>,'=',GID}||GID<-UserGroups]}
         ]}
     end,
@@ -357,7 +357,7 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
             _-> Owner ! ?SUBSCRIPTION(ID,update,OID,Updates)
           end;
         { true, false }->
-          ?SUBSCRIPTION(ID,create,OID, Read( Object, Object ));
+          Owner ! ?SUBSCRIPTION(ID,create,OID, Read( Object, Object ));
         {false, true}->
           Owner ! Owner! ?SUBSCRIPTION(ID,delete,OID,#{});
         _->
@@ -386,7 +386,7 @@ on_commit(#ecomet_log{
   tags = {TAdd, TOld, TDel},
   changes = Changes,
   self = Self
-} = Log)->
+})->
 
   % Run object monitors
   Updates = maps:with( maps:keys(Changes), Object ),
@@ -395,53 +395,40 @@ on_commit(#ecomet_log{
 
   case ets:lookup(?S_INDEX, global) of
     [{_,Global}]->
-      Mask = tags_mask( TAdd ++ TOld ++ TDel ),
+      Mask = tags_mask( TAdd ++ TOld ++ TDel,[] ),
       case ?X_BIT(Mask,Global) of
         <<>> -> ignore;
         XTags->
-          ecomet_bitmap:foldl( )
+          ecomet_bitmap:foldl(fun(Tag,_)->
+            case ets:lookup(?S_INDEX,{tag,Tag}) of
+              [{_,Indexes}]->
+                maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers,_)->
+                  case ?X_BIT( Mask, And ) of
+                    And->
+                      case ?X_BIT(Mask, Not) of
+                        <<>> ->
+                          case lists:member(DB, DBs) of
+                            true ->
+                              [ S ! {log, OID, Object, Changes, Self} || S <- Subscribers ],
+                              ok;
+                            _->
+                              ignore
+                          end;
+                        _->
+                          ignore
+                      end;
+                    _->
+                      ignore
+                  end
+                end,undefined, Indexes );
+              []->
+                ignore
+            end
+          end,undefined, XTags,{none,none})
       end;
     []->
       ignore
   end,
-
-  %-----------------------Sorting----------------------------------------------
-  [ TAdd1, TOld1, TDel1, RAdd1, ROld1, RDel1, ChangedFields1]=
-    [ordsets:from_list(I)||I<-[ TAdd, TOld, TDel, RAdd, ROld, RDel, maps:keys(Changes)] ],
-
-  %-----------------------The SEARCH phase-------------------------------------
-  Tags = TAdd1 ++ TOld1 ++ TDel1,
-  Index = {'AND',[
-    {'OR',[ {'TAG',{tag,{T,1}}}  || T<-Tags ]},
-    {'OR',[ {'TAG',{tag,{T,2}}} || T<-[none|Tags] ]},
-    {'OR',[ {'TAG',{tag,{T,3}}} || T<-[none|Tags] ]}
-  ]},
-
-  Rights =
-    {'OR',[{'TAG',{rights,R}} || R <- [is_admin|RAdd1 ++ ROld1 ++ RDel1] ]},
-
-  Dependencies =
-    {'OR',[{'TAG',{deps,D}} || D <- [<<"@ANY@">>|ChangedFields1]]},
-
-  Query = {'AND',[
-    Dependencies,
-    Index,
-    Rights,
-    {'TAG',{db,DB}}
-  ]},
-
-  % Log with sorted items
-  Log1=Log#ecomet_log{
-    tags = {TAdd1, TOld1, TDel1},
-    rights = { RAdd1, ROld1, RDel1 },
-    changes = Changes
-  },
-
-  % Run the search on the other nodes
-  [ rpc:cast( N,?MODULE,notify,[ Query, Log1 ]) || N <-ecomet_node:get_ready_nodes() -- [node()] ],
-
-  % Local search
-  notify( Query, Log1 ),
 
   ok.
 
