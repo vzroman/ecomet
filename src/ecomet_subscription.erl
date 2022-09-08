@@ -396,7 +396,11 @@ on_commit(#ecomet_log{
   case ets:lookup(?S_INDEX, global) of
     [{_,Global}]->
       Mask = tags_mask( TAdd ++ TOld ++ TDel ),
-
+      case ?X_BIT(Mask,Global) of
+        <<>> -> ignore;
+        XTags->
+          ecomet_bitmap:foldl( )
+      end;
     []->
       ignore
   end,
