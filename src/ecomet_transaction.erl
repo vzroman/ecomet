@@ -434,12 +434,13 @@ merge_log([OID|Rest],Parentlog)->
 merge_log([],Parentlog)->Parentlog.
 
 on_commit(Log,OnCommits)->
-  run_notifications([L#ecomet_log{self = self()} || L <- Log]),
+  Self = self(),
+  run_notifications([L#ecomet_log{self = Self} || L <- Log]),
   run_oncommits(lists:reverse(OnCommits)).
 
 % Run notifications
 run_notifications([Log|Rest])->
-  ecomet_router:on_commit(Log),
+  [ rpc:cast( N, ecomet_subscription, on_commit,[ Log ]) || N <-ecomet_node:get_ready_nodes() ],
   run_notifications(Rest);
 run_notifications([])->ok.
 

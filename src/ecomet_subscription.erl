@@ -25,8 +25,7 @@
 -export([
   on_init/0,
   get_subscriptions/1,
-  on_commit/1,
-  notify/2
+  on_commit/1
 ]).
 
 %%=================================================================
@@ -55,14 +54,12 @@
 
 -define(SET_BIT(BM,Tag), ecomet_bitmap:zip(ecomet_bitmap:set_bit(BM,Tag)) ).
 -define(RESET_BIT(BM,Tag), ecomet_bitmap:zip(ecomet_bitmap:reset_bit(BM,Tag)) ).
+-define(X_BIT(X1,X2), ecomet_bitmap:zip( ecomet_bitmap:bit_and(X1,X2)) ).
 
 %%=================================================================
 %%	Service API
 %%=================================================================
 on_init()->
-
-  % Initialize subscriptions optimization
-  ok = ecomet_router:on_init( ?ENV( router_pool_size, ?ROUTER_POOL_SIZE ) ),
 
   % Prepare the storage for sessions
   ets:new(?SUBSCRIPTIONS,[named_table,public,set,{keypos, #subscription.id}]),
@@ -387,7 +384,6 @@ on_commit(#ecomet_log{
   object = #{<<".oid">> := OID} = Object,
   db = DB,
   tags = {TAdd, TOld, TDel},
-  rights = { RAdd, ROld, RDel },
   changes = Changes,
   self = Self
 } = Log)->
@@ -395,7 +391,15 @@ on_commit(#ecomet_log{
   % Run object monitors
   Updates = maps:with( maps:keys(Changes), Object ),
   NewTags = TAdd ++ TOld,
-  [ rpc:cast( N, esubscribe, notify,[ {log,OID}, { NewTags, Updates, Self } ]) || N <-ecomet_node:get_ready_nodes() ],
+  esubscribe:notify({log,OID}, { NewTags, Updates, Self }),
+
+  case ets:lookup(?S_INDEX, global) of
+    [{_,Global}]->
+      Mask = tags_mask( TAdd ++ TOld ++ TDel ),
+
+    []->
+      ignore
+  end,
 
   %-----------------------Sorting----------------------------------------------
   [ TAdd1, TOld1, TDel1, RAdd1, ROld1, RDel1, ChangedFields1]=
@@ -434,115 +438,6 @@ on_commit(#ecomet_log{
 
   % Local search
   notify( Query, Log1 ),
-
-  ok.
-
-notify( Query, #ecomet_log{self = Self} = Log )->
-
-  case search( Query ) of
-    none -> ignore;
-    Set ->
-      gb_sets:fold(fun({PID, Owner, NoFeedback}, Acc)->
-        if
-          NoFeedback, Owner=:=Self-> ignore;
-          true ->
-            % Run the second (FINAL MATCH) phase
-            PID ! {match,Log}
-        end,
-        Acc
-      end, none, Set)
-  end,
-
-  ok.
-
-search({'TAG',Tag})->
-  case ets:lookup(?S_INDEX, Tag) of
-    [#index{value = Set}] -> Set;
-    _->none
-  end;
-search({'AND',Tags})->
-  search_and(Tags,none);
-search({'OR',Tags})->
-  search_or(Tags,none).
-
-search_and([T|Tags],Acc)->
-  case search(T) of
-    none -> none;
-    Set when Acc =:= none ->
-      search_and(Tags, Set);
-    Set ->
-      case gb_sets:intersection(Set,Acc) of
-        {0,nil}-> none;
-        Set1-> search_and(Tags,Set1)
-      end
-  end;
-search_and([], Acc)->
-  Acc.
-
-search_or([T|Tags], Acc)->
-  case search(T) of
-    none ->
-      search_or(Tags,Acc);
-    Set when Acc =:= none->
-      search_or(Tags,Set);
-    Set->
-      search_or(Tags, gb_sets:union(Set,Acc))
-  end;
-search_or([],Acc)->
-  Acc.
-
-
-%%------------------------------------------------------------
-%%  Subscription process
-%%------------------------------------------------------------
-% The subscription is not started yet, stockpile the logs and wait for message to start
-wait_for_run(#state{session = Session}=State, Buffer)->
-  receive
-    {match,Log}->
-      wait_for_run(State, [Log|Buffer]);
-    {run,Match}->
-      % Activate the subscription
-      % Run the buffer
-      [ Match(Log) || Log <- lists:reverse(Buffer) ],
-      subscription_loop(State#state{match = Match});
-    {stop, Session}->
-      % The exit command
-      unlink(Session),
-
-      clean_up( State );
-    Unexpected->
-      ?LOGWARNING("unexpected message ~p",[Unexpected]),
-      wait_for_run(State, Buffer)
-  after
-    5-> erlang:hibernate(?MODULE,?FUNCTION_NAME,[ State, Buffer])
-  end.
-
-% The subscription is active, wait for log events.
-subscription_loop(#state{session = Session, match = Match} = State)->
-  receive
-    {match,Log}->
-      try Match(Log) catch
-        _:Error->?LOGERROR("subscription matching error, error ~p",[Error])
-      end,
-      subscription_loop(State);
-    {stop, Session}->
-      % The exit command
-      unlink(Session),
-
-      clean_up( State );
-    Unexpected->
-      ?LOGWARNING("unexpected message ~p",[Unexpected]),
-      subscription_loop(State)
-  after
-    5-> erlang:hibernate(?MODULE,?FUNCTION_NAME,[ State ])
-  end.
-
-clean_up( #state{ id =Id, owner = Owner, params = Params} )->
-  % Unregister the subscription process
-  ets:delete(?SUBSCRIPTIONS,Id),
-
-  % Destroy index
-  destroy_index( self(), Owner, Params ),
 
   ok.
 
