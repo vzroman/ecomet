@@ -237,9 +237,7 @@ define_patterns({'AND',Conditions})->
 define_patterns({'OR',Conditions})->
   {'OR',[ define_patterns(C) || C <- Conditions ]};
 define_patterns({'ANDNOT',C1,C2})->
-  C1=define_patterns(C1),
-  C2=define_patterns(C2),
-  {'ANDNOT',{C1,C2}};
+  {'ANDNOT',{define_patterns(C1),define_patterns(C2)}};
 define_patterns(Condition)->
   Condition.
 
