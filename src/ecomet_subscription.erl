@@ -19,152 +19,40 @@
 
 -include("ecomet.hrl").
 
--export([
-  subscribe_object/4
-]).
-
 %%=================================================================
 %%	Service API
 %%=================================================================
 -export([
   on_init/0,
-  start_link/3,
-  run/2,
-  stop/1,
-
   get_subscriptions/1,
-
   on_commit/1,
   notify/2
+]).
+
+%%=================================================================
+%%	API
+%%=================================================================
+-export([
+  subscribe/5,
+  unsubscribe/1
 ]).
 
 %%=================================================================
 %%	Internal API
 %%=================================================================
 -export([
-  wait_for_run/2,
-  subscription_loop/1,
   object_monitor/1
 ]).
 
 -record(subscription,{id, pid, ts, owner }).
 -record(index,{key, value}).
--record(monitor,{id,oid,object,owner,fields,format,no_feedback}).
+-record(monitor,{id,oid,object,read,owner,no_feedback}).
 
 -record(state,{id, session, owner, params, match}).
 
 -define(SUBSCRIPTIONS,ecomet_subscriptions).
 -define(S_INDEX,ecomet_subscriptions_index).
-
-%%=================================================================
-%%	Internal API
-%%=================================================================
-subscribe_object(ID,Object,Fields,InParams)->
-  Owner = self(),
-  PID = spawn(fun()->
-
-    erlang:monitor(process, Owner),
-    OID = ?OID(Object),
-
-    case ets:insert_new(?SUBSCRIPTIONS,#subscription{
-      id = {oid,ID},
-      ts = ecomet_lib:ts(),
-      pid = self(),
-      owner = Owner
-    }) of
-      true ->
-        % I'm ready
-        Owner ! {ok,self()},
-
-        object_monitor(#monitor{id = ID,oid = OID,object = Object, owner = Owner, fields = Fields}, InParams);
-      _->
-        Owner ! {error,self(),{not_unique,ID}}
-    end
-  end),
-  receive
-    {ok,PID} -> ok;
-    {error,PID,Error}->throw(Error)
-  end.
-
-object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object,fields = Fields0} =Monitor0, Params)->
-
-  NoFeedback = maps:get(no_feedback, Params, false),
-
-  Format = maps:get(format, Params, fun(_,V)->V end),
-
-  Fields1 =
-   case Fields0 of
-     ['*'] ->
-       maps:keys( ecomet_object:read_all(Object) )--[<<".oid">>];
-     _->
-       Fields0
-   end,
-
-  Fields =
-    [ case F of
-        <<".oid">> -> {<<".oid">>, term};
-        <<".path">> -> {<<".path">>, string};
-        _-> {F, element(2,ecomet_object:field_type(Object,F)) }
-      end || F <- Fields1],
-
-  Monitor = Monitor0#monitor{
-    no_feedback = NoFeedback,
-    format = Format,
-    fields = Fields
-  },
-
-  esubscribe:subscribe({log,OID}, [node()], self(), infinity),
-
-  case maps:get(stateless, Params, false) of
-    false ->
-      ReadParams =
-        if
-          Format =:= undefined-> #{};
-          true-> #{format => Format}
-        end,
-      Create = ecomet_object:read_fields(Object,Fields1,ReadParams),
-      Owner ! ?SUBSCRIPTION(ID,create,OID, Create);
-    _->
-      ignore
-  end,
-
-  object_monitor( Monitor ).
-
-object_monitor(#monitor{id = ID,oid = OID, owner = Owner, fields = Fields, format = Format, no_feedback = NoFeedback } = Monitor )->
-  receive
-    {'$esubscription', {log,OID}, {_Tags,_Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
-      object_monitor( Monitor );
-    {'$esubscription', {log,OID}, {[],_Changes, _Self}, _Node, _Actor}->
-      Owner! ?SUBSCRIPTION(ID,delete,OID,#{}),
-      ets:delete(?SUBSCRIPTIONS,{oid,ID});
-    {'$esubscription', {log,OID}, {_Tags, Changes, _Self}, _Node, _Actor}->
-      Updates =
-        lists:foldl(fun({Field, Type}, Acc)->
-          case Changes of
-            #{Field := Value}->
-              Acc#{ Field => Format(Type,Value) };
-            _ when Field =:= <<".oid">>->
-              Acc#{Field => Format(Type, OID)};
-            _ when Field =:= <<".path">>->
-              Acc#{Field => Format(Type, ?PATH(OID))};
-            _->
-              Acc
-          end
-        end, #{}, Fields),
-      case maps:size(Updates) of
-        0-> ignore;
-        _-> Owner ! ?SUBSCRIPTION(ID,update,OID,Updates)
-      end,
-      object_monitor( Monitor );
-    {stop, Owner}->
-      ets:delete(?SUBSCRIPTIONS,{oid,ID});
-    {'DOWN', _Ref, process, Owner, _Reason}->
-      ets:delete(?SUBSCRIPTIONS,{oid,ID});
-    _->
-      object_monitor( Monitor )
-  after
-    5->erlang:hibernate(?MODULE,?FUNCTION_NAME,[ Monitor ])
-  end.
+-define(HASH_BASE, 65535).
 
 %%=================================================================
 %%	Service API
@@ -181,6 +69,192 @@ on_init()->
   ets:new(?S_INDEX,[named_table,public,set,{keypos, #index.key}]),
 
   ok.
+
+%%=================================================================
+%%	API
+%%=================================================================
+subscribe( ID, DBs, Read, Conditions, Params)->
+  Owner = self(),
+  PID =
+    ecomet_user:spawn_session(fun()->
+      erlang:monitor(process, Owner),
+      try
+        do_subscribe(Conditions, Owner, ID, DBs, Read, Params ),
+        Owner ! {ok, self()}
+      catch
+        _:E->
+          Owner ! {error, self(), E}
+      end
+    end),
+
+  receive
+    {ok,PID} -> ok;
+    {error,PID,Error}->throw(Error)
+  end.
+
+do_subscribe({<<".path">>,'=',Path}, Owner, ID, DBs, Read, Params )->
+  do_subscribe({<<".oid">>,'=',?OID(Path)}, Owner, ID, DBs, Read, Params );
+do_subscribe({<<".oid">>,'=',OID}, Owner, ID, _DBs, Read, Params )->
+  % Object subscription
+  case ecomet_object:open(OID) of
+    not_exists->
+      throw({not_exists, OID});
+    {error,Error}->
+      throw(Error);
+    Object->
+      subscribe_object(ID,Object,Owner,Read,Params)
+  end;
+do_subscribe({<<".oid">>,'=',OID}, Owner, ID, _DBs, Read, Params )->
+  todo.
+
+%%=================================================================
+%%	Single Object subscription
+%%=================================================================
+subscribe_object(ID,Object,Owner,Read,Params)->
+
+  OID = ?OID(Object),
+
+  case ets:insert_new(?SUBSCRIPTIONS,#subscription{
+    id = {oid,ID},
+    ts = ecomet_lib:ts(),
+    pid = self(),
+    owner = Owner
+  }) of
+    true ->
+      object_monitor(#monitor{id = ID,oid = OID,object = Object, owner = Owner, read = Read}, Params);
+    _->
+      throw({not_unique,ID})
+  end.
+
+object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read = Read} =Monitor, #{
+  no_feedback := NoFeedback,
+  stateless := Stateless
+})->
+
+  esubscribe:subscribe({log,OID}, [node()], self(), infinity),
+
+  if
+    Stateless -> ignore;
+    true ->
+      Fields = ecomet_object:read_all(Object),
+      Update = Read( Fields, Fields ),
+      Owner ! ?SUBSCRIPTION(ID,create,OID, Update)
+  end,
+
+  object_monitor( Monitor#monitor{no_feedback = NoFeedback} ).
+
+object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedback = NoFeedback } = Monitor )->
+  receive
+    {'$esubscription', {log,OID}, {_Tags, _Object, _Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
+      object_monitor( Monitor );
+    {'$esubscription', {log,OID}, {[], _Object, _Changes, _Self}, _Node, _Actor}->
+      Owner! ?SUBSCRIPTION(ID,delete,OID,#{}),
+      esubscribe:unsubscribe({log,ID},[node()], self()),
+      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+    {'$esubscription', {log,OID}, {_Tags, Object, Changes, _Self}, _Node, _Actor}->
+      Updates = Read( Changes, Object ),
+      case maps:size(Updates) of
+        0-> ignore;
+        _-> Owner ! ?SUBSCRIPTION(ID,update,OID,Updates)
+      end,
+      object_monitor( Monitor );
+    {unsubscribe, Owner}->
+      esubscribe:unsubscribe({log,ID},[node()], self()),
+      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+    {'DOWN', _Ref, process, Owner, _Reason}->
+      esubscribe:unsubscribe({log,ID},[node()], self()),
+      ets:delete(?SUBSCRIPTIONS,{oid,ID});
+    _->
+      object_monitor( Monitor )
+  after
+    5->erlang:hibernate(?MODULE,?FUNCTION_NAME,[ Monitor ])
+  end.
+
+%%=================================================================
+%%	Query subscription
+%%=================================================================
+-record(ind,{tag,'&','!',db}).
+subscribe_query(ID, DBs, Fields, InConditions, #{
+  stateless := Stateless,     % No initial query, only updates
+  no_feedback := NoFeedback    % Do not send updates back to the author process
+})->
+
+  Conditions =
+    case ecomet_user:is_admin() of
+      {ok,true}->Conditions;
+      {error,Error}->throw(Error);
+      _->
+        {ok,UserGroups}=ecomet_user:get_usergroups(),
+        {'AND',[
+          Conditions,
+          {'OR',[{<<".readgroups">>,'=',GID}||GID<-UserGroups]}
+        ]}
+    end,
+  Tags = ecomet_resultset:subscription_prepare( Conditions ),
+  Index = compile_index( Tags, DBs ),
+
+  todo.
+
+compile_index([{[Tag|And],Not}|Rest], DBs)->
+  [#ind{
+    tag = tag_hash(Tag),
+    '&' = tags_mask(And,[]),
+    '!'= tags_mask(Not,[]),
+    db = DBs } | compile_index( Rest, DBs ) ];
+compile_index([], _DBs)->
+  [].
+
+tag_hash( Tag )->
+  erlang:phash2(Tag,?HASH_BASE).
+
+tags_mask([Tag|Rest],Mask)->
+  tags_mask( Rest, [tag_hash(Tag)|Mask] );
+tags_mask([], Mask)->
+  ecomet_bitmap:set_bit(<<>>, lists:usort(Mask)).
+
+
+compile_read([<<".oid">>],_Formatter)->
+  fun(_Changed,_Object)-> #{} end;
+compile_read(['*'],Formatter)->
+  ReadField =
+    if
+      is_function(Formatter,2) ->
+        fun(Object,Field)->
+          Value = maps:get(Field,Object,none),
+          {ok,Type}=ecomet_object:field_type(maps:get(object,Object),Field),
+          Formatter(Type,Value)
+        end;
+      true ->
+        fun(Object,Field)->maps:get(Field,Object,none) end
+    end,
+
+  fun(Changed,Object)->
+      maps:map(fun(Field,_)->ReadField(Object,Field) end,Changed)
+  end;
+
+compile_read(Fields,Formatter)->
+
+  % Per object reading plan
+  ReadMap=read_map(Fields,Formatter),
+
+  Read=
+    fun(Changed,Object)->
+      maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
+        case ordsets:intersection(Changed,Args) of
+          []->
+            % If the changes are not among the function arguments list the the field is not affected
+            Acc;
+          _->
+            % The value has to be recalculated
+            Acc#{Alias=>Fun(Object)}
+        end
+                end,#{},ReadMap)
+    end,
+
+  { Read, FieldsDeps }.
+
+
+
 
 start_link( Id, Owner, Params )->
   Session = self(),

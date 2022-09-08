@@ -44,10 +44,7 @@
 %% Subscriptions API
 %%====================================================================
 -export([
-	subscription_prepare/1,
-	subscription_fields/1,
-	subscription_indexes/1,
-	subscription_match_function/1
+	subscription_prepare/1
 ]).
 
 %%====================================================================
@@ -98,7 +95,6 @@ prepare(Conditions)->
 %%=====================================================================
 %%	Subscriptions API
 %%=====================================================================
-
 subscription_prepare(Conditions)->
 
 	% Standard preparation procedure
@@ -111,78 +107,9 @@ subscription_prepare(Conditions)->
 	% Extract tags
 	[{
 			[ Tag || {'TAG',Tag,_} <- AND ], 				% 1. And tags
-			[ Tag || {'TAG',Tag,_} <- ANDNOT ],			% 2. Andnot tags
-			[ Tag || {'DIRECT',Tag,_} <- DAND] ,		% 3. And direct conditions
-			[ Tag || {'DIRECT',Tag,_} <- DANDNOT]		% 4. Andnot direct conditions
+			[ Tag || {'TAG',Tag,_} <- ANDNOT ]			% 2. Andnot tags
 		}
-	|| {'NORM',{ {{'AND',AND,_},{'OR',ANDNOT,_}}, {DAND, DANDNOT} }, _} <- Normal ].
-
-subscription_fields(Subscription)->
-	Fields=
-		[
-			[ F || {F, _, _ } <- AND ] ++
-			[ F || {F, _, _ } <- ANDNOT ] ++
-			[ F || {_, F, _ } <- DAND ] ++
-			[ F || {_, F, _ } <- DANDNOT ]
-		||{ AND, ANDNOT, DAND, DANDNOT} <- Subscription ],
-	ordsets:from_list(lists:append(Fields)).
-
-subscription_indexes(Subscription)->
-	Index=
-		[case AND of
-			 [T1,T2,T3|_] ->[{T1,1},{T2,2},{T3,3}];
-			 [T1,T2]			->[{T1,1},{T2,2},{none,3}];
-			 [T1]					->[{T1,1},{none,2},{none,3}]
-		end ||{ AND, _ANDNOT, _DAND, _DANDNOT} <- Subscription ],
-	ordsets:from_list(lists:append(Index)).
-
-subscription_match_function(Subscription)->
-	Ordered=
-		[{
-			ordsets:from_list(AND),
-			ordsets:from_list(ANDNOT),
-			ordsets:from_list(DAND),
-			ordsets:from_list(DANDNOT)
-		} || { AND, ANDNOT, DAND, DANDNOT} <- Subscription ],
-
-	fun(Tags,Fields)->
-		reverse_check(Ordered,Tags,Fields)
-	end.
-
-reverse_check([{And,AndNot,DAnd,DAndNot}|Rest],Tags,Fields)->
-	Result=
-		case ordsets:subtract(And,Tags) of
-			[]->
-				% The object satisfies all the ANDs
-				case ordsets:intersection(AndNot,Tags) of
-					[]->
-						% The object does not have any ANDNOTs
-						case direct_and(DAnd,Fields) of
-							true->
-								% The object satisfies all the Direct ANDs
-								case direct_or(DAndNot,Fields) of
-									false->
-										% The object does not have any Direct ANDNOTs
-										true;
-									_->
-										false
-								end;
-							_->
-								false
-						end;
-					_->
-						false
-				end;
-			_->
-				false
-		end,
-	if
-		Result -> Result;
-		true ->
-			reverse_check(Rest,Tags,Fields)
-	end;
-reverse_check([],_Tags,_Fields)->
-	false.
+	|| {'NORM',{ {{'AND',AND,_},{'OR',ANDNOT,_}}, _Direct }, _} <- Normal ].
 
 direct_and([{Oper,Field,Value}|Rest],Fields)->
 	FieldValue = maps:get(Field,Fields,none),

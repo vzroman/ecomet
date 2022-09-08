@@ -254,131 +254,32 @@ subscribe(ID,_DBs,Fields,{<<".oid">>,'=',OID},InParams)->
     {error,Error}->
       throw(Error);
     Object->
-      ecomet_subscription:subscribe_object(ID,Object,Fields,InParams)
+      Params= maps:merge(#{
+        stateless => false,
+        no_feedback => false,
+        format => undefined
+      },InParams),
+      ecomet_subscription:subscribe_object(ID,Object,Fields,Params)
   end;
 subscribe(ID,DBs,Fields,{<<".path">>,'=',Path},InParams)->
   subscribe(ID,DBs, Fields,{<<".oid">>,'=',?OID(Path)}, InParams);
 subscribe(ID,DBs,Fields,Conditions,InParams)->
 
-  #{
-    stateless := Stateless,     % No initial query, only updates
-    no_feedback := NoFeedback,    % Do not send updates back to the author process
-    format := Formatter,         % Format fields according to their types
-    timeout := Timeout
+  Params = #{
+    format := Formatter         % Format fields according to their types
   } = maps:merge(#{
     stateless => false,
     no_feedback => false,
-    format => undefined,
-    timeout => undefined
+    format => undefined
   },InParams),
 
-  %----------Compile fields---------------------------
-  { Read, ReadDeps } = compile_subscribe_read(Fields,Formatter),
+  Read = compile_subscribe_read(Fields,Formatter),
 
+  ecomet_subscription:subscribe( ID, DBs, Read, Conditions, Params ).
 
-  % Compile the subscription constraints
-  CompiledSubscription = ecomet_resultset:subscription_prepare(Conditions),
-
-  % Get involved fields
-  TagsDeps = ecomet_resultset:subscription_fields(CompiledSubscription),
-
-  % The total fields dependencies
-  Deps = ordsets:union([ReadDeps,TagsDeps,[<<".readgroups">>]]),
-
-  % User rights
-  Rights=
-    case ecomet_user:is_admin() of
-      {ok,true}->[is_admin];
-      _->
-        {ok,UserGroups}=ecomet_user:get_usergroups(),
-        UserGroups
-    end,
-
-  % Subscription indexes (for the SEARCH phase)
-  Tags = ecomet_resultset:subscription_indexes(CompiledSubscription),
-
-  % Register a subscription object for the SEARCH phase.
-  {ok,PID} = ecomet_session:register_subscription(ID, #{
-    rights=>Rights,
-    databases=>DBs,
-    tags=>Tags,
-    dependencies=>Deps,
-    no_feedback=>NoFeedback
-  }, Timeout),
-
-  % If the subscription is not stateless (default) then we need to
-  % perform a traditional search for what is already satisfies the conditions
-  StartTS=
-    if
-      not Stateless -> init_subscription_state(ID,DBs,ReadDeps,Conditions,Read);
-      true -> -1
-    end,
-
-  % Conditions match function
-  TagsMatch= ecomet_resultset:subscription_match_function(CompiledSubscription),
-
-  % Rights match
-  RightsMatch=
-    if
-      Rights =:=[is_admin]-> fun(_)->true end;
-      true ->
-        fun(InRights)->
-          case ordsets:intersection(Rights,InRights) of
-            []->false;
-            _->true
-          end
-        end
-    end,
-
-  %--------------FINAL MATCH-----------------------------------------------
-  Self=self(),
-  Match=
-    fun
-      (#ecomet_log{ts=TS}) when TS =< StartTS->
-        % If the object is created before the TS of the last object in the initial
-        % state result, the just ignore it because it is already sent
-        false;
-      (#ecomet_log{
-        object = #{<<".oid">>:=OID} = Object,
-        tags = { TNew, TOld, TDel },
-        rights = { RNew, ROld, RDel },
-        changes = Changes
-      })->
-        OldObject = maps:merge(Object,Changes),
-        case match_log( TNew, TOld, TDel, Object, OldObject, TagsMatch ) of
-          false->false;
-          TagsResult->
-            case match_log( RNew, ROld, RDel, Object, OldObject, fun(T,_)->RightsMatch(T) end) of
-              false-> false;
-              RightsResult->
-                if
-                  TagsResult =:= add,RightsResult=:=del->false ;
-                  TagsResult =:= del,RightsResult=:=add->false ;
-                  TagsResult =:= add;RightsResult=:=add ->
-                    Self!?SUBSCRIPTION(ID,create,OID,Read(ReadDeps,Object));
-                  TagsResult =:= del;RightsResult=:=del ->
-                    Self!?SUBSCRIPTION(ID,delete,OID,#{});
-                  true ->
-                    Updates = Read(ordsets:from_list(maps:keys(Changes)),Object),
-                    case maps:size( Updates ) of
-                      0 ->
-                        % Don't send an update if there were no changes in the requested fields
-                        ignore;
-                      _ ->
-                        Self!?SUBSCRIPTION(ID,update,OID,Updates)
-                    end
-                end
-            end
-        end
-      end,
-
-  % Run the subscription
-  ecomet_subscription:run(PID,Match),
-
-  ok.
 
 compile_subscribe_read([<<".oid">>],_Formatter)->
-  { fun(_Changed,_Object)-> #{} end, [<<"@ANY@">>] };
+  fun(_Changes,_Object)-> #{} end;
 compile_subscribe_read(['*'],Formatter)->
   ReadField =
     if
@@ -392,81 +293,32 @@ compile_subscribe_read(['*'],Formatter)->
         fun(Object,Field)->maps:get(Field,Object,none) end
     end,
 
-  Params=
-    if
-      is_function(Formatter,2) ->
-        #{format=>Formatter};
-      true ->
-        #{}
-    end,
-
-  Read=
-    fun
-      ([<<"@ANY@">>],#{object:=Object})->
-        ecomet_object:read_all(Object,Params);
-      (Changed,Object)->
-        lists:foldl(fun(Field,Acc)->Acc#{Field=>ReadField(Object,Field)} end,#{},Changed)
-    end,
-
-  { Read, [<<"@ANY@">>] };
+  fun(Changes,Object)->
+    maps:map(fun(Field,_)-> ReadField(Object,Field) end,Changes)
+  end;
 
 compile_subscribe_read(Fields,Formatter)->
 
   % Per object reading plan
   ReadMap=read_map(Fields,Formatter),
 
-  % Fields dependencies
-  FieldsDeps=ordsets:union([field_args(F)|| {_,F}<-maps:to_list(ReadMap) ]),
-
-  Read=
-    fun(Changed,Object)->
-      maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
-        case ordsets:intersection(Changed,Args) of
-          []->
-            % If the changes are not among the function arguments list the the field is not affected
-            Acc;
-          _->
-            % The value has to be recalculated
-            Acc#{Alias=>Fun(Object)}
-        end
-      end,#{},ReadMap)
-    end,
-
-  { Read, FieldsDeps }.
+  fun(Changes,Object)->
+    Changed = ordsets:from_list( maps:keys( Changes )),
+    maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
+      case ordsets:intersection(Changed,Args) of
+        []->
+          % If the changes are not among the function arguments list the field is not affected
+          Acc;
+        _->
+          % The value has to be recalculated
+          Acc#{Alias=>Fun(Object)}
+      end
+    end,#{},ReadMap)
+  end.
 
 
 unsubscribe(ID)->
-  ecomet_session:remove_subscription(ID).
-
-match_log( New, Old, Del, NewObject, OldObject, Match )->
-  Now = Match(ordsets:union(New,Old),NewObject),
-  Was = Match(ordsets:union(Old,Del),OldObject),
-  if
-    Now,Was -> upd ;
-    Now, not Was-> add;
-    not Now, Was-> del;
-    true -> false
-  end.
-
-init_subscription_state(ID,DBs,Deps,Conditions,Read)->
-  RealDeps = [D||D<-Deps,D=/=<<"@ANY@">>],
-  F=
-    fun([Object|Values])->
-      Values1 = maps:from_list(lists:zip(RealDeps,Values)),
-      ObjectMap=object_map(Object,Values1),
-      OID = ecomet_object:get_oid(Object),
-      ?SUBSCRIPTION(ID,create,OID,Read(Deps,ObjectMap))
-    end,
-  Fields = [<<".ts">>,{F, [<<".object">>|RealDeps]}],
-  {_Header, Objects}=ecomet_query:get(DBs,Fields,Conditions,#{order=>[{<<".ts">>,'ASC'}]}),
-
-  % Send the results
-  Self=self(),
-  lists:foldl(fun([TS,Msg],_)->
-    Self!Msg,
-    TS
-  end,-1,Objects).
-
+  ecomet_subscription:unsubscribe( ID ).
 
 %%=====================================================================
 %%	SET
