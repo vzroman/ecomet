@@ -109,7 +109,7 @@ spawn_session(Fun)->
   case get(?CONTEXT) of
     undefined -> throw( user_undefined );
     Context->
-      spawn_session(fun()->put(?CONTEXT, Context), Fun()  end)
+      spawn(fun()->put(?CONTEXT, Context), Fun()  end)
   end.
 
 logout()->
