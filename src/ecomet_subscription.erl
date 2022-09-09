@@ -378,7 +378,7 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
         { true, false }->
           Owner ! ?SUBSCRIPTION(ID,create,OID, Read( Object, Object ));
         {false, true}->
-          Owner ! Owner! ?SUBSCRIPTION(ID,delete,OID,#{});
+          Owner ! ?SUBSCRIPTION(ID,delete,OID,#{});
         _->
           ignore
       end,
@@ -428,32 +428,33 @@ search( OID, DB, Tags, Object, Changes, Self )->
       case ?X_BIT(Mask,Global) of
         <<>> -> ignore;
         XTags->
-          ecomet_bitmap:foldl(fun(Tag,_)->
+          ecomet_bitmap:foldl(fun(Tag,Notified)->
             case ets:lookup(?S_INDEX,{tag,Tag}) of
               [{_,Indexes}]->
-                maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers,_)->
+                maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers, TagNotified)->
                   case ?X_BIT( Mask, And ) of
                     And->
                       case ?X_BIT(Mask, Not) of
                         <<>> ->
                           case lists:member(DB, DBs) of
                             true ->
-                              [ S ! {log, OID, Object, Changes, Self} || S <- Subscribers ],
-                              ok;
+                              ToNotify = ordsets:subtract( Subscribers, TagNotified ),
+                              [ S ! {log, OID, Object, Changes, Self} || S <- ToNotify ],
+                              ordsets:union( TagNotified, ToNotify );
                             _->
-                              ignore
+                              TagNotified
                           end;
                         _->
-                          ignore
+                          TagNotified
                       end;
                     _->
-                      ignore
+                      TagNotified
                   end
-                end,undefined, Indexes );
+                end,Notified, Indexes );
               []->
-                ignore
+                Notified
             end
-          end,undefined, XTags,{none,none})
+          end,[], XTags,{none,none})
       end;
     []->
       ignore
