@@ -135,8 +135,7 @@
 }).
 -define(NODE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] },
-  <<"is_ready">>=>#{ type => bool, index=> [simple] },
-  <<"backend_env">>=>#{ type => term }
+  <<"is_ready">>=>#{ type => bool, index=> [simple] }
 }).
 
 %-------------USER PATTERNS--------------------------------------------
