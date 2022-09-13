@@ -438,10 +438,8 @@ on_commit(Log,OnCommits)->
   run_oncommits(lists:reverse(OnCommits)).
 
 % Run notifications
-run_notifications([Log|Rest])->
-  ecomet_router:on_commit(Log),
-  run_notifications(Rest);
-run_notifications([])->ok.
+run_notifications(Logs)->
+  ecomet_router:on_commit(Logs).
 
 % Execute fun
 run_oncommits([F|Rest]) when is_function(F)->
