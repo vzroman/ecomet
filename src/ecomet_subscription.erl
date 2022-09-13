@@ -396,9 +396,6 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
   end.
 
 
-on_commit(#ecomet_log{ changes = undefined })->
-  % No changes
-  ok;
 on_commit(#ecomet_log{
   object = #{<<".oid">> := OID} = Object,
   db = DB,
@@ -406,18 +403,12 @@ on_commit(#ecomet_log{
   changes = Changes,
   self = Self
 })->
-
-  OtherNodes = ecomet_node:get_ready_nodes() -- [node()],
   % Run object monitors
-  Update = { TAdd ++ TOld, Object, Changes, Self },
-  [ rpc:cast( N, esubscribe ,notify,[ {log,OID}, Update ]) || N <-OtherNodes ],
-  esubscribe:notify( {log,OID}, Update ),
-
+  NewTags = TAdd ++ TOld,
+  esubscribe:notify( {log,OID}, { NewTags, Object, Changes, Self } ),
 
   % Run the search on the other nodes
-  Tags = TAdd ++ TOld ++ TDel,
-  [ rpc:cast( N, ?MODULE ,search,[ OID, DB, Tags, Object, Changes, Self ]) || N <-OtherNodes ],
-  search(OID, DB, Tags, Object, Changes, Self).
+  search(OID, DB, NewTags ++ TDel, Object, Changes, Self).
 
 search( OID, DB, Tags, Object, Changes, Self )->
   case ets:lookup(?S_INDEX, global) of

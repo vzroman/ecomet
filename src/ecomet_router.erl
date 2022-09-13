@@ -24,10 +24,13 @@
 %%=================================================================
 -export([
   on_init/1,
-  on_commit/1
+  on_commit/1,
+  notify/1
 ]).
 
 on_init( PoolSize )->
+
+  spawn_link(fun ready_nodes/0),
 
   [ persistent_term:put({?MODULE, I }, spawn_link( fun worker_loop/0 ) ) || I <- lists:seq(1, PoolSize) ],
 
@@ -48,13 +51,32 @@ worker_loop()->
       ?LOGWARNING("unexpected message ~p", [Unexpected])
   end.
 
-on_commit( Log )->
+on_commit( #ecomet_log{changes = undefined} )->
+  ignore;
+on_commit( Logs0 )->
+  case [L || L=#ecomet_log{changes = C} <- Logs0, C=/=undefined] of
+    []->
+      ignore;
+    Logs->
+      [ rpc:cast( N, ?MODULE , notify,[ Logs ]) || N <- persistent_term:get({?MODULE,ready_nodes}) ],
+      notify( Logs )
+  end.
+
+notify( Logs )->
   case persistent_term:get({?MODULE,pool_size},none) of
     PoolSize when is_integer(PoolSize)->
-      I = erlang:phash(Log, PoolSize),
-      Worker = persistent_term:get({?MODULE,I}),
-      Worker ! Log;
+      [ begin
+          I = erlang:phash(Log, PoolSize),
+          Worker = persistent_term:get({?MODULE,I}),
+          Worker ! Log
+        end || Log <- Logs ],
+      ok;
     _->
       % Not initialized yet
       ignore
   end.
+
+ready_nodes()->
+  catch persistent_term:put({?MODULE, ready_nodes }, ecomet_node:get_ready_nodes() -- [node()]),
+  timer:sleep(100),
+  ready_nodes().
