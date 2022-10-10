@@ -45,11 +45,11 @@ worker_loop()->
       catch
         _:Error:Stack->
           ?LOGERROR("log error ~p, ~p, ~p",[ Log, Error, Stack ])
-      end,
-      worker_loop();
+      end;
     Unexpected->
       ?LOGWARNING("unexpected message ~p", [Unexpected])
-  end.
+  end,
+  worker_loop().
 
 on_commit( #ecomet_log{changes = undefined} )->
   ignore;
