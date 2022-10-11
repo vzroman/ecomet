@@ -22,6 +22,8 @@
 %%=================================================================
 %%	ZAYA API
 %%=================================================================
+-record(key,{type,storage,key}).
+
 %%	SERVICE API
 -export([
   create/1,
@@ -162,6 +164,116 @@ remove( Params )->
       throw(Errors)
   end.
 
+%%	LOW_LEVEL
+read( Ref, [#key{type = T,storage = S,key = K}=Key|Rest])->
+  case Ref of
+    #{ T := {Module, TRef} }->
+      case try Module:read(TRef, [{S,K}]) catch _:_->error end of
+        [{_,V}]->
+          [{Key,V}| read(Ref, Rest ) ];
+        _->
+          read(Ref, Rest)
+      end;
+    _->
+      read( Ref, Rest )
+  end;
+read( Ref, [_InvalidKey| Rest] )->
+  read( Ref, Rest );
+read(_Ref,[])->
+  [].
+
+write(Ref, KVs)->
+  ByTypes =
+    lists:foldl(fun({#key{ type = T, storage = S, key = K }, V}, Acc)->
+      TypeAcc = maps:get(T,Acc,[]),
+      Acc#{ T => [{{S,K}, V} | TypeAcc]}
+    end,#{}, KVs),
+  maps:map(fun(Type, Recs)->
+    { Module, TRef } = maps:get(Type, Ref),
+    ok = Module:write( TRef, Recs )
+  end, ByTypes),
+  ok.
+
+delete(Ref, Keys)->
+  ByTypes =
+    lists:foldl(fun(#key{ type = T, storage = S, key = K }, Acc)->
+      TypeAcc = maps:get(T,Acc,[]),
+      Acc#{ T => [{S,K} | TypeAcc]}
+    end,#{}, Keys),
+  maps:map(fun(Type, TKeys)->
+    { Module, TRef } = maps:get(Type, Ref),
+    ok = Module:delete( TRef, TKeys )
+  end, ByTypes),
+  ok.
+
+%%	ITERATOR
+first( Ref )->
+  Types = lists:usort( maps:keys(Ref) ),
+  first(Types, Ref).
+first([T|Rest], Ref)->
+  { Module, TRef } = maps:get(T, Ref),
+  try
+    {{S,K}, V} = Module:first( TRef ),
+    { #key{ type = T, storage = S, key = K }, V}
+  catch
+    _:_->
+      first( Rest, Ref )
+  end;
+first([], _Ref)->
+  throw( undefined ).
+
+last( Ref )->
+  Types = lists:reverse(lists:usort( maps:keys(Ref) )),
+  last(Types, Ref).
+last([T|Rest], Ref)->
+  { Module, TRef } = maps:get(T, Ref),
+  try
+    {{S,K}, V} = Module:last( TRef ),
+    { #key{ type = T, storage = S, key = K }, V}
+  catch
+    _:_->
+      last( Rest, Ref )
+  end;
+last([], _Ref)->
+  throw( undefined ).
+
+next( Ref, #key{type = T, storage = S, key = K})->
+  Types = lists:usort([ _T ||_T = maps:keys(Ref), _T >= T] ),
+  next( Types, Ref, {S,K} ).
+next([T|Rest], Ref, SK)->
+  { Module, TRef } = maps:get(T, Ref),
+  try
+    {{S,K}, V} = Module:next( TRef, SK ),
+    { #key{ type = T, storage = S, key = K }, V}
+  catch
+    _:_->
+      next( Rest, Ref, SK )
+  end;
+next([], _Ref, _SK)->
+  throw( undefined ).
+
+prev( Ref, #key{type = T, storage = S, key = K})->
+  Types = lists:reverse(lists:usort([ _T ||_T = maps:keys(Ref), _T =< T] )),
+  prev( Types, Ref, {S,K} ).
+prev([T|Rest], Ref, SK)->
+  { Module, TRef } = maps:get(T, Ref),
+  try
+    {{S,K}, V} = Module:prev( TRef, SK ),
+    { #key{ type = T, storage = S, key = K }, V}
+  catch
+    _:_->
+      prev( Rest, Ref, SK )
+  end;
+prev([], _Ref, _SK)->
+  throw( undefined ).
+
+%%================================================================
+%% ECOMET
+%%================================================================
+read(DB,Storage,Type,Key)->
+  read(DB,Storage,Type,Key,read).
+read(DB,Storage,Type,Key,Lock)->
+  dlss:read(?NAME(DB,Storage,Type), Key, Lock).
 
 %%=================================================================
 %%	SERVICE API
