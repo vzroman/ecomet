@@ -494,7 +494,7 @@ check_storage(Object,IsEmpty)->
       {ok,PatternID} = ecomet:read_field(Object,<<".folder">>),
       PatternStorage = ecomet_pattern:get_storage(PatternID),
       if
-        PatternStorage=:=?RAMLOCAL; PatternStorage=:=?RAM ->
+        PatternStorage=:=?RAM ->
           ?ERROR(memory_only_pattern);
         true -> ok
       end,

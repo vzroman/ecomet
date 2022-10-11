@@ -6,7 +6,6 @@
   {applications,
    [kernel,
     stdlib,
-    dlss,
     cowboy,
     erlware_commons
    ]},
@@ -14,7 +13,9 @@
   {modules, []},
   {included_applications,[
    elock,
-   esubscribe
+   esubscribe,
+   zaya_leveldb,
+   zaya
   ]},
   {licenses, ["Apache 2.0"]},
   {links, []}

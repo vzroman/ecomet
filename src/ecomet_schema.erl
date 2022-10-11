@@ -77,11 +77,32 @@
 -endif.
 %%====================================================================
 
--define(DEFAULT_SCHEMA_CYCLE, 5000).
--define(WAIT_SCHEMA_TIMEOUT,5000).
+%%=================================================================
+%%	SCHEMA
+%%=================================================================
+-define(SCHEMA,?MODULE).
+-define(schemaModule,zaya_leveldb).
+-define(dir,?SCHEMA_DIR++"/SCHEMA").
+-define(params,
+  #{
+    dir => ?dir,
+    eleveldb => #{
+      open_options=>#{
+        paranoid_checks => false,
+        verify_compactions => false,
+        compression => false
+      },
+      read => #{
+        verify_checksums => false
+      },
+      write => #{
+        sync => true
+      }
+    }
+  }
+).
 
--define(INCREMENT,list_to_atom("ecomet_"++atom_to_list(node()))).
--define(SCHEMA,ecomet_schema).
+-define(DEFAULT_SCHEMA_CYCLE, 5000).
 
 %%====================================================================
 %%		System patterns
@@ -364,8 +385,6 @@ list_patterns() ->
   Result = ['$1'],
   lists:flatten(mnesia:dirty_select(?SCHEMA, [{Matcher, [], [Result]}])).
 
-local_increment(Key)->
-  mnesia:dirty_update_counter(?INCREMENT,Key,1).
 
 %%=================================================================
 %%	OTP
@@ -380,11 +399,14 @@ init([])->
   ?LOGINFO("initialize sessions"),
   ok = ecomet_session:on_init(),
 
-  ?LOGINFO("initialize local increment table"),
-  ok = init_increment_table(),
+  ?LOGINFO("initialize local id database"),
+  ok = ecomet_id:init(),
+
+  ?LOGINFO("init backend"),
+  ok = ecomet_backend:init(),
 
   ?LOGINFO("intialize schema"),
-  ok = init_schema_table(),
+  ok = init_schema(),
 
   ?LOGINFO("initialize root database"),
   ok = add_root_database(),
@@ -457,68 +479,21 @@ code_change(_OldVsn, State, _Extra) ->
 %%============================================================================
 %%	Internal helpers
 %%============================================================================
-init_increment_table()->
-  case table_exists(?INCREMENT) of
+init_schema()->
+  case lists:member(?SCHEMA,zaya:all_dbs()) of
     true->
-      ?LOGINFO("the increment table already exists"),
-      ok;
-    _->
-      ?LOGINFO("creating the increment table"),
-      case mnesia:create_table(?INCREMENT,[
-        {attributes, record_info(fields, kv)},
-        {record_name, kv},
-        {type,ordered_set},
-        {disc_copies,[node()]},
-        {ram_copies,[]},
-        {local_content,true}     % IMPORTANT!!! The increment table belongs only to the relevant node
-      ]) of
-        {atomic,ok} -> ok;
-        {aborted,Reason} ->
-          ?LOGERROR("unable to create the increment table for the node ~p",[Reason]),
-          ?ERROR(Reason)
-      end
-  end.
-
-init_schema_table()->
-  case table_exists(?SCHEMA) of
-    true->
-      ?LOGINFO("wait for schema"),
-      mnesia:wait_for_tables([?SCHEMA],?WAIT_SCHEMA_TIMEOUT),
-      case table_has_copy(?SCHEMA,disc_copies) of
-        true->
-          ?LOGINFO("schema already has a local copy");
-        _->
-          ?LOGINFO("creating a local copy of the schema"),
-          case mnesia:add_table_copy(?SCHEMA,node(),disc_copies) of
-            {atomic,ok}->
-              ?LOGINFO("schema is copied successfully");
-            {aborted,CopyError}->
-              ?LOGERROR("unable to copy schema ~p",[CopyError]),
-              ?ERROR(CopyError)
-          end
-      end,
-      ok;
+      todo;
     false->
-      ?LOGINFO("schema table does not exist yet, creating..."),
-      case mnesia:create_table(?SCHEMA,[
-        {attributes, record_info(fields, kv)},
-        {record_name, kv},
-        {type,ordered_set},
-        {disc_copies,[node()]},
-        {ram_copies,[]}
-      ]) of
-        {atomic,ok} ->
-          case mnesia:change_table_load_order( ?SCHEMA, 999 ) of
-            {atomic,ok} -> ok;
-            {aborted,SetLoadOrderError}->
-              ?LOGERROR("unable to set load order for the schema, error ~p",[SetLoadOrderError]),
-              ?ERROR( SetLoadOrderError )
-          end;
-        {aborted,CreateError} ->
-          ?LOGERROR("unable to create the schema table for the node ~p",[CreateError]),
-          ?ERROR(CreateError)
+      try
+        {OKs,Errors} = zaya:db_create(?SCHEMA,?schemaModule,#{node()=>?params}),
+        {OKs,Errors} = zaya:db_open(?SCHEMA)
+      catch
+        _:CreateError->
+          ?LOGERROR("schema create error ~p, close the application, fix the problem and try to start again",[CreateError])
       end
-  end.
+  end,
+  wait_schema().
+
 
 add_root_database()->
   try

@@ -627,7 +627,7 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 							{error,{undefined_field,_}}->AccStorages
 						end
 					end,[],ExtBits,{none,none})),
-				% Order is [ramlocal,ram,ramdisc,disc]
+				% Order is [ram,ramdisc,disc]
 				lists:subtract(?STORAGE_TYPES,lists:subtract(?STORAGE_TYPES,FoundStorages))
 		end,
 	Config=

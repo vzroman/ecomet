@@ -23,6 +23,7 @@
 %%	Service API
 %%=================================================================
 -export([
+  init/0,
   create_db/1,
   remove_db/1,
   get_storage_name/3,
@@ -53,7 +54,6 @@
 -define(NAME(N,S,T),list_to_atom("ecomet_"++atom_to_list(N)++"_"++atom_to_list(S)++"_"++atom_to_list(T))).
 
 -define(DB,[
-  { ?RAMLOCAL, #{ type => ?RAM, local => true } },
   { ?RAM, #{ type => ?RAM } },
   { ?RAMDISC, #{ type => ?RAMDISC } },
   { ?DISC, #{ type => ?DISC } }
@@ -62,6 +62,28 @@
 %%=================================================================
 %%	Service API
 %%=================================================================
+init()->
+  case application:ensure_started( zaya ) of
+    ok->ok;
+    {error,Error}->
+      ?LOGERROR("backend init error ~p, close the application fix the error and try to start again",[Error])
+  end,
+  wait_local_dbs().
+
+wait_local_dbs()->
+  DBs = zaya:node_dbs( node() ),
+  ReadyDBs =
+    [DB || DB <- DBs, lists:member(node(), zaya:db_available_nodes(DB))],
+  case DBs -- ReadyDBs of
+    []->ok;
+    NotReady->
+      ?LOGINFO("~p databases are not ready yet, waiting...",[NotReady]),
+      timer:sleep(5000),
+      wait_local_dbs()
+  end.
+
+
+
 create_db(Name)->
   [ dlss:add_storage(?NAME(Name,?DATA,Type), DLSSType, O) || { Type, #{ type:=DLSSType } = O } <- ?DB],
   [ dlss:add_storage(?NAME(Name,?INDEX,Type), DLSSType, O) || { Type, #{ type:=DLSSType } = O } <- ?DB],
@@ -98,14 +120,7 @@ get_segment_size(Segment)->
   dlss:get_segment_size(Segment).
 
 get_storage_type(Storage)->
-  case dlss:get_storage_type(Storage) of
-    ram->
-      case is_local_storage(Storage) of
-        true->?RAMLOCAL;
-        _->?RAM
-      end;
-    Other->Other
-  end.
+  dlss:get_storage_type(Storage).
 
 storage_limits( DB, Storage, Type )->
   dlss:storage_limits( ?NAME( DB,Storage,Type) ).

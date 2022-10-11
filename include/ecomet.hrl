@@ -26,11 +26,10 @@
 -define(INDEX,index).
 
 %-------Supported storage types------------------
--define(RAMLOCAL,ramlocal).
 -define(RAM,ram).
 -define(RAMDISC,ramdisc).
 -define(DISC,disc).
--define(STORAGE_TYPES,[?DISC,?RAMDISC,?RAM,?RAMLOCAL]).
+-define(STORAGE_TYPES,[?DISC,?RAMDISC,?RAM]).
 
 
 -define(BITSTRING_LENGTH,65536).

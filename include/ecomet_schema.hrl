@@ -19,6 +19,8 @@
 -ifndef(ECOMET_SCHEMA).
 -define(ECOMET_SCHEMA,1).
 
+-define(SCHEMA_DIR,zaya:schema_dir()++"/ECOMET").
+
 %%==============================================================
 %%	Patterns
 %%==============================================================
