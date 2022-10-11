@@ -75,31 +75,68 @@
 -endif.
 %%====================================================================
 
+-define(DEFAULT_LEVELDB_PARAMS,#{
+  open_options=>#{
+    paranoid_checks => false,
+    verify_compactions => false,
+    compression => false
+  },
+  read => #{
+    verify_checksums => false
+  },
+  write => #{
+    sync => true
+  }
+}).
+
 %%=================================================================
 %%	SCHEMA
 %%=================================================================
 -define(SCHEMA,?MODULE).
--define(schemaModule,zaya_leveldb).
--define(dir,?SCHEMA_DIR++"/SCHEMA").
--define(params,
+-define(schemaModule,zaya_ets_leveldb).
+-define(schemaDir,?SCHEMA_DIR++"/SCHEMA").
+-define(schemaParams,
   #{
-    dir => ?dir,
-    eleveldb => #{
-      open_options=>#{
-        paranoid_checks => false,
-        verify_compactions => false,
-        compression => false
-      },
-      read => #{
-        verify_checksums => false
-      },
-      write => #{
-        sync => true
+    ets => #{},
+    leveldb => #{
+      dir => ?schemaDir,
+      eleveldb => ?DEFAULT_LEVELDB_PARAMS
+    }
+  }
+).
+
+%%=================================================================
+%%	ROOT
+%%=================================================================
+-define(rootModule,ecomet_db).
+-define(rootDir,?SCHEMA_DIR++"/ROOT").
+-define(rootParams,
+  #{
+    ?RAM => #{
+      module => zaya_ets,
+      params => #{}
+    },
+    ?RAMDISC => #{
+      module => zaya_ets_leveldb,
+      params => #{
+        ets => #{},
+        leveldb => #{
+          dir => ?rootDir++"/RAMDISC",
+          eleveldb => ?DEFAULT_LEVELDB_PARAMS
+        }
+      }
+    },
+    ?DISC =>#{
+      module => zaya_leveldb,
+      params => #{
+        dir => ?rootDir++"/DISC",
+        eleveldb => ?DEFAULT_LEVELDB_PARAMS
       }
     }
   }
 ).
 
+-define(onError,"close the application, fix the problem and try to start again").
 -define(DEFAULT_SCHEMA_CYCLE, 5000).
 
 %%====================================================================
@@ -136,22 +173,14 @@
 %-------------STORAGE PATTERNS--------------------------------------------
 -define(DATABASE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] },
-  <<"segments_count">>=>#{ type => integer },
-  <<"size">>=>#{ type => integer },
-  <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] }
-}).
--define(DATABASE_STORAGE_SCHEMA,#{
+  <<"types">>=>#{ type => list, subtype => atom, index=> [simple] },
+  <<"modules">>=>#{ type => term },
   <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] },
-  <<"segments_count">>=>#{ type => integer },
-  <<"size">>=>#{ type => integer },
-  <<"root_segment">>=>#{ type => atom, index=>[simple] },
-  <<"limits">>=>#{ type => term }
+  <<"params">>=>#{ type => term },
+  <<"ram_size">>=>#{ type => integer }
+  <<"size">>=>#{ type => integer }
 }).
--define(SEGMENT_SCHEMA,#{
-  <<"size">>=>#{ type => integer },
-  <<"key">>=>#{ type => term },
-  <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] }
-}).
+
 -define(NODE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] },
   <<"is_ready">>=>#{ type => bool, index=> [simple] }
@@ -458,20 +487,20 @@ init_schema()->
         true->
           ok;
         _->
-          try zaya:db_add_copy(?SCHEMA,node(),?params)
+          try zaya:db_add_copy(?SCHEMA,node(),?schemaParams)
           catch
             _:E->
-              ?LOGERROR("schema create copy error ~p, close the application, fix the problem and try to start again",[E]),
+              ?LOGERROR("schema create copy error ~p, "++?onError,[E]),
               timer:sleep(infinity)
           end
       end;
     false->
       try
-        assert_ok( zaya:db_create(?SCHEMA,?schemaModule,#{node()=>?params}) ),
+        assert_ok( zaya:db_create(?SCHEMA,?schemaModule,#{node()=>?schemaParams}) ),
         assert_ok( zaya:db_open(?SCHEMA) )
       catch
         _:CreateError->
-          ?LOGERROR("schema create error ~p, close the application, fix the problem and try to start again",[CreateError]),
+          ?LOGERROR("schema create error ~p, "++?onError,[CreateError]),
           timer:sleep(infinity)
       end
   end,
@@ -495,34 +524,58 @@ wait_schema()->
   end.
 
 add_root_database()->
-  try
-     0 = get_db_id(?ROOT),
-     ?LOGINFO("the root database already exists"),
-     ok
-  catch
-      _:_  ->
-        ?LOGINFO("the root database does not exist, creating..."),
-        ecomet_backend:remove_db(?ROOT),
-        ecomet_backend:create_db(?ROOT),
+  case lists:member(?ROOT,zaya:all_dbs()) of
+    true -> ok;
+    _->
+      ?LOGINFO("creating root database"),
+      try
+        assert_ok( zaya:db_create(?ROOT, ?rootModule, #{node() => ?rootParams}) ),
+        assert_ok( zaya:db_open(?ROOT) )
+      catch
+        _:CreateError->
+          ?LOGERROR("root database create error ~p, "++?onError,[CreateError])
+      end
+  end,
 
-        % Add the root db to the schema
-        add_db(?ROOT),
-        % Mount the root folder to the root DB
-        mount_db({?FOLDER_PATTERN,?ROOT_FOLDER},?ROOT),
-        ok
+  case zaya:read(?SCHEMA,[#dbName{k=?ROOT}]) of
+    [_]->ok;
+    _->
+      ?LOGINFO("register root database"),
+      zaya:delete(?SCHEMA,[#dbId{k=0},#dbName{k=?ROOT}]),
+      case add_db( ?ROOT ) of
+        {ok,_}->ok;
+        {error,RegisterError}->
+          ?LOGERROR("register root database error ~p",[RegisterError]),
+          timer:sleep(infinity)
+      end,
+      case mount_db({?FOLDER_PATTERN,?ROOT_FOLDER},?ROOT) of
+        ok->ok;
+        {error,MountError}->
+          ?LOGERROR("mount root database error ~p",[MountError]),
+          timer:sleep(infinity)
+      end,
+      wait_root()
+  end.
+
+wait_root()->
+  case zaya:db_available_nodes( ?ROOT ) of
+    []->
+      ?LOGINFO("wait for root database..."),
+      timer:sleep(1000),
+      wait_root()
   end.
 
 register_node()->
-  try
-    0 = get_node_id(node()),
-    ?LOGINFO("the node ~p is already registered",[node()]),
-    ok
-  catch
-    _:_  ->
-      % Add the node to the schema
-      ?LOGINFO("adding the ~p node to the schema",[node()]),
-      add_node(node()),
-      ok
+  case zaya:read( ?SCHEMA, [#nodeName{k=node()}] ) of
+    [_]->ok;
+    _->
+      ?LOGINFO("register node"),
+      case add_node( node() ) of
+        {ok,_}->ok;
+        {error,Error}->
+          ?LOGERROR("register node error ~p",[Error]),
+          timer:sleep(infinity)
+      end
   end.
 
 init_base_types()->
@@ -651,7 +704,7 @@ init_pattern_fields(Fields)->
 init_storage_objects()->
 
   % Step 1, Register the patterns (without behaviours). We create patterns without behaviours first
-  % because the root database and the first are already added to the schema, therefore when we will
+  % because the root database and the first node are already added to the schema, therefore when we will
   % be creating the related objects we don't want the behaviours do it again
   PatternsTree = [
     { <<".patterns">>, #{
@@ -663,21 +716,6 @@ init_storage_objects()->
             <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
           },
           children=>init_pattern_fields(?DATABASE_SCHEMA)
-        }},
-        { <<".storage">>, #{
-          fields=>#{
-            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<"parent_pattern">>=>{?PATTERN_PATTERN,?FOLDER_PATTERN}
-          },
-          children=>init_pattern_fields(?DATABASE_STORAGE_SCHEMA)
-        }},
-        % SEGMENT
-        { <<".segment">>, #{
-          fields=>#{
-            <<".pattern">> => {?PATTERN_PATTERN,?PATTERN_PATTERN},
-            <<"parent_pattern">>=>{?PATTERN_PATTERN,?OBJECT_PATTERN}
-          },
-          children=>init_pattern_fields(?SEGMENT_SCHEMA)
         }},
         % NODE
         { <<".node">>, #{
@@ -700,7 +738,7 @@ init_storage_objects()->
         { atom_to_binary(node(),utf8), #{
           fields=>#{
             <<".pattern">>=>?OID(<<"/root/.patterns/.node">>),
-            <<"id">>=>0
+            <<"id">>=> get_node_id( node() )
           }
         }}
       ]
@@ -711,11 +749,9 @@ init_storage_objects()->
         { <<"root">>, #{
           fields=>#{
             <<".pattern">>=>?OID(<<"/root/.patterns/.database">>),
-            <<"id">>=>0
-          },
-          children=>[
-            { ecomet_db:storage_name(S,T) , #{ fields=>#{ <<".pattern">>=>?OID(<<"/root/.patterns/.storage">>) } } } || S <-[?DATA,?INDEX],T <-?STORAGE_TYPES
-          ]
+            <<"id">>=> get_db_id(?ROOT)
+
+          }
         }}
       ]
     }}
