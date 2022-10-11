@@ -18,12 +18,49 @@
 -module(ecomet_db).
 
 -include("ecomet.hrl").
+
+%%=================================================================
+%%	ZAYA API
+%%=================================================================
+%%	SERVICE API
+-export([
+  create/1,
+  open/1,
+  close/1,
+  remove/1
+]).
+
+%%	LOW_LEVEL API
+-export([
+  read/2,
+  write/2,
+  delete/2
+]).
+
+%%	ITERATOR API
+-export([
+  first/1,
+  last/1,
+  next/2,
+  prev/2
+]).
+
+%%	HIGH-LEVEL API
+-export([
+  find/2,
+  foldl/4,
+  foldr/4
+]).
+
+%%	INFO API
+-export([
+  get_size/1
+]).
+
 %%=================================================================
 %%	SERVICE API
 %%=================================================================
 -export([
-
-
   is_local/1,
   get_search_node/2,
   get_databases/0,
@@ -56,6 +93,75 @@
   remove_database/1
 ]).
 -endif.
+
+%%=================================================================
+%%	ZAYA
+%%=================================================================
+%%	SERVICE
+create( Params )->
+  Types = maps:to_list( Params ),
+  try
+    [ ok = Module:create( TypeParams ) ||{_Type,#{ module := Module, params := TypeParams }} <- Types],
+    ok
+  catch
+    _:E->
+      [ catch Module:remove( TypeParams ) ||{_Type,#{ module := Module, params := TypeParams }} <- Types],
+      throw(E)
+  end.
+
+open( Params )->
+  try
+    maps:fold(fun(Type, #{ module := Module, params := TypeParams }, Acc)->
+      Ref = Module:open( TypeParams ),
+      case get({?MODULE,open_ref}) of
+        Refs when is_list( Refs )->
+          put({?MODULE,open_ref},[{Module,Ref}|Refs]);
+        _->
+          put({?MODULE,open_ref},[{Module,Ref}])
+      end,
+      Acc#{ Type => {Module, Module:open( TypeParams )} }
+    end,#{}, Params )
+  catch
+    _:E->
+      case get({?MODULE,open_ref}) of
+        Refs when is_list( Refs )->
+          [ catch Module:close( Ref ) || {Module,Ref} <- Refs ];
+        _->
+          nothing_is_opened
+      end,
+      throw(E)
+  after
+    erase({?MODULE,open_ref})
+  end.
+
+close( Ref )->
+  case maps:fold(fun(_Type,{Module, Ref},Errs)->
+    try
+      Module:close( Ref ),
+      Errs
+    catch
+      _:E->[E|Errs]
+    end
+  end,[], Ref ) of
+    []->ok;
+    Errors->
+      throw(Errors)
+  end.
+
+remove( Params )->
+  case maps:fold(fun(_Type,#{ module := Module, params := TypeParams }, Errs)->
+    try
+      Module:remove( TypeParams ),
+      Errs
+    catch
+      _:E->[E|Errs]
+    end
+  end,[], Params ) of
+    []->ok;
+    Errors->
+      throw(Errors)
+  end.
+
 
 %%=================================================================
 %%	SERVICE API
