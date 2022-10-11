@@ -38,9 +38,9 @@ start_link() ->
 
 init([]) ->
 
-  SubsLockServer = #{
-    id=>elock_subs,
-    start=>{elock,start_link,[ '$subsLocks$' ]},
+  LockServer = #{
+    id=>?LOCKS,
+    start=>{elock,start_link,[ ?LOCKS ]},
     restart=>permanent,
     shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
     type=>worker,
@@ -78,7 +78,7 @@ init([]) ->
 
   {ok, {Supervisor,
     [
-      SubsLockServer,
+      LockServer,
       ESubsriptionsServer,
       SchemaSrv
       |Listeners]

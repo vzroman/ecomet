@@ -47,9 +47,7 @@
   new_pattern_id/0,
   get_pattern/1,
   set_pattern/2,
-  list_patterns/0,
-
-  local_increment/1
+  list_patterns/0
 ]).
 
 %%=================================================================
@@ -169,6 +167,8 @@
   <<"extend_groups">>=>#{ type => list, subtype => link, index=> [simple] }
 }).
 
+-define(schema_lock,{transform,?SCHEMA}).
+
 % Database indexing
 -record(dbId,{k}).
 -record(dbName,{k}).
@@ -193,198 +193,170 @@
 %%=================================================================
 %%------------Add a new database to the schema---------------
 add_db(Name)->
-  case mnesia:transaction(fun()->
-    % Adding a new mount point requires lock on the schema
-    mnesia:lock({table,?SCHEMA},write),
-
+  % Adding a new database requires lock on the schema
+  {ok,Unlock} = elock:lock(?LOCKS, ?schema_lock ,_IsShared = false, _Timeout = infinity, zaya:db_available_nodes(?SCHEMA)),
+  Result = zaya:transaction(fun()->
     Id = new_db_id(),
-
-    % Index on id
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #dbId{k=Id}, value = Name }, write ),
-    % name 2 id
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #dbName{k=Name}, value = Id }, write ),
-
+    ok = zaya:write( ?SCHEMA, [{ #dbId{k=Id}, Name }, {#dbName{k=Name}, Id}], write ),
     Id
-  end) of
-    { atomic, Id }-> { ok, Id};
-    { aborted, Reason }->{error,Reason}
+  end),
+  Unlock(),
+  case Result of
+    { ok, Id }-> { ok, Id};
+    { abort, Reason }->{error,Reason}
   end.
 
 %%------------Remove a database from the schema---------------
 remove_db(Name)->
-  case mnesia:transaction(fun()->
+  case zaya:transaction(fun()->
 
-    mnesia:lock({table,?SCHEMA},write),
-
-    [ #kv{ value = Id } ] = mnesia:read( ?SCHEMA, #dbName{k=Name} ),
-
-    ok = mnesia:delete( ?SCHEMA, #dbId{k=Id}, write ),
-
-    ok = mnesia:delete( ?SCHEMA, #dbName{k=Name}, write )
+    [{_,Id}] = zaya:read( ?SCHEMA, [#dbName{k=Name}], write ),
+    ok = zaya:delete(?SCHEMA,[#dbId{k=Id},#dbName{k=Name}], write)
 
   end) of
-    { atomic, ok }-> ok;
-    { aborted, Reason }->{error,Reason}
+    { ok, ok }-> ok;
+    { abort, Reason }->{error,Reason}
   end.
 
 %%---------------Mount a new database to a folder------------------
 % A database can be mounted to more than one folder
 mount_db(FolderID,DB)->
-  case mnesia:transaction(fun()->
-    % Adding a new mount point requires lock on the schema
-    mnesia:lock({table,?SCHEMA},write),
+  case zaya:transaction(fun()->
 
     Path = ecomet:to_path( FolderID ),
 
-    % Index on OID
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntOID{k=FolderID}, value = DB }, write ),
-    % Index on PATH
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #mntPath{k=Path}, value = FolderID }, write )
+    ok = zaya:write(?SCHEMA,[{#mntOID{k=FolderID}, DB}, {#mntPath{k=Path}, FolderID}])
 
   end) of
-    { atomic, ok }-> ok;
-    { aborted, Reason }->{error,Reason}
+    { ok, ok }-> ok;
+    { abort, Reason }->{error,Reason}
   end.
 
 %%---------------Unmount a database from a folder------------------
 unmount_db(FolderID)->
-  case mnesia:transaction(fun()->
-
-    mnesia:lock({table,?SCHEMA},write),
+  case zaya:transaction(fun()->
 
     Path = ecomet:to_path( FolderID ),
 
-    ok = mnesia:delete( ?SCHEMA, #mntOID{k=FolderID}, write ),
-
-    ok = mnesia:delete( ?SCHEMA, #mntPath{k=Path}, write )
+    ok = zaya:delete(?SCHEMA,[#mntOID{k=FolderID}, #mntPath{k=Path} ], write)
 
   end) of
-    { atomic, ok }-> ok;
-    { aborted, Reason }->{error,Reason}
+    { ok, ok }-> ok;
+    { abort, Reason }->{error,Reason}
   end.
 
 get_db_id(Name)->
-  [#kv{value = ID}] = mnesia:dirty_read(?SCHEMA,#dbName{k=Name}),
+  [{_,ID}] = zaya:read(?SCHEMA,[#dbName{k=Name}]),
   ID.
 
 get_db_name(ID)->
-  [#kv{value = Name}] = mnesia:dirty_read(?SCHEMA,#dbId{k=ID}),
+  [{_,Name}] = zaya:read(?SCHEMA,[#dbId{k=ID}]),
   Name.
 
 get_mounted_db(OID)->
-  case mnesia:dirty_read(?SCHEMA,#mntOID{k=OID}) of
-    [#kv{value = DB}]->DB;
+  case zaya:read(?SCHEMA,[#mntOID{k=OID}]) of
+    [{_,DB}]->DB;
     _->none
   end.
 
 get_mounted_folder(Path)->
-  get_mounted_folder(Path, mnesia:dirty_prev(?SCHEMA,#mntPath{ k= Path }) ).
+  get_mounted_folder(Path, zaya:prev(?SCHEMA,#mntPath{ k= Path }) ).
 
-get_mounted_folder(Path, #mntPath{k=MountedPath} = Closest)->
+get_mounted_folder(Path, {#mntPath{k=MountedPath} = Closest, FolderID} )->
   S = size(MountedPath),
   case Path of
     <<MountedPath:S/binary,_/binary>>->
-      [#kv{value = FolderID}] = mnesia:dirty_read(?SCHEMA,Closest),
       {MountedPath,FolderID};
     _->
-      get_mounted_folder(Path, mnesia:dirty_prev(?SCHEMA,Closest) )
+      get_mounted_folder(Path, zaya:prev(?SCHEMA,Closest) )
   end.
 
 get_registered_databases()->
   MS=[{
-    #kv{key = #dbName{k = '$1'}, value = '_'},
+    {#dbName{k = '$1'},'_'},
     [],
     ['$1']
   }],
-  mnesia:dirty_select(?SCHEMA,MS).
+  zaya:find(?SCHEMA,#{ms => MS}).
 
 %%=================================================================
 %%	NODE API
 %%=================================================================
 %%------------Add a new node to the schema---------------
 add_node(Name)->
-  case mnesia:transaction(fun()->
-    % Adding a new mount point requires lock on the schema
-    mnesia:lock({table,?SCHEMA},write),
-
+  % Adding a new node requires lock on the schema
+  {ok,Unlock} = elock:lock(?LOCKS, ?schema_lock ,_IsShared = false, _Timeout = infinity, zaya:db_available_nodes(?SCHEMA)),
+  Result = zaya:transaction(fun()->
     Id = new_node_id(),
-
-    % Index on id
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #nodeId{k=Id}, value = Name }, write ),
-    % name 2 id
-    ok = mnesia:write( ?SCHEMA, #kv{ key = #nodeName{k=Name}, value = Id }, write ),
-
+    ok = zaya:write(?SCHEMA,[{#nodeId{k=Id}, Name},{ #nodeName{k=Name}, Id }], write),
     Id
-  end) of
-    { atomic, Id }-> { ok, Id };
-    { aborted, Reason }->{error,Reason}
+  end),
+  Unlock(),
+  case Result of
+    { ok, Id }-> { ok, Id };
+    { abort, Reason }->{error,Reason}
   end.
 
 %%------------Remove a node from the schema---------------
 remove_node(Name)->
-  case mnesia:transaction(fun()->
-
-    mnesia:lock({table,?SCHEMA},write),
-
-    [ #kv{ value = Id } ] = mnesia:read( ?SCHEMA, #nodeName{k=Name} ),
-
-    ok = mnesia:delete( ?SCHEMA, #nodeId{k=Id}, write ),
-
-    ok = mnesia:delete( ?SCHEMA, #nodeName{k=Name}, write )
-
+  case zaya:transaction(fun()->
+    [{_, Id}] = zaya:read( ?SCHEMA, [#nodeName{k=Name}], write ),
+    ok = zaya:delete(?SCHEMA,[#nodeId{k=Id}, #nodeName{k=Name}], write)
   end) of
-    { atomic, ok }-> ok;
-    { aborted, Reason }->{error,Reason}
+    { ok, ok }-> ok;
+    { abort, Reason }->{error,Reason}
   end.
 
 get_node_id(Name)->
-  [ #kv{ value = Id } ] = mnesia:dirty_read( ?SCHEMA, #nodeName{k=Name} ),
+  [{_, Id}] = zaya:read( ?SCHEMA, [#nodeName{k=Name}] ),
   Id.
 
 get_nodes()->
   MS=[{
-    #kv{key = #nodeName{k='$1'}, value = '_'},
+    {#nodeName{k='$1'},'_'},
     [],
     ['$1']
   }],
-  mnesia:dirty_select(?SCHEMA,MS).
+  zaya:find(?SCHEMA,#{ms => MS}).
 
 %%=================================================================
 %%	PATTERN API
 %%=================================================================
 new_pattern_id()->
-  case mnesia:transaction(fun()->
+  case zaya:transaction(fun()->
     NewID=
-      case mnesia:read(?SCHEMA,pattern_id,write) of
+      case zaya:read(?SCHEMA,[pattern_id],write) of
         []->1;
-        [#kv{value = ID}]->ID + 1
+        [{_,ID}]->ID + 1
       end,
-    ok = mnesia:write(?SCHEMA,#kv{key = pattern_id,value = NewID},write),
+    ok = zaya:write(?SCHEMA,[{pattern_id,NewID}],write),
     NewID
   end) of
-    { atomic, ID }-> ID;
-    { aborted, Reason }->?ERROR(Reason)
+    { ok, ID }-> ID;
+    { abort, Reason }->?ERROR(Reason)
   end.
 
 get_pattern(ID)->
-  case mnesia:dirty_read(?SCHEMA,#pattern{id=ID}) of
-    [#kv{value = Value}] -> Value;
+  case zaya:read(?SCHEMA,[#pattern{id=ID}]) of
+    [{_, Value}] -> Value;
     _->none
   end.
 
 set_pattern(ID,Value)->
-  case mnesia:transaction(fun()->
-    ok = mnesia:write(?SCHEMA,#kv{key = #pattern{id=ID}, value = Value },write)
+  case zaya:transaction(fun()->
+    ok = zaya:write(?SCHEMA,[{#pattern{id=ID},Value }],write)
   end) of
-    { atomic, ok }-> ok;
-    { aborted, Reason }->?ERROR(Reason)
+    { ok, ok }-> ok;
+    { abort, Reason }->?ERROR(Reason)
   end.
 
 list_patterns() ->
-  Matcher = #kv{key = #pattern{id = '$1'}, value = '$2'},
-  Result = ['$1'],
-  lists:flatten(mnesia:dirty_select(?SCHEMA, [{Matcher, [], [Result]}])).
-
+  MS=[{
+    {#pattern{id = '$1'},'_'},
+    [],
+    ['$1']
+  }],
+  zaya:find(?SCHEMA,#{ms => MS}).
 
 %%=================================================================
 %%	OTP
@@ -482,18 +454,45 @@ code_change(_OldVsn, State, _Extra) ->
 init_schema()->
   case lists:member(?SCHEMA,zaya:all_dbs()) of
     true->
-      todo;
+      case lists:member(node(),zaya:db_all_nodes(?SCHEMA)) of
+        true->
+          ok;
+        _->
+          try zaya:db_add_copy(?SCHEMA,node(),?params)
+          catch
+            _:E->
+              ?LOGERROR("schema create copy error ~p, close the application, fix the problem and try to start again",[E]),
+              timer:sleep(infinity)
+          end
+      end;
     false->
       try
-        {OKs,Errors} = zaya:db_create(?SCHEMA,?schemaModule,#{node()=>?params}),
-        {OKs,Errors} = zaya:db_open(?SCHEMA)
+        assert_ok( zaya:db_create(?SCHEMA,?schemaModule,#{node()=>?params}) ),
+        assert_ok( zaya:db_open(?SCHEMA) )
       catch
         _:CreateError->
-          ?LOGERROR("schema create error ~p, close the application, fix the problem and try to start again",[CreateError])
+          ?LOGERROR("schema create error ~p, close the application, fix the problem and try to start again",[CreateError]),
+          timer:sleep(infinity)
       end
   end,
   wait_schema().
 
+assert_ok({OKs,Errors})->
+  Node = node(),
+  case maps:from_list(OKs) of
+    #{Node:=_}->ok;
+    _->
+      throw( lists:keyfind(Node,1,Errors) )
+  end.
+
+wait_schema()->
+  case lists:member(node(),zaya:db_available_nodes(?SCHEMA)) of
+    true-> ok;
+    _->
+      ?LOGINFO("wait for schema..."),
+      timer:sleep(1000),
+      wait_schema()
+  end.
 
 add_root_database()->
   try
@@ -798,32 +797,17 @@ init_default_users()->
   ]),
   ok.
 
-table_exists(Table)->
-  Known = mnesia:system_info(tables),
-  lists:member(Table,Known).
-
-table_has_copy(Table,Type)->
-  Copies=mnesia:table_info(Table,Type),
-  lists:member(node(),Copies).
-
 new_db_id()->
-  new_db_id(mnesia:dirty_next(?SCHEMA, #dbId{k=-1}), -1).
-new_db_id(#dbId{k=NextID}=DB,Id)->
-  if
-    (NextID - Id) > 1 -> Id + 1 ;
-    true -> new_db_id( mnesia:dirty_next(?SCHEMA,DB), NextID )
-  end;
-new_db_id(_Other,Id)->
-  % '$end_of_table' or other keys range
-  Id + 1.
+  case zaya:prev( ?SCHEMA, #dbId{k='$end'} ) of
+    #dbId{k= MaxId}-> MaxId + 1;
+    _-> 0
+  end.
 
 new_node_id()->
-  new_node_id(mnesia:dirty_next(?SCHEMA, #nodeId{k=-1}), -1).
-new_node_id(#nodeId{k=NextID}=Node,_Id)->
-  new_node_id( mnesia:dirty_next(?SCHEMA,Node), NextID );
-new_node_id(_Other,Id)->
-  % '$end_of_table' or other keys range
-  Id + 1.
+  case zaya:prev( ?SCHEMA, #nodeId{k='$end'} ) of
+    #nodeId{k= MaxId}-> MaxId + 1;
+    _-> 0
+  end.
 
 init_tree(FolderID,Items)->
   [

@@ -268,7 +268,7 @@ get_subscriptions( Session )->
 %%------------------------------------------------------------
 build_index([#index{tag = Tag}=Index|Rest], Self)->
 
-  {ok,TagUnlock} = elock:lock('$subsLocks$',{tag,Tag}, _IsShared = false, _Timeout = infinity),
+  {ok,TagUnlock} = elock:lock(?LOCKS,{tag,Tag}, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX,{tag,Tag}) of
       [{_,Indexes}]->
@@ -290,7 +290,7 @@ build_index([], _Self)->
   ok.
 
 destroy_index([#index{tag = Tag}=Index|Rest], Self )->
-  {ok,TagUnlock} = elock:lock('$subsLocks$',{tag,Tag}, _IsShared = false, _Timeout = infinity),
+  {ok,TagUnlock} = elock:lock(?LOCKS,{tag,Tag}, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX,{tag,Tag}) of
       [{_,Indexes}]->
@@ -330,7 +330,7 @@ destroy_index([], _Self)->
   ok.
 
 global_set(Tag)->
-  {ok,Unlock} = elock:lock('$subsLocks$',global, _IsShared = false, _Timeout = infinity),
+  {ok,Unlock} = elock:lock(?LOCKS,global, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX,global) of
       [{_,Global}]->
@@ -342,7 +342,7 @@ global_set(Tag)->
     Unlock()
   end.
 global_reset(Tag)->
-  {ok,Unlock} = elock:lock('$subsLocks$',global, _IsShared = false, _Timeout = infinity),
+  {ok,Unlock} = elock:lock(?LOCKS,global, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX, global) of
       [{_,Global}]->
