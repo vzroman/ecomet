@@ -68,9 +68,6 @@
   get_databases/0,
   get_name/1,
   get_by_name/1,
-  get_storage_oid/3,
-  get_segment_oid/1,
-  get_storage_segments/1,
   storage_name/2,
   sync/0
 ]).
@@ -267,6 +264,27 @@ prev([T|Rest], Ref, SK)->
 prev([], _Ref, _SK)->
   throw( undefined ).
 
+%%	HIGH-LEVEL
+%----------------------FIND------------------------------------------
+find(Ref, Query)->
+  todo.
+
+%----------------------FOLD LEFT------------------------------------------
+foldl( Ref, Query, Fun, InAcc )->
+  todo.
+
+%----------------------FOLD RIGHT------------------------------------------
+foldr( Ref, Query, Fun, InAcc )->
+  todo.
+
+%%=================================================================
+%%	INFO
+%%=================================================================
+get_size( Ref )->
+  maps:fold(fun(_Type,{Module,TRef},Acc)->
+    Acc + Module:get_size( TRef )
+  end,0, Ref).
+
 %%================================================================
 %% ECOMET
 %%================================================================
@@ -303,35 +321,6 @@ get_by_name(Name) when is_binary(Name)->
     [OID]->{ok,OID};
     _->{error,not_found}
   end.
-
-get_storage_oid(DB,Storage,Type)->
-  ecomet_folder:path2oid(<<
-    "/root/.databases/",
-    (atom_to_binary(DB,utf8))/binary,
-    "/",
-    (storage_name(Storage,Type))/binary
-  >>).
-
-get_segment_oid(Name) when is_atom(Name)->
-  get_segment_oid(atom_to_binary(Name,utf8));
-get_segment_oid(Name) when is_binary(Name)->
-  case ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
-    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.segment">>)},
-    {<<".name">>,'=',Name}
-  ]}) of
-    [OID]->{ok,OID};
-    _->{error,not_found}
-  end.
-
-get_storage_segments(StorageID)->
-  {_,Segments} = ecomet_query:system([?ROOT],[<<".name">>],{'AND',[
-    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.segment">>)},
-    {<<".folder">>,'=',StorageID }
-  ]}),
-  [ binary_to_atom(S,utf8) || [S]<-Segments].
-
-storage_name(Storage,Type)->
-  <<(atom_to_binary(Storage,utf8))/binary,"@",(atom_to_binary(Type,utf8))/binary>>.
 
 sync()->
   % Run through all databases
