@@ -617,7 +617,7 @@ load_storage(OID,Type)->
           end,
         #{ read:=Read } =?TMODE,
         LoadedStorage=
-          case ecomet_backend:Read(DB,?DATA,Type,OID) of
+          case ecomet_db:Read(DB,?DATA,Type,OID) of
             not_found->none;
             Loaded->Loaded
           end,
@@ -663,7 +663,7 @@ commit(OID,Dict)->
       % Purge object indexes
       {[],Tags}= ecomet_index:delete_object(OID,BackTags),
       % Purge object storage
-      [ ok = ecomet_backend:delete(DB,?DATA,Type,OID,none) || Type <- maps:keys(Storages) ],
+      [ ok = ecomet_db:delete(DB,?DATA,Type,OID,none) || Type <- maps:keys(Storages) ],
       % The log record
       #ecomet_log{
         object = ecomet_query:object_map(Object,#{}),
@@ -726,7 +726,7 @@ commit(OID,Dict)->
                   case maps:size(TFields) of
                     0->
                       % Storage is empty now, delete it
-                      ok = ecomet_backend:Delete(DB,?DATA,T,OID),
+                      ok = ecomet_db:Delete(DB,?DATA,T,OID),
                       Acc;
                     _->
                       % Update storage tags
@@ -737,7 +737,7 @@ commit(OID,Dict)->
                           _->#{fields=>TFields, tags=>TTags}
                         end,
                       % Dump the new version of the storage
-                      ok = ecomet_backend:Write(DB,?DATA,T,OID,NewStorage),
+                      ok = ecomet_db:Write(DB,?DATA,T,OID,NewStorage),
                       maps:merge(Acc,TFields)
                   end
               end
@@ -1030,7 +1030,7 @@ load_storage_types(#object{oid=OID,db=DB},Dict, Types)->
         {ok, none} -> { Type, #{} };
         {ok, Loaded} -> { Type, Loaded };
         error->
-          case ecomet_backend:Read(DB,?DATA,Type,OID) of
+          case ecomet_db:Read(DB,?DATA,Type,OID) of
             not_found -> { Type, #{} };
             Loaded -> { Type, Loaded }
           end
@@ -1123,7 +1123,7 @@ rebuild_index(OID, Fields)->
                _->#{fields=>TFields, tags=>TTags}
              end,
            % Dump the new version of the storage
-           ok = ecomet_backend:Write(DB,?DATA,T,OID,NewStorage)
+           ok = ecomet_db:Write(DB,?DATA,T,OID,NewStorage)
          end || {T, S} <- maps:to_list(Storages)],
 
         ok

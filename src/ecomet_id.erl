@@ -46,7 +46,7 @@
         verify_checksums => false
       },
       write => #{
-        sync => true
+        sync => false
       }
     }
   }
@@ -70,9 +70,8 @@ init()->
       true->
         log_create();
       _->
-        already_exists
+        log_open()
     end,
-  LogRef = log_open(),
 
   persistent_term:put(?log, LogRef),
 

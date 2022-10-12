@@ -403,7 +403,7 @@ init([])->
   ok = ecomet_id:init(),
 
   ?LOGINFO("init backend"),
-  ok = ecomet_backend:init(),
+  ok = ecomet_db:init(),
 
   ?LOGINFO("intialize schema"),
   ok = init_schema(),
@@ -489,14 +489,13 @@ init_schema()->
           try zaya:db_add_copy(?SCHEMA,node(),?schemaParams)
           catch
             _:E->
-              ?LOGERROR("schema create copy error ~p, "++?onError,[E]),
+              ?LOGERROR("schema add copy error ~p, "++?onError,[E]),
               timer:sleep(infinity)
           end
       end;
     false->
       try
-        assert_ok( zaya:db_create(?SCHEMA,?schemaModule,#{node()=>?schemaParams}) ),
-        assert_ok( zaya:db_open(?SCHEMA) )
+        assert_ok( zaya:db_create(?SCHEMA,?schemaModule,#{node()=>?schemaParams}) )
       catch
         _:CreateError->
           ?LOGERROR("schema create error ~p, "++?onError,[CreateError]),
@@ -528,8 +527,7 @@ add_root_database()->
     _->
       ?LOGINFO("creating root database"),
       try
-        assert_ok( zaya:db_create(?ROOT, ?rootModule, #{node() => ?rootParams}) ),
-        assert_ok( zaya:db_open(?ROOT) )
+        assert_ok( zaya:db_create(?ROOT, ?rootModule, #{node() => ?rootParams}) )
       catch
         _:CreateError->
           ?LOGERROR("root database create error ~p, "++?onError,[CreateError])
@@ -540,7 +538,6 @@ add_root_database()->
     [_]->ok;
     _->
       ?LOGINFO("register root database"),
-      zaya:delete(?SCHEMA,[#dbId{k=0},#dbName{k=?ROOT}]),
       case add_db( ?ROOT ) of
         {ok,_}->ok;
         {error,RegisterError}->

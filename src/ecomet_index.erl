@@ -226,21 +226,21 @@ build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN)->
 
 %%--------------Add an ID to the index level--------------------------------------
 bitmap_level(add,DB,Storage,Tag,ID)->
-  case ecomet_backend:read(DB,?INDEX,Storage,Tag,write) of
+  case ecomet_db:read(DB,?INDEX,Storage,Tag,write) of
     not_found->
       Value = ecomet_bitmap:zip(ecomet_bitmap:set_bit(<<>>,ID)),
-      ok = ecomet_backend:write(DB,?INDEX,Storage,Tag,Value),
+      ok = ecomet_db:write(DB,?INDEX,Storage,Tag,Value),
       % The index didn't exist before, we need to add the value to the upper level also
       up;
     LevelValue->
       Value = ecomet_bitmap:zip(ecomet_bitmap:set_bit(LevelValue,ID)),
-      ok = ecomet_backend:write(DB,?INDEX,Storage,Tag,Value),
+      ok = ecomet_db:write(DB,?INDEX,Storage,Tag,Value),
       % The index already exists, no need to update the upper level
       stop
   end;
 %%--------------Remove an ID from the index level--------------------------------------
 bitmap_level(del,DB,Storage,Tag,ID)->
-  case ecomet_backend:read(DB,?INDEX,Storage,Tag,write) of
+  case ecomet_db:read(DB,?INDEX,Storage,Tag,write) of
     not_found->
       % Why are we here?
       ?LOGWARNING("an attempt to delete an ID in the absent index level, ID ~p, DB ~p, storage type ~p, tag ~p",[
@@ -252,11 +252,11 @@ bitmap_level(del,DB,Storage,Tag,ID)->
       LeftValue = ecomet_bitmap:zip(ecomet_bitmap:reset_bit(LevelValue,ID)),
       case ecomet_bitmap:is_empty(LeftValue) of
         true->
-          ok = ecomet_backend:delete(DB,?INDEX,Storage,Tag),
+          ok = ecomet_db:delete(DB,?INDEX,Storage,Tag),
           % The level is deleted, we need to update the upper level index
           up;
         _->
-          ok = ecomet_backend:write(DB,?INDEX,Storage,Tag,LeftValue),
+          ok = ecomet_db:write(DB,?INDEX,Storage,Tag,LeftValue),
           % The level is updated (not removed) therefore there is no need to update the upper level
           stop
       end
@@ -273,7 +273,7 @@ read_tag(DB,Storage,Vector,Tag)->
       [PatternID]->{Tag,{idh,PatternID}};
       []->{Tag,patterns}
     end,
-  case ecomet_backend:dirty_read(DB,?INDEX,Storage,Key) of
+  case ecomet_db:dirty_read(DB,?INDEX,Storage,Key) of
     not_found->none;
     IndexValue-> IndexValue
   end.

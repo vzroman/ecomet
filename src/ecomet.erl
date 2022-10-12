@@ -74,7 +74,8 @@
   start_transaction/0,
   commit_transaction/0,
   rollback_transaction/0,
-  on_commit/1
+  on_commit/1,
+  on_abort/1
 ]).
 
 %%=================================================================
@@ -328,6 +329,9 @@ rollback_transaction()->
 on_commit(Fun)->
   ecomet_transaction:on_commit(Fun).
 
+on_abort(Fun)->
+  ecomet_transaction:on_abort(Fun).
+
 %%=================================================================
 %%	Identification API
 %%=================================================================
@@ -377,11 +381,7 @@ ts()->
   ecomet_lib:ts().
 
 stop()->
-  application:stop(ecomet),
-  dlss:stop().
-
-get_storage_name(Name,Storage,Type)->
-  ecomet_backend:get_storage_name(Name,Storage,Type).
+  application:stop(ecomet).
 
 rebuild_index(OID)->
   ecomet_object:rebuild_index( OID ).

@@ -60,9 +60,21 @@
 ]).
 
 %%=================================================================
+%%	ECOMET API
+%%=================================================================
+-export([
+  read/4, read/5,
+  write/5, write/6,
+  delete/4, delete/5,
+  transaction/1
+]).
+
+%%=================================================================
 %%	SERVICE API
 %%=================================================================
 -export([
+  init/0,
+  wait_local_dbs/0,
   is_local/1,
   get_search_node/2,
   get_databases/0,
@@ -94,44 +106,58 @@
 -endif.
 
 %%=================================================================
+%%	INIT
+%%=================================================================
+init()->
+  case application:ensure_started( zaya ) of
+    ok->ok;
+    {error,Error}->
+      ?LOGERROR("backend init error ~p, close the application fix the error and try to start again",[Error])
+  end,
+  wait_local_dbs().
+
+wait_local_dbs()->
+  DBs = zaya:node_dbs( node() ),
+  ReadyDBs =
+    [DB || DB <- DBs, lists:member(node(), zaya:db_available_nodes(DB))],
+  case DBs -- ReadyDBs of
+    []->ok;
+    NotReady->
+      ?LOGINFO("~p databases are not ready yet, waiting...",[NotReady]),
+      timer:sleep(5000),
+      wait_local_dbs()
+  end.
+
+%%=================================================================
 %%	ZAYA
 %%=================================================================
 %%	SERVICE
 create( Params )->
-  Types = maps:to_list( Params ),
-  try
-    [ ok = Module:create( TypeParams ) ||{_Type,#{ module := Module, params := TypeParams }} <- Types],
-    ok
-  catch
-    _:E->
-      [ catch Module:remove( TypeParams ) ||{_Type,#{ module := Module, params := TypeParams }} <- Types],
-      throw(E)
-  end.
+  maps:fold(fun(Type, #{ module := Module, params := TypeParams }, Acc)->
+    try
+      Ref = Module:create( TypeParams ),
+      [{Module,Ref,TypeParams}|Acc]
+    catch
+      _:E->
+        ?LOGERROR("~p type database create error ~p",[Type,E]),
+        [try M:close(TRef), M:remove( TPs ) catch _:_->ignore end || {M,TRef,TPs} <- Acc],
+        throw(E)
+    end
+  end,[], Params ),
+  ok.
 
 open( Params )->
-  try
-    maps:fold(fun(Type, #{ module := Module, params := TypeParams }, Acc)->
+  maps:fold(fun(Type, #{ module := Module, params := TypeParams }, Acc)->
+    try
       Ref = Module:open( TypeParams ),
-      case get({?MODULE,open_ref}) of
-        Refs when is_list( Refs )->
-          put({?MODULE,open_ref},[{Module,Ref}|Refs]);
-        _->
-          put({?MODULE,open_ref},[{Module,Ref}])
-      end,
-      Acc#{ Type => {Module, Module:open( TypeParams )} }
-    end,#{}, Params )
-  catch
-    _:E->
-      case get({?MODULE,open_ref}) of
-        Refs when is_list( Refs )->
-          [ catch Module:close( Ref ) || {Module,Ref} <- Refs ];
-        _->
-          nothing_is_opened
-      end,
-      throw(E)
-  after
-    erase({?MODULE,open_ref})
-  end.
+      Acc#{ Type => {Module, Ref} }
+    catch
+      _:E->
+        ?LOGERROR("~p type database open error ~p",[Type,E]),
+        [ catch M:close(TRef) || {_T,{M,TRef}} <- maps:to_list(Acc) ],
+        throw(E)
+    end
+  end,#{}, Params ).
 
 close( Ref )->
   case maps:fold(fun(_Type,{Module, Ref},Errs)->
@@ -165,7 +191,7 @@ remove( Params )->
 read( Ref, [#key{type = T,storage = S,key = K}=Key|Rest])->
   case Ref of
     #{ T := {Module, TRef} }->
-      case try Module:read(TRef, [{S,K}]) catch _:_->error end of
+      case try Module:read(TRef, [{S,[K]}]) catch _:_->error end of
         [{_,V}]->
           [{Key,V}| read(Ref, Rest ) ];
         _->
@@ -183,7 +209,7 @@ write(Ref, KVs)->
   ByTypes =
     lists:foldl(fun({#key{ type = T, storage = S, key = K }, V}, Acc)->
       TypeAcc = maps:get(T,Acc,[]),
-      Acc#{ T => [{{S,K}, V} | TypeAcc]}
+      Acc#{ T => [{{S,[K]}, V} | TypeAcc]}
     end,#{}, KVs),
   maps:map(fun(Type, Recs)->
     { Module, TRef } = maps:get(Type, Ref),
@@ -195,7 +221,7 @@ delete(Ref, Keys)->
   ByTypes =
     lists:foldl(fun(#key{ type = T, storage = S, key = K }, Acc)->
       TypeAcc = maps:get(T,Acc,[]),
-      Acc#{ T => [{S,K} | TypeAcc]}
+      Acc#{ T => [{S,[K]} | TypeAcc]}
     end,#{}, Keys),
   maps:map(fun(Type, TKeys)->
     { Module, TRef } = maps:get(Type, Ref),
@@ -204,78 +230,53 @@ delete(Ref, Keys)->
   ok.
 
 %%	ITERATOR
-first( Ref )->
-  Types = lists:usort( maps:keys(Ref) ),
-  first(Types, Ref).
-first([T|Rest], Ref)->
-  { Module, TRef } = maps:get(T, Ref),
-  try
-    {{S,K}, V} = Module:first( TRef ),
-    { #key{ type = T, storage = S, key = K }, V}
-  catch
-    _:_->
-      first( Rest, Ref )
-  end;
-first([], _Ref)->
-  throw( undefined ).
+first( _Ref )->
+  throw(not_supported).
 
-last( Ref )->
-  Types = lists:reverse(lists:usort( maps:keys(Ref) )),
-  last(Types, Ref).
-last([T|Rest], Ref)->
-  { Module, TRef } = maps:get(T, Ref),
-  try
-    {{S,K}, V} = Module:last( TRef ),
-    { #key{ type = T, storage = S, key = K }, V}
-  catch
-    _:_->
-      last( Rest, Ref )
-  end;
-last([], _Ref)->
-  throw( undefined ).
+last( _Ref )->
+  throw(not_supported).
 
-next( Ref, #key{type = T, storage = S, key = K})->
-  Types = lists:usort([ _T ||_T = maps:keys(Ref), _T >= T] ),
-  next( Types, Ref, {S,K} ).
-next([T|Rest], Ref, SK)->
-  { Module, TRef } = maps:get(T, Ref),
-  try
-    {{S,K}, V} = Module:next( TRef, SK ),
-    { #key{ type = T, storage = S, key = K }, V}
-  catch
-    _:_->
-      next( Rest, Ref, SK )
-  end;
-next([], _Ref, _SK)->
-  throw( undefined ).
+next( Ref, #key{type = T, storage = S, key = K}=Key)->
+  case Ref of
+    #{T := {Module, TRef}}->
+      case Module:next(TRef,{S,[K]}) of
+        {{S,[Next]}, V}->
+          {Key#key{ key = Next }, V};
+        _->
+          throw(undefined)
+      end;
+    _->
+      throw(invalid_type)
+  end.
 
-prev( Ref, #key{type = T, storage = S, key = K})->
-  Types = lists:reverse(lists:usort([ _T ||_T = maps:keys(Ref), _T =< T] )),
-  prev( Types, Ref, {S,K} ).
-prev([T|Rest], Ref, SK)->
-  { Module, TRef } = maps:get(T, Ref),
-  try
-    {{S,K}, V} = Module:prev( TRef, SK ),
-    { #key{ type = T, storage = S, key = K }, V}
-  catch
-    _:_->
-      prev( Rest, Ref, SK )
-  end;
-prev([], _Ref, _SK)->
-  throw( undefined ).
+prev( Ref, #key{type = T, storage = S, key = K}=Key)->
+  case Ref of
+    #{T := {Module, TRef}}->
+      case Module:prev(TRef,{S,[K]}) of
+        {{S,[Prev]}, V}->
+          {Key#key{ key = Prev }, V};
+        _->
+          throw(undefined)
+      end;
+    _->
+      throw(invalid_type)
+  end.
 
 %%	HIGH-LEVEL
 %----------------------FIND------------------------------------------
-find(Ref, Query)->
-  todo.
+find(_Ref, _Query)->
+  % TODO
+  [].
 
 %----------------------FOLD LEFT------------------------------------------
-foldl( Ref, Query, Fun, InAcc )->
-  todo.
+foldl( _Ref, _Query, _Fun, InAcc )->
+  % TODO
+  InAcc.
 
 %----------------------FOLD RIGHT------------------------------------------
-foldr( Ref, Query, Fun, InAcc )->
-  todo.
+foldr( _Ref, _Query, _Fun, InAcc )->
+  % TODO
+  InAcc.
 
 %%=================================================================
 %%	INFO
@@ -288,10 +289,29 @@ get_size( Ref )->
 %%================================================================
 %% ECOMET
 %%================================================================
-read(DB,Storage,Type,Key)->
-  read(DB,Storage,Type,Key,read).
-read(DB,Storage,Type,Key,Lock)->
-  dlss:read(?NAME(DB,Storage,Type), Key, Lock).
+read(DB, Storage, Type, Key)->
+  case zaya:read(DB, [#key{ type = Type, storage = Storage, key = Key }]) of
+    [{_,Value}] -> Value;
+    _->not_found
+  end.
+read(DB, Storage, Type, Key, Lock)->
+  case zaya:read(DB, [#key{ type = Type, storage = Storage, key = Key }], Lock) of
+    [{_,Value}] -> Value;
+    _->not_found
+  end.
+
+write(DB, Storage, Type, Key, Value)->
+  zaya:write(DB, [{#key{type = Type, storage = Storage, key = Key}, Value}]).
+write(DB, Storage, Type, Key, Value, Lock)->
+  zaya:write(DB, [{#key{type = Type, storage = Storage, key = Key}, Value}], Lock).
+
+delete(DB, Storage, Type, Key)->
+  zaya:delete(DB, [#key{type = Type, storage = Storage, key = Key}]).
+delete(DB, Storage, Type, Key, Lock)->
+  zaya:delete(DB, [#key{type = Type, storage = Storage, key = Key}], Lock).
+
+transaction(Fun)->
+  zaya:transaction(Fun).
 
 %%=================================================================
 %%	SERVICE API
@@ -343,7 +363,7 @@ sync_database(DB)->
 sync_storage(DB,Storage,Type)->
   {ok,StorageID} = get_storage_oid(DB,Storage,Type),
   Configured = get_storage_segments(StorageID),
-  Actual = ecomet_backend:get_segments(DB,Storage,Type),
+  Actual = ecomet_db:get_segments(DB,Storage,Type),
 
   % remove segments that does not exist any more
   case Configured--Actual of
@@ -373,10 +393,10 @@ sync_storage(DB,Storage,Type)->
 sync_segment(Segment)->
   {ok,OID} = get_segment_oid(Segment),
   Object = ecomet:open(OID,none),
-  #{ local:= IsLocal } = ecomet_backend:get_segment_info(Segment),
+  #{ local:= IsLocal } = ecomet_db:get_segment_info(Segment),
   if
     not IsLocal ->
-      {ok, #{ copies := Copies }} = ecomet_backend:get_segment_params(Segment),
+      {ok, #{ copies := Copies }} = ecomet_db:get_segment_params(Segment),
       Actual = maps:keys( Copies ),
       case ecomet:read_field(Object,<<"nodes">>,#{default=>[]}) of
         {ok,[]}->
@@ -384,10 +404,10 @@ sync_segment(Segment)->
         {ok,Configured}->
 
           % Add copies of the segment to nodes
-          [ ecomet_backend:add_segment_copy(Segment,N) || N <- Configured -- Actual ],
+          [ ecomet_db:add_segment_copy(Segment,N) || N <- Configured -- Actual ],
 
           % Remove copies
-          [ ecomet_backend:remove_segment_copy(Segment,N) || N <- Actual -- Configured ]
+          [ ecomet_db:remove_segment_copy(Segment,N) || N <- Actual -- Configured ]
 
       end;
     true ->
@@ -407,7 +427,7 @@ sync_segment(Segment)->
 is_master(Segment)->
   % The master of the segment is the first ready node in the list of
   % the nodes hosting the segment
-  #{nodes := RootNodes } = ecomet_backend:get_segment_info(Segment),
+  #{nodes := RootNodes } = ecomet_db:get_segment_info(Segment),
   ReadyNodes = ecomet_node:get_ready_nodes(),
   Node = node(),
 
@@ -420,7 +440,7 @@ is_master(Segment)->
 
 is_master(DB,Storage,Type)->
   % The master of a storage is the master of its root segment
-  Root = ecomet_backend:get_root_segment(DB,Storage,Type),
+  Root = ecomet_db:get_root_segment(DB,Storage,Type),
   is_master(Root).
 
 update_db(OID)->
@@ -431,7 +451,7 @@ update_db(OID)->
 
   Update =
     lists:foldl(fun([Nodes,Size,Count,Root],#{<<"nodes">>:=AccNodes,<<"size">>:=AccSize,<<"segments_count">>:=AccCount}=Acc)->
-      case ecomet_backend:get_segment_info(Root) of
+      case ecomet_db:get_segment_info(Root) of
         #{local:=true}->
           % Local storage are not counted
           Acc;
@@ -474,15 +494,15 @@ update_storage(OID)->
   Storage = binary_to_atom(S,utf8),
   Type = binary_to_atom(T,utf8),
 
-  Root = ecomet_backend:get_root_segment(DB,Storage,Type),
-  ActualLimits = ecomet_backend:storage_limits( DB,Storage,Type ),
+  Root = ecomet_db:get_root_segment(DB,Storage,Type),
+  ActualLimits = ecomet_db:storage_limits( DB,Storage,Type ),
 
   Update =
     case Limits of
       ActualLimits -> Update0;
       _ when is_map( Limits )->
         % Set storage limits
-        ecomet_backend:storage_limits( DB,Storage,Type, Limits ),
+        ecomet_db:storage_limits( DB,Storage,Type, Limits ),
         Update0;
       _ ->
         % Update actual limits
@@ -498,41 +518,49 @@ update_storage(OID)->
 update_segment(OID)->
   Object = ecomet:open(OID,none),
   {ok,Name}=ecomet:read_field(Object,<<".name">>),
-  Size = ecomet_backend:get_segment_size(binary_to_atom(Name,utf8)),
+  Size = ecomet_db:get_segment_size(binary_to_atom(Name,utf8)),
   ok = ecomet:edit_object(Object,#{<<"size">>=>Size}).
 
 %%=================================================================
 %%	Ecomet object behaviour
 %%=================================================================
 on_create(Object)->
-  check_name(Object),
+  Name=check_name(Object),
+
+  %<<"modules">> - #{ Type => Module },
+  %<<"params">>=>#{ Type => #{ Node => Params } },
+
+  Types = check_types(Object),
+  Params = check_params(Object),
+
   %-------------Create a new database-------------------------
-  { ok, Name } = ecomet:read_field(Object,<<".name">>),
-  NameAtom = binary_to_atom(Name,utf8),
-  ?LOGINFO("creating a new database ~p",[NameAtom]),
+  ?LOGINFO("creating a new database ~p, params ~p",[Name,Params]),
+  case zaya:db_create(Name,?MODULE,Params) of
+    {_,[]}->
+      ok;
+    {_,CreateErrors}->
+      ?LOGERROR("~p database create errors ~p",[Name,CreateErrors])
+  end,
 
-  % Create storage types
-  [ ecomet:create_object(#{
-    <<".name">>=>storage_name(S,T),
-    <<".folder">>=>?OID(Object),
-    <<".pattern">>=>?OID(<<"/root/.patterns/.storage">>)
-  }) || S<-[?DATA,?INDEX], T<-?STORAGE_TYPES ],
-
-  % We need to create the backend out of a transaction, otherwise it throws 'nested_transaction'
-  ecomet:on_commit(fun()->
-    case create_database(NameAtom) of
-      {ok,ID}->
-        ?LOGINFO("database ~p created successfully, id = ~p",[NameAtom,ID]),
-        ok = ecomet:edit_object(Object,#{<<"id">>=>ID});
-      _->
-        ok = ecomet:delete_object(Object)
-    end
+  ecomet_transaction:on_abort(fun()->
+    catch zaya:db_close( Name ),
+    wait_close( Name ),
+    catch zaya:db_remove( Name ),
+    ecomet_schema:remove_db(Name)
   end),
-  ok.
+
+  {ok,Id} = ecomet_schema:add_db( Name ),
+
+  ecomet:edit_object(Object,#{
+    <<"id">> => Id,
+    <<"types">>=>maps:keys( Types )
+  }).
 
 on_edit(Object)->
   check_name(Object),
   check_id(Object),
+  check_types(Object),
+  check_params(Object),
   ok.
 
 on_delete(Object)->
@@ -540,11 +568,11 @@ on_delete(Object)->
     []->
       {ok,Name}=ecomet:read_field(Object,<<".name">>),
       NameAtom = binary_to_atom(Name,utf8),
-      ecomet:on_commit(fun()->
-        remove_database(NameAtom)
-      end),
+      zaya:db_remove(NameAtom),
+      ecomet_schema:remove_db( NameAtom ),
       ok;
-    _->?ERROR(is_mounted)
+    _->
+      ?ERROR(is_mounted)
   end.
 
 check_name(Object)->
@@ -552,7 +580,8 @@ check_name(Object)->
     none->ok;
     { Name, none }->
       case re:run(Name,"^(\\w+)$") of
-        {match,_}->ok;
+        {match,_}->
+          binary_to_atom(Name,utf8);
         _->
           ?ERROR(invalid_name)
       end;
@@ -570,41 +599,11 @@ check_id(Object)->
       ?ERROR(change_id_is_not_allowed)
   end.
 
-create_database(Name)->
-  try
-    ?LOGINFO("creating backend for ~p",[Name]),
-    ok = ecomet_backend:create_db(Name),
-    ?LOGINFO("backend for ~p database is created successfully",[Name]),
-
-    ?LOGINFO("registering the ~p database in the schema",[Name]),
-    case ecomet_schema:add_db(Name) of
-      {ok,ID}->{ok,ID};
-      {error,Error}->
-        try ecomet_backend:remove_db(Name) catch
-          _:CleanError->
-            ?LOGERROR("error on removing ~p database, error ~p",[Name,CleanError])
-        end,
-        throw(Error)
-    end
-  catch
-    _:CreateError:Stack->
-      ?LOGERROR("unable to create the ~p database, error ~p, stack ~p",[
-        Name,
-        CreateError,
-        Stack
-      ]),
-      error
+wait_close( DB )->
+  case zaya:db_available_nodes( DB ) of
+    []->ok;
+    _->
+      ?LOGINFO("~p database wait close",[DB]),
+      timer:sleep(5000),
+      wait_close( DB )
   end.
-
-remove_database(Name)->
-  ?LOGINFO("unregistering the ~p database",[Name]),
-  case ecomet_schema:remove_db(Name) of
-    ok->ok;
-    {error,Error}->
-      ?LOGERROR("error unregistering a database ~p, error ~p",[Name,Error])
-  end,
-  try ecomet_backend:remove_db(Name) catch
-    _:CleanError->
-      ?LOGERROR("error on removing ~p database, error ~p",[Name,CleanError])
-  end,
-  ok.

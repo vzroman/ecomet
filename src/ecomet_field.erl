@@ -501,7 +501,7 @@ check_storage(Object,IsEmpty)->
       true;
     { NewStorage, _OldStorage } ->
       % Just check for other supported types
-      case lists:member( NewStorage, ecomet_backend:get_supported_types() ) of
+      case lists:member( NewStorage, ?STORAGE_TYPES ) of
         true->ok;
         _->?ERROR(invalid_storage_type)
       end,

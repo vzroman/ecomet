@@ -35,6 +35,7 @@
   queue_commit/1,
   apply_commit/1,
   on_commit/1,
+  on_abort/1,
   get_type/0,
   commit/0,
   rollback/0
@@ -50,7 +51,7 @@
 % Run fun within transaction
 internal(Fun)->
   State = tstart(internal),
-  case ecomet_backend:transaction(fun()->
+  case ecomet_db:transaction(fun()->
     clean(State),
     Result=Fun(),
     {Log,OnCommits}=tcommit(),
@@ -66,7 +67,7 @@ internal(Fun)->
 
 internal_sync(Fun)->
   State = tstart(internal),
-  case ecomet_backend:sync_transaction(fun()->
+  case ecomet_db:sync_transaction(fun()->
     clean(State),
     Result=Fun(),
     {Log,OnCommits}=tcommit(),
@@ -146,7 +147,7 @@ commit()->
     undefined->?ERROR(no_transaction);
     #state{type = internal}->?ERROR(internal_transaction);
     State when State#state.type==external->
-      case ecomet_backend:transaction(fun()->tcommit() end) of
+      case ecomet_db:transaction(fun()->tcommit() end) of
         {ok,{Log,OnCommits}}->
           release_locks(maps:to_list(State#state.locks)),
           on_commit(Log,OnCommits);
@@ -212,7 +213,7 @@ add_lock(Key,LockLevel,Locks,TType,Timeout)->
 
 % Acquire lock for internal transaction
 get_lock(internal,?LOCKKEY(DB,Storage,Type,Key),LockLevel,_Timeout)->
-  case ecomet_backend:read(DB,Storage,Type,Key,LockLevel) of
+  case ecomet_db:read(DB,Storage,Type,Key,LockLevel) of
     not_found->
       throw(not_found);
     Value->
@@ -251,7 +252,7 @@ upgrade_lock(external,_Key,LockLevel,#lock{pid=PID},Timeout)->
 % Executed in context of linked process
 stick_lock(Holder,Key,LockLevel)->
   link(Holder),
-  case ecomet_backend:transaction(fun()->
+  case ecomet_db:transaction(fun()->
     Lock=get_lock(internal,Key,LockLevel,timeout_not_used),
     Holder!{ecomet_stick_lock,Lock#lock{pid=self()}},
     wait_release(Key,Holder)
@@ -368,6 +369,18 @@ on_commit(Fun) when is_function(Fun,0)->
   end,
   ok;
 on_commit(_Invalid)->
+  ?ERROR(not_function).
+
+% Add fun to execute if transaction committed
+on_abort(Fun) when is_function(Fun,0)->
+  case get(?TKEY) of
+    undefined->?ERROR(no_transaction);
+    State->
+      OnCommits=[Fun|State#state.oncommit],
+      put(?TKEY,State#state{oncommit=OnCommits})
+  end,
+  ok;
+on_abort(_Invalid)->
   ?ERROR(not_function).
 
 %%-----------------------------------------------------------------------
