@@ -373,6 +373,7 @@ on_commit(_Invalid)->
 
 % Add fun to execute if transaction committed
 on_abort(Fun) when is_function(Fun,0)->
+  % TODO
   case get(?TKEY) of
     undefined->?ERROR(no_transaction);
     State->

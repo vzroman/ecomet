@@ -99,9 +99,7 @@
 -ifdef(TEST).
 -export([
   check_id/1,
-  check_name/1,
-  create_database/1,
-  remove_database/1
+  check_name/1
 ]).
 -endif.
 
@@ -133,31 +131,50 @@ wait_local_dbs()->
 %%=================================================================
 %%	SERVICE
 create( Params )->
-  maps:fold(fun(Type, #{ module := Module, params := TypeParams }, Acc)->
+  TypesParams = maps:with( ?STORAGE_TYPES, Params ),
+  OtherParams = maps:without(?STORAGE_TYPES, Params),
+  maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
     try
-      Ref = Module:create( TypeParams ),
-      [{Module,Ref,TypeParams}|Acc]
+      TypeRef = M:create( type_params(T, Ps, OtherParams) ),
+      Acc#{ T => {M,TypeRef}}
     catch
       _:E->
-        ?LOGERROR("~p type database create error ~p",[Type,E]),
-        [try M:close(TRef), M:remove( TPs ) catch _:_->ignore end || {M,TRef,TPs} <- Acc],
+        ?LOGERROR("~p type database create error ~p",[T,E]),
+        maps:map(fun(_T,{_M,_Ref})->
+          try
+            _M:close( _Ref ),
+            _M:remove( type_params(_T, maps:get(_T,TypesParams), OtherParams) )
+          catch
+            _:_E-> ?LOGERROR("~p type database rollback create error ~p",[_T,_E])
+          end
+        end, Acc),
         throw(E)
     end
-  end,[], Params ),
-  ok.
+  end,#{}, TypesParams ).
 
 open( Params )->
-  maps:fold(fun(Type, #{ module := Module, params := TypeParams }, Acc)->
+  TypesParams = maps:with( ?STORAGE_TYPES, Params ),
+  OtherParams = maps:without(?STORAGE_TYPES, Params),
+  maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
     try
-      Ref = Module:open( TypeParams ),
-      Acc#{ Type => {Module, Ref} }
+      TypeRef = M:open( type_params(T, Ps, OtherParams) ),
+      Acc#{ T => {M, TypeRef} }
     catch
       _:E->
-        ?LOGERROR("~p type database open error ~p",[Type,E]),
-        [ catch M:close(TRef) || {_T,{M,TRef}} <- maps:to_list(Acc) ],
+        ?LOGERROR("~p type database open error ~p",[T,E]),
+        maps:map(fun(_T,{_M,_Ref})->
+          try
+            _M:close( _Ref )
+          catch
+            _:_E-> ?LOGERROR("~p type database rollback open error ~p",[_T,_E])
+          end
+        end, Acc),
         throw(E)
     end
-  end,#{}, Params ).
+  end,#{}, TypesParams ).
+
+type_params(Type, Params, #{dir := Dir} = OtherParams )->
+  maps:merge( OtherParams#{ dir => Dir ++ "/" ++ atom_to_list(Type) }, maps:without([dir],Params) ).
 
 close( Ref )->
   case maps:fold(fun(_Type,{Module, Ref},Errs)->
@@ -282,9 +299,9 @@ foldr( _Ref, _Query, _Fun, InAcc )->
 %%	INFO
 %%=================================================================
 get_size( Ref )->
-  maps:fold(fun(_Type,{Module,TRef},Acc)->
-    Acc + Module:get_size( TRef )
-  end,0, Ref).
+  maps:map(fun(_Type,{Module,TRef})->
+    Module:get_size( TRef )
+  end, Ref).
 
 %%================================================================
 %% ECOMET
@@ -320,9 +337,8 @@ get_name(DB)->
   {ok,Name}=ecomet:read_field(?OBJECT(DB),<<".name">>),
   binary_to_atom(Name,utf8).
 
-is_local(_Name)->
-  % TODO
-  true.
+is_local(DB)->
+  lists:member(node(),zaya:db_available_nodes(DB)).
 
 get_search_node(_Name,_Exclude)->
   % TODO
@@ -344,182 +360,110 @@ get_by_name(Name) when is_binary(Name)->
 
 sync()->
   % Run through all databases
-  [ sync_database(DB) || DB <- get_databases() ].
+  RegisteredDBs = get_databases(),
+  ActualDBs =
+    [DB || DB <- zaya:all_dbs(), zaya:db_module( DB ) =:= ?MODULE],
 
-sync_database(DB)->
-  % Run through all storage types in the database where the node is the master
-  [ sync_storage(DB,S,T) || S<-[?DATA,?INDEX], T<-?STORAGE_TYPES, is_master(DB,S,T) ],
+  [ try remove_database( DB )
+   catch
+      _:E-> ?LOGERROR("~p database remove error ~p",[DB,E])
+    end|| DB <- ActualDBs -- RegisteredDBs, is_master(DB) ],
 
-  % The database master is the master of the data disc storage
-  case is_master(DB,?DATA,?DISC) of
-    true->
-      {ok,OID}=get_by_name(DB),
-      update_db(OID),
-      ok;
-    _->
-      ok
-  end.
+  [ try sync_copies(DB)
+    catch
+      _:E-> ?LOGERROR("~p database sync copies error ~p",[DB,E])
+    end|| DB <- RegisteredDBs ],
 
-sync_storage(DB,Storage,Type)->
-  {ok,StorageID} = get_storage_oid(DB,Storage,Type),
-  Configured = get_storage_segments(StorageID),
-  Actual = ecomet_db:get_segments(DB,Storage,Type),
-
-  % remove segments that does not exist any more
-  case Configured--Actual of
-    []->ok;
-    ToRemove->
-      ecomet:delete(get_databases(),{'AND',[
-        {<<".folder">>,'=',StorageID},
-        {'OR',[ {<<".name">>,'=',atom_to_binary(N,utf8) } || N <-ToRemove ]}
-      ]})
-  end,
-
-  % add new segments
-  [ ecomet:create_object(#{
-    <<".name">>=>atom_to_binary(N,utf8),
-    <<".folder">>=>StorageID,
-    <<".pattern">>=>?OID(<<"/root/.patterns/.segment">>)
-  }) || N<- Actual -- Configured],
-
-  % Update segments metrics
-  [ sync_segment(S) || S<-get_storage_segments(StorageID), is_master(S) ],
-
-  % Update storage merics
-  update_storage(StorageID),
+  [ try update_info(DB)
+   catch
+      _:E->?LOGERROR("~p database update info error ~p",[DB,E])
+    end|| DB <- RegisteredDBs, is_master(DB) ],
 
   ok.
 
-sync_segment(Segment)->
-  {ok,OID} = get_segment_oid(Segment),
-  Object = ecomet:open(OID,none),
-  #{ local:= IsLocal } = ecomet_db:get_segment_info(Segment),
-  if
-    not IsLocal ->
-      {ok, #{ copies := Copies }} = ecomet_db:get_segment_params(Segment),
-      Actual = maps:keys( Copies ),
-      case ecomet:read_field(Object,<<"nodes">>,#{default=>[]}) of
-        {ok,[]}->
-          ok = ecomet:edit_object(Object,#{<<"nodes">>=>Actual});
-        {ok,Configured}->
-
-          % Add copies of the segment to nodes
-          [ ecomet_db:add_segment_copy(Segment,N) || N <- Configured -- Actual ],
-
-          % Remove copies
-          [ ecomet_db:remove_segment_copy(Segment,N) || N <- Actual -- Configured ]
-
-      end;
-    true ->
-      Node = node(),
-      case ecomet:read_field(Object,<<"nodes">>) of
-        {ok,[Node]}->ok;
-        _->
-          ecomet:edit_object(Object,#{<<"nodes">>=>[Node]})
-      end
-  end,
-
-  update_segment(OID),
-
-  ok.
-
-
-is_master(Segment)->
-  % The master of the segment is the first ready node in the list of
-  % the nodes hosting the segment
-  #{nodes := RootNodes } = ecomet_db:get_segment_info(Segment),
-  ReadyNodes = ecomet_node:get_ready_nodes(),
+is_master(DB)->
   Node = node(),
-
-  case [N || N <- RootNodes, lists:member(N,ReadyNodes)] of
-    [Node|_]->
-      true;
-    _->
-      false
+  Masters = zaya:db_masters( DB ),
+  ReadyNodes = zaya:ready_nodes(),
+  if
+    length(Masters)>0->
+      case Masters -- ReadyNodes of
+        [Node|_]->
+          true;
+        _->
+          false
+      end;
+    true->
+      DBNodes = lists:usort( zaya:db_all_nodes(DB) ),
+      case DBNodes -- ReadyNodes of
+        [Node|_]->
+          true;
+        _->
+          false
+      end
   end.
 
-is_master(DB,Storage,Type)->
-  % The master of a storage is the master of its root segment
-  Root = ecomet_db:get_root_segment(DB,Storage,Type),
-  is_master(Root).
+remove_database( DB )->
+  zaya:db_close( DB ),
+  wait_close( DB ),
+  zaya:db_remove( DB ).
 
-update_db(OID)->
-  {_, StorageTypes } = ecomet:get(get_databases(),[<<"nodes">>,<<"size">>,<<"segments_count">>,<<"root_segment">>],{'AND',[
-    {<<".folder">>,'=',OID},
-    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.storage">>)}
-  ]}),
+wait_close( DB )->
+  case zaya:db_available_nodes( DB ) of
+    []->ok;
+    _->
+      ?LOGINFO("~p database wait close",[DB]),
+      timer:sleep(5000),
+      wait_close( DB )
+  end.
 
-  Update =
-    lists:foldl(fun([Nodes,Size,Count,Root],#{<<"nodes">>:=AccNodes,<<"size">>:=AccSize,<<"segments_count">>:=AccCount}=Acc)->
-      case ecomet_db:get_segment_info(Root) of
-        #{local:=true}->
-          % Local storage are not counted
-          Acc;
-        _->Acc#{
-          <<"nodes">>=>ordsets:union(AccNodes,ordsets:from_list(Nodes)),
-          <<"size">>=>if is_number(Size)->AccSize + Size; true->AccSize end,
-          <<"segments_count">>=>if is_number(Count)->AccCount + Count; true->AccCount end
-        }
-      end
-    end,#{<<"nodes">>=>[],<<"size">>=>0,<<"segments_count">>=>0},StorageTypes),
+sync_copies(DB)->
+  case ecomet:get([?ROOT],[<<"params">>],{'AND',[
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.database">>)},
+    {<<".name">>,'=',atom_to_binary(DB,utf8)}
+  ]}) of
+    {_,[[Params]]}->
+      Node = node(),
+      EcometParams = maps:get(Node,Params,undefined),
+      ZayaParams = zaya:db_node_params(DB, Node),
+      case {EcometParams,ZayaParams} of
+        {Same,Same}->
+          ok;
+        {undefined,_}->
+          zaya:db_close(DB, Node),
+          wait_close(DB, Node),
+          zaya:db_remove_copy(DB, Node);
+        {_, undefined}->
+          zaya:db_add_copy(DB, Node, EcometParams );
+        {_,_}->
+          zaya:db_set_copy_params(DB, Node, EcometParams )
+      end;
+    _->
+      ?LOGWARNING("~p database is registered but not found the corresponding object, skip synchronization",[DB])
+  end.
 
-  ok = ecomet:edit_object(ecomet:open(OID,none),Update).
+wait_close( DB, Node )->
+  case lists:member(Node,zaya:db_available_nodes( DB )) of
+    false->ok;
+    _->
+      ?LOGINFO("~p database wait close",[DB]),
+      timer:sleep(5000),
+      wait_close( DB, Node )
+  end.
 
-
-update_storage(OID)->
-  {_, Segments } = ecomet:get(get_databases(),[<<"nodes">>,<<"size">>],{'AND',[
-    {<<".folder">>,'=',OID},
-    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.segment">>)}
-  ]}),
-
-  Update0 =
-    lists:foldl(fun([Nodes,Size],#{<<"nodes">>:=AccNodes,<<"size">>:=AccSize})->
-      #{
-        <<"nodes">>=>ordsets:union(AccNodes,ordsets:from_list(Nodes)),
-        <<"size">>=>if is_number(Size)->AccSize + Size; true->AccSize end
-      }
-    end,#{<<"nodes">>=>[],<<"size">>=>0},Segments),
-
-  Object = ecomet:open(OID,none),
-  #{
-    <<".name">> := Name,
-    <<".folder">> := DB_OID,
-    <<"limits">> := Limits
-  } = ecomet:read_fields( Object, [<<".name">>,<<".folder">>,<<"limits">>]),
-
-  [S,T] = binary:split(Name,<<"@">>),
-  {ok,DB_Name} = ecomet:read_field( ecomet:open(DB_OID,none), <<".name">> ),
-
-  DB = binary_to_atom(DB_Name,utf8),
-  Storage = binary_to_atom(S,utf8),
-  Type = binary_to_atom(T,utf8),
-
-  Root = ecomet_db:get_root_segment(DB,Storage,Type),
-  ActualLimits = ecomet_db:storage_limits( DB,Storage,Type ),
-
-  Update =
-    case Limits of
-      ActualLimits -> Update0;
-      _ when is_map( Limits )->
-        % Set storage limits
-        ecomet_db:storage_limits( DB,Storage,Type, Limits ),
-        Update0;
-      _ ->
-        % Update actual limits
-        Update0#{ <<"limits">> => ActualLimits }
-    end,
-
-  ok = ecomet:edit_object(Object,Update#{
-    <<"root_segment">> => Root,
-    <<"segments_count">> => length(Segments)
-  }).
-
-
-update_segment(OID)->
-  Object = ecomet:open(OID,none),
-  {ok,Name}=ecomet:read_field(Object,<<".name">>),
-  Size = ecomet_db:get_segment_size(binary_to_atom(Name,utf8)),
-  ok = ecomet:edit_object(Object,#{<<"size">>=>Size}).
+update_info(DB)->
+  case get_by_name( DB ) of
+    {ok, OID}->
+      ok = ecomet:edit_object(ecomet:open(OID),#{
+        <<"nodes">> => zaya:db_all_nodes( DB ),
+        <<"available_nodes">> => zaya:db_available_nodes(DB),
+        <<"not_ready_nodes">> => zaya:db_not_ready_nodes(DB),
+        <<"is_available">> => zaya:is_db_available(DB),
+        <<"size">> => zaya:db_size(DB)
+      });
+    _->
+      ?LOGWARNING("~p database update info is not possible as the corresponding object is not found",[DB])
+  end.
 
 %%=================================================================
 %%	Ecomet object behaviour
@@ -527,8 +471,7 @@ update_segment(OID)->
 on_create(Object)->
   Name=check_name(Object),
 
-  %<<"modules">> - #{ Type => Module },
-  %<<"params">>=>#{ Type => #{ Node => Params } },
+  %<<"params">>=>#{ Node => #{ Type => Params } },
 
   Types = check_types(Object),
   Params = check_params(Object),
@@ -542,17 +485,14 @@ on_create(Object)->
       ?LOGERROR("~p database create errors ~p",[Name,CreateErrors])
   end,
 
-  ecomet_transaction:on_abort(fun()->
-    catch zaya:db_close( Name ),
-    wait_close( Name ),
-    catch zaya:db_remove( Name ),
-    ecomet_schema:remove_db(Name)
-  end),
+  % If the transaction fails the database won't be registered in ecomet schema
+  % and will be removed during the synchronization
 
   {ok,Id} = ecomet_schema:add_db( Name ),
 
   ecomet:edit_object(Object,#{
     <<"id">> => Id,
+    <<"params">> => Params,
     <<"types">>=>maps:keys( Types )
   }).
 
@@ -560,17 +500,19 @@ on_edit(Object)->
   check_name(Object),
   check_id(Object),
   check_types(Object),
-  check_params(Object),
-  ok.
+  case check_params(Object) of
+    Params when is_map(Params)->
+      ok = ecomet:edit_object(Object,#{<<"params">> => Params});
+    _->
+      ok
+  end.
 
 on_delete(Object)->
   case ecomet_folder:find_mount_points(?OID(Object)) of
     []->
       {ok,Name}=ecomet:read_field(Object,<<".name">>),
       NameAtom = binary_to_atom(Name,utf8),
-      zaya:db_remove(NameAtom),
-      ecomet_schema:remove_db( NameAtom ),
-      ok;
+      ok = ecomet_schema:remove_db( NameAtom );
     _->
       ?ERROR(is_mounted)
   end.
@@ -586,7 +528,7 @@ check_name(Object)->
           ?ERROR(invalid_name)
       end;
     {_New, _Old}->
-      ?ERROR(renaming_is_not_allowed)
+      ?ERROR(name_is_final)
   end.
 
 check_id(Object)->
@@ -599,11 +541,71 @@ check_id(Object)->
       ?ERROR(change_id_is_not_allowed)
   end.
 
-wait_close( DB )->
-  case zaya:db_available_nodes( DB ) of
-    []->ok;
-    _->
-      ?LOGINFO("~p database wait close",[DB]),
-      timer:sleep(5000),
-      wait_close( DB )
+check_types(Object)->
+  case ecomet:field_changes(Object,<<"modules">>) of
+    none->ok;
+    { Modules, none }->
+      if
+        is_map(Modules) andalso map_size(Modules)>0->
+          case maps:keys(Modules) -- ?STORAGE_TYPES of
+            []->
+              [case is_atom(M) of true->ok; _->throw({invalid_module,M}) end || M <- maps:values(Modules)],
+              Modules;
+            InvalidTypes->
+              throw({invalid_types,InvalidTypes})
+          end;
+        true->
+          throw(invalid_types)
+      end;
+    {_New, _Old}->
+      throw(types_are_final)
   end.
+
+check_params(Object)->
+  case ecomet:field_changes(Object,<<"params">>) of
+    none->ok;
+    { NewParams, OldParams } when is_map(NewParams)->
+      {ok,Modules}= ecomet:read_field(Object,<<"modules">>),
+      params_diff( NewParams, OldParams, Modules );
+    _->
+      throw(invalid_params)
+  end.
+
+params_diff( NewParams, none, Modules )->
+  params_diff(NewParams, #{}, Modules);
+params_diff( NewParams, OldParams, Modules )->
+  Types = maps:keys(Modules),
+  %-------Add new nodes or change copies params---------------
+  maps:fold(fun(Node,NodeParams,Acc)->
+    if
+      is_map(NodeParams)-> ok;
+      true-> throw({invalid_node_params,Node})
+    end,
+    OtherParams = maps:without(?STORAGE_TYPES, NodeParams),
+    NodeTypesParams =
+      lists:foldl(fun(Type,TAcc)->
+        Module = maps:get(Type,Modules),
+        TypeParams =
+          case NodeParams of
+            #{Type:=_TypeParams}->
+              if
+                is_map(_TypeParams)->
+                  _TypeParams;
+                true->
+                  throw({invalid_node_params,Type,_TypeParams})
+              end;
+            _->
+              #{}
+          end,
+        TAcc#{Type => #{module => Module, params => TypeParams} }
+      end,#{},Types),
+    NewNodeParams = maps:merge(OtherParams, NodeTypesParams),
+    case OldParams of
+      #{Node := NewNodeParams}->
+        Acc;
+      _->
+        Acc#{Node => NewNodeParams}
+    end
+  end, #{}, NewParams).
+
+

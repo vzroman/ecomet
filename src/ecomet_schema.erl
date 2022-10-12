@@ -76,16 +76,18 @@
 %%====================================================================
 
 -define(DEFAULT_LEVELDB_PARAMS,#{
-  open_options=>#{
-    paranoid_checks => false,
-    verify_compactions => false,
-    compression => false
-  },
-  read => #{
-    verify_checksums => false
-  },
-  write => #{
-    sync => true
+  eleveldb => #{
+    open_options=>#{
+      paranoid_checks => false,
+      verify_compactions => false,
+      compression => false
+    },
+    read => #{
+      verify_checksums => false
+    },
+    write => #{
+      sync => true
+    }
   }
 }).
 
@@ -94,14 +96,10 @@
 %%=================================================================
 -define(SCHEMA,?MODULE).
 -define(schemaModule,zaya_ets_leveldb).
--define(schemaDir,?SCHEMA_DIR++"/SCHEMA").
 -define(schemaParams,
   #{
     ets => #{},
-    leveldb => #{
-      dir => ?schemaDir,
-      eleveldb => ?DEFAULT_LEVELDB_PARAMS
-    }
+    leveldb => ?DEFAULT_LEVELDB_PARAMS
   }
 ).
 
@@ -109,7 +107,6 @@
 %%	ROOT
 %%=================================================================
 -define(rootModule,ecomet_db).
--define(rootDir,?SCHEMA_DIR++"/ROOT").
 -define(rootParams,
   #{
     ?RAM => #{
@@ -120,18 +117,12 @@
       module => zaya_ets_leveldb,
       params => #{
         ets => #{},
-        leveldb => #{
-          dir => ?rootDir++"/RAMDISC",
-          eleveldb => ?DEFAULT_LEVELDB_PARAMS
-        }
+        leveldb => ?DEFAULT_LEVELDB_PARAMS
       }
     },
     ?DISC =>#{
       module => zaya_leveldb,
-      params => #{
-        dir => ?rootDir++"/DISC",
-        eleveldb => ?DEFAULT_LEVELDB_PARAMS
-      }
+      params => ?DEFAULT_LEVELDB_PARAMS
     }
   }
 ).
@@ -177,7 +168,10 @@
   <<"modules">>=>#{ type => term },
   <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] },
   <<"params">>=>#{ type => term },
-  <<"size">>=>#{ type => integer }
+  <<"available_nodes">> => #{ type => list, subtype => atom, index=> [simple] },
+  <<"not_ready_nodes">> => #{ type => list, subtype => atom, index=> [simple] },
+  <<"is_available">> => #{ type => bool, index=> [simple] },
+  <<"size">>=>#{ type => term }
 }).
 
 -define(NODE_SCHEMA,#{
@@ -305,7 +299,7 @@ get_registered_databases()->
     [],
     ['$1']
   }],
-  zaya:find(?SCHEMA,#{ms => MS}).
+  zaya:find(?SCHEMA,#{start => #dbName{k = -1}, stop => #dbName{k=[]}, ms => MS}).
 
 %%=================================================================
 %%	NODE API
@@ -345,7 +339,7 @@ get_nodes()->
     [],
     ['$1']
   }],
-  zaya:find(?SCHEMA,#{ms => MS}).
+  zaya:find(?SCHEMA,#{start => #nodeName{k = -1}, stop => #nodeName{k=[]}, ms => MS}).
 
 %%=================================================================
 %%	PATTERN API
@@ -384,7 +378,7 @@ list_patterns() ->
     [],
     ['$1']
   }],
-  zaya:find(?SCHEMA,#{ms => MS}).
+  zaya:find(?SCHEMA,#{start => #pattern{id = -1}, stop => #pattern{id=[]}, ms => MS}).
 
 %%=================================================================
 %%	OTP
