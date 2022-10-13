@@ -109,7 +109,6 @@
 -export([
   ts/0,
   stop/0,
-  get_storage_name/3,
   rebuild_index/1, rebuild_index/2
 ]).
 

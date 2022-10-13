@@ -164,6 +164,7 @@
 %-------------STORAGE PATTERNS--------------------------------------------
 -define(DATABASE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] },
+  <<"masters">>=>#{ type => list, subtype => atom, index=> [simple] },
   <<"types">>=>#{ type => list, subtype => atom, index=> [simple] },
   <<"modules">>=>#{ type => term },
   <<"nodes">>=>#{ type => list, subtype => atom, index=> [simple] },

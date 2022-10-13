@@ -80,7 +80,6 @@
   get_databases/0,
   get_name/1,
   get_by_name/1,
-  storage_name/2,
   sync/0
 ]).
 
@@ -364,6 +363,11 @@ sync()->
   ActualDBs =
     [DB || DB <- zaya:all_dbs(), zaya:db_module( DB ) =:= ?MODULE],
 
+  [ try update_masters( DB )
+    catch
+      _:E-> ?LOGERROR("~p database remove error ~p",[DB,E])
+    end|| DB <- ActualDBs -- RegisteredDBs, is_master(DB) ],
+
   [ try remove_database( DB )
    catch
       _:E-> ?LOGERROR("~p database remove error ~p",[DB,E])
@@ -401,6 +405,31 @@ is_master(DB)->
         _->
           false
       end
+  end.
+
+update_masters( DB )->
+  case ecomet:get([?ROOT],[<<"masters">>],{'AND',[
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.database">>)},
+    {<<".name">>,'=',atom_to_binary(DB,utf8)}
+  ]}) of
+    {_,[[Masters0]]}->
+      Masters =
+        if
+          is_list( Masters0 )-> Masters0;
+          true -> []
+        end,
+      case zaya:db_masters( DB ) of
+        Masters -> ok;
+        _->
+          zaya:db_masters( DB, Masters ),
+          if
+            DB =/= ?ROOT-> ok;
+            true->
+              zaya:db_masters( ecomet_schema, Masters )
+          end
+      end;
+    _->
+      ?LOGWARNING("~p database is registered but not found the corresponding object, skip synchronization",[DB])
   end.
 
 remove_database( DB )->
