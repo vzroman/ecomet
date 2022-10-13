@@ -22,367 +22,177 @@
 %% API
 -export([
   internal/1,
-  internal_sync/1,
-  dirty/1,
   start/0,
-  lock_key/4,
-  lock/3,
-  release_lock/1,
-  find_lock/1,
-  dict_get/1,dict_get/2,
-  dict_put/1,
-  dict_remove/1,
-  queue_commit/1,
-  apply_commit/1,
   on_commit/1,
-  on_abort/1,
   get_type/0,
   commit/0,
   rollback/0
 ]).
 
--define(TKEY,eCoMeT_tRaNsAcTiOn).
--define(LOCKTIMEOUT,10000).
--define(LOCKKEY(DB,Storage,Type,Key),{DB,Storage,Type,Key}).
+-define(transaction,?MODULE).
+-record(state,{ type, on_commit, log }).
 
--record(state,{locks,dict,log,droplog,parent,oncommit,type,dirty}).
--record(lock,{value,level,pid}).
-
-% Run fun within transaction
 internal(Fun)->
-  State = tstart(internal),
-  case ecomet_db:transaction(fun()->
-    clean(State),
-    Result=Fun(),
-    {Log,OnCommits}=tcommit(),
-    {Result,Log,OnCommits}
-  end) of
-    {ok,{Result,Log,OnCommits}}->
-      on_commit(Log,OnCommits),
-      {ok,Result};
-    {error,Error}->
-      rollback(),
-      {error,Error}
-  end.
-
-internal_sync(Fun)->
-  State = tstart(internal),
-  case ecomet_db:sync_transaction(fun()->
-    clean(State),
-    Result=Fun(),
-    {Log,OnCommits}=tcommit(),
-    {Result,Log,OnCommits}
-  end) of
-    {ok,{Result,Log,OnCommits}}->
-      on_commit(Log,OnCommits),
-      {ok,Result};
-    {error,Error}->
-      rollback(),
-      {error,Error}
-  end.
-
-dirty(Fun)->
-  tstart( internal, _Dirty=true ),
-  try
-    Result=Fun(),
-    {Log,OnCommits}=tcommit(),
-    on_commit(Log,OnCommits),
-    {ok,Result}
-  catch
-    _:Error->
-      rollback(),
-      {error,Error}
+  case get(?transaction) of
+    undefined->
+      put(?transaction, #state{ type = internal, on_commit = [], log = #{} }),
+      Result = ecomet_db:transaction(Fun),
+      State = erase(?transaction),
+      case Result of
+        {ok,_}-> commit( State );
+        _-> ignore
+      end,
+      Result;
+    #state{ type = internal } = State->
+      Result = ecomet_db:transaction(Fun),
+      case Result of
+        {abort,_}->
+          put(?transaction, State);
+        _->
+          ignore
+      end,
+      Result;
+    #state{ type = External } when is_pid( External )->
+      External ! {internal, self(), Fun},
+      receive
+        {result, External, Result}-> Result
+      end
   end.
 
 % Start external transaction
-start()->tstart(external).
-
-% Start transaction
-tstart(Type)->
-  tstart(Type, _Dirty=false).
-tstart(Type,Dirty)->
-  State=
-    case get(?TKEY) of
-      % It is root transaction
-      undefined->
-        #state{
-          locks= #{},
-          dict= #{},
-          log=[],
-          droplog=[],
-          parent=none,
-          oncommit=[],
-          type=Type,
-          dirty = Dirty
-        };
-      % Subtransaction
-      Parent->
-        % Variants:
-        SubType=
-          case {Parent#state.type,Type} of
-            % parent is external. Sub run as external, even if it is claimed as internal
-            {external,_}->external;
-            % parent is internal, sub is internal. Run as internal
-            {internal,internal}->internal;
-            % parent is internal, sub is external. Error
-            {internal,external}->?ERROR(external_transaction_within_internal)
-          end,
-        #state{
-          locks=Parent#state.locks,
-          dict= Parent#state.dict,
-          log=[],
-          droplog=[],
-          parent=Parent,
-          oncommit=[],
-          type=SubType,
-          dirty=Dirty
-        }
-    end,
-  put(?TKEY,State),
-  State.
+start()->
+  case get(?transaction) of
+    undefined->
+      Self = self(),
+      External = ecomet_user:spawn_session(fun()-> external( Self ) end),
+      put(?transaction,#state{ type = External });
+    #state{type = External} when is_pid(External)->
+      External ! {external, self()};
+    _->
+      throw(nested_external_transaction)
+  end.
 
 % Commit transaction
 commit()->
-  case get(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    #state{type = internal}->?ERROR(internal_transaction);
-    State when State#state.type==external->
-      case ecomet_db:transaction(fun()->tcommit() end) of
-        {ok,{Log,OnCommits}}->
-          release_locks(maps:to_list(State#state.locks)),
-          on_commit(Log,OnCommits);
-        {error,Error}->?ERROR(Error)
-      end
+  case get(?transaction) of
+    #state{ type = External } when is_pid(External)->
+      External ! {commit, self()},
+      receive
+        {commit, External}->
+          erase(?transaction),
+          ok;
+        {abort, External, Reason}->
+          erase(?transaction),
+          {abort, Reason};
+        {nested, External, Result}->
+          Result
+      end;
+    #state{type = internal}->
+      throw( internal_transaction );
+    _->
+      throw(no_transaction)
   end.
 
 % Transaction rollback, erase all changes
 rollback()->
-  case erase(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    % Main transaction
-    #state{parent=none,type=Type,locks=Locks}->
-      case Type of
-        internal->ok;
-        external->release_locks(maps:to_list(Locks))
-      end;
-    #state{parent=Parent,locks=Locks}->
-      % By default we hold all locks until main transaction finish
-      put(?TKEY,Parent#state{locks=Locks})
-  end,
-  ok.
-
-clean(State)->
-  put(?TKEY,State).
-
-% Get type of current transaction
-get_type()->
-  case get(?TKEY) of
-    undefined->none;
-    #state{ dirty = true }-> dirty;
-    #state{ type = Type }-> Type
-  end.
-
-lock_key(DB,Storage,Type,Key)->
-  ?LOCKKEY(DB,Storage,Type,Key).
-
-lock(?LOCKKEY(_,_,_,_)=LockKey,Level,Timeout) when is_integer(Timeout)->
-  case get(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    #state{locks=Locks,type=TType}=State->
-      Lock = add_lock(LockKey,Level,Locks,TType,Timeout),
-      put(?TKEY,State#state{locks=Locks#{LockKey=>Lock}}),
-      Lock#lock.value
-  end;
-lock(?LOCKKEY(_,_,_,_)=LockKey,Level,_Timeout)->
-  lock(LockKey,Level,?LOCKTIMEOUT).
-
-
-add_lock(Key,LockLevel,Locks,TType,Timeout)->
-  case maps:find(Key,Locks) of
-    error->
-      get_lock(TType,Key,LockLevel,Timeout);
-    {ok,Lock}->
-      case {LockLevel,Lock#lock.level} of
-        % No need to upgrade
-        {read,_}->Lock;
-        {write,write}->Lock;
-        % Upgrade needed
-        {write,read}->upgrade_lock(TType,Key,LockLevel,Lock,Timeout)
-      end
-  end.
-
-% Acquire lock for internal transaction
-get_lock(internal,?LOCKKEY(DB,Storage,Type,Key),LockLevel,_Timeout)->
-  case ecomet_db:read(DB,Storage,Type,Key,LockLevel) of
-    not_found->
-      throw(not_found);
-    Value->
-      #lock{value=Value,level=LockLevel,pid=internal}
-  end;
-% External transaction uses stick locks
-get_lock(external,Key,LockLevel,Timeout)->
-  Self=self(),
-  PID=spawn(fun()->stick_lock(Self,Key,LockLevel) end),
-  wait_stick_lock(PID,Timeout).
-wait_stick_lock(PID,Timeout)->
-  Trap = process_flag(trap_exit,true),
-  receive
-    {ecomet_stick_lock,Lock} when Lock#lock.pid==PID->
-      process_flag(trap_exit,Trap),
-      Lock;
-    {'EXIT',PID,{throw, not_found}}->
-      process_flag(trap_exit,Trap),
-      throw(not_found);
-    {'EXIT',PID,Reason}->
-      process_flag(trap_exit,Trap),
-      ?ERROR(Reason)
-  after
-    Timeout->
-      process_flag(trap_exit,Trap),
-      exit(PID,timeout),
-      ?ERROR(timeout)
-  end.
-
-upgrade_lock(internal,Key,LockLevel,_Lock,Timeout)->
-  get_lock(internal,Key,LockLevel,Timeout);
-upgrade_lock(external,_Key,LockLevel,#lock{pid=PID},Timeout)->
-  PID!{upgrade,LockLevel},
-  wait_stick_lock(PID,Timeout).
-
-% Executed in context of linked process
-stick_lock(Holder,Key,LockLevel)->
-  link(Holder),
-  case ecomet_db:transaction(fun()->
-    Lock=get_lock(internal,Key,LockLevel,timeout_not_used),
-    Holder!{ecomet_stick_lock,Lock#lock{pid=self()}},
-    wait_release(Key,Holder)
-  end) of
-    {ok,_}->
-      unlink(Holder);
-    {error, not_found}->
-      exit(not_found);
-    {error, {not_found,_Stack}}->
-      exit(not_found);
-    {error, Error}->
-      exit(Error)
-  end.
-wait_release(Key,Holder)->
-  process_flag(trap_exit,true),
-  receive
-  % Finish process
-    release->ok;
-    % Parent finished
-    {'EXIT',Holder,Reason}->exit(Reason);
-    {upgrade,NewLockLevel}->
-      % Use unlink because this process can be killed by timeout
-      Lock=get_lock(internal,Key,NewLockLevel,timeout_not_used),
-      Holder!{ecomet_stick_lock,Lock#lock{pid=self()}},
-      wait_release(Key,Holder)
-  end.
-
-release_lock(Key)->
-  case get(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    % Internal transaction holds locks until commit all parents
-    #state{type=internal}->ok;
-    State->
-      case maps:find(Key,State#state.locks) of
-        {ok,Lock}->release_stick_lock(Lock),
-          put(?TKEY,State#state{locks=maps:remove(Key,State#state.locks)}),
+  case get(?transaction) of
+    #state{ type = External } when is_pid( External )->
+      External ! {rollback, self()},
+      receive
+        {abort, External}->
+          erase(?transaction),
           ok;
-        error->ok
-      end
+        {nested, External}->
+          ok
+      end;
+    #state{ type = internal }->
+      throw( internal_transaction );
+    _->
+      throw(no_transaction)
   end.
-release_stick_lock(#lock{pid=PID})->
-  PID!release.
 
-find_lock(Key)->
-  case get(?TKEY) of
+% Get type of the current transaction
+get_type()->
+  case get(?transaction) of
     undefined->none;
-    #state{locks=Locks}->
-      case maps:find(Key,Locks) of
-        error->none;
-        {ok,#lock{value=Value,level=LockLevel}}->{Value,LockLevel}
-      end
+    #state{ type = internal }-> internal;
+    #state{ type = External } when is_pid(External)-> external
   end.
-
-
-dict_get(Key)->
-  case get(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    #state{dict=Dict}->maps:get(Key,Dict)
-  end.
-dict_get(Key,Default)->
-  case get(?TKEY) of
-    undefined->Default;
-    #state{dict=Dict}->maps:get(Key,Dict,Default)
-  end.
-
-dict_put(KeyValueList) when is_list(KeyValueList)->
-  dict_put(maps:from_list(KeyValueList));
-dict_put(KeyValueMap) when is_map(KeyValueMap)->
-  case get(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    State->
-      Dict=maps:merge(State#state.dict,KeyValueMap),
-      put(?TKEY,State#state{dict=Dict})
-  end.
-
-dict_remove(KeyList)->
-  case get(?TKEY) of
-    undefined->ok;
-    State->
-      Dict=maps:without(KeyList,State#state.dict),
-      put(?TKEY,State#state{dict=Dict})
-  end.
-
-% Put oid to commit queue
-queue_commit(OID)->
-  case get(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    State->
-      NewState=
-        case lists:member(OID,State#state.log) of
-          false->State#state{log=[OID|State#state.log],droplog=[OID|State#state.droplog]};
-          true->State
-        end,
-      put(?TKEY,NewState)
-  end,
-  ok.
-
-apply_commit(OID)->
-  case get(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    State->
-      DropLog=lists:delete(OID,State#state.droplog),
-      put(?TKEY,State#state{droplog=DropLog})
-  end,
-  ok.
 
 % Add fun to execute if transaction committed
 on_commit(Fun) when is_function(Fun,0)->
-  case get(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    State->
-      OnCommits=[Fun|State#state.oncommit],
-      put(?TKEY,State#state{oncommit=OnCommits})
-  end,
-  ok;
+  case get(?transaction) of
+    #state{type = internal, on_commit = OnCommit } = State->
+      put(?transaction,State#state{ on_commit = [Fun|OnCommit] });
+    #state{ type = External} when is_pid(External)->
+      External ! {on_commit, self(), Fun};
+    _->
+      throw(no_transaction)
+  end;
 on_commit(_Invalid)->
-  ?ERROR(not_function).
+  throw( badarg ).
 
-% Add fun to execute if transaction committed
-on_abort(Fun) when is_function(Fun,0)->
-  % TODO
-  case get(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    State->
-      OnCommits=[Fun|State#state.oncommit],
-      put(?TKEY,State#state{oncommit=OnCommits})
-  end,
-  ok;
-on_abort(_Invalid)->
-  ?ERROR(not_function).
+read(DB, Storage, Type, Key, Lock)->
+  case get(?transaction) of
+    #state{ type = internal }->
+      ecomet_db:read( DB, Storage, Type, Key, Lock );
+    #state{ type = External } when is_pid(External)->
+      External ! {read, self(), DB, Storage, Type, Key, Lock},
+      receive
+        {result, External, Result}-> Result
+      end;
+    _->
+      throw(no_transaction)
+  end.
+
+write(DB, Storage, Type, Key, Value, Lock)->
+  case get(?transaction) of
+    #state{ type = internal }->
+      ecomet_db:write( DB, Storage, Type, Key, Value, Lock );
+    #state{ type = External } when is_pid(External)->
+      External ! {write, self(), DB, Storage, Type, Key, Value, Lock},
+      receive
+        {result, External, Result}-> Result
+      end;
+    _->
+      throw(no_transaction)
+  end.
+
+delete(DB, Storage, Type, Key, Lock)->
+  case get(?transaction) of
+    #state{ type = internal }->
+      ecomet_db:delete( DB, Storage, Type, Key, Lock );
+    #state{ type = External } when is_pid(External)->
+      External ! {delete, self(), DB, Storage, Type, Key, Lock},
+      receive
+        {result, External, Result}-> Result
+      end;
+    _->
+      throw(no_transaction)
+  end.
+
+log(OID, Value)->
+  case get(?transaction) of
+    #state{ type = internal, log = Log } = State->
+      Queue =
+        case Log of
+          #{ OID, {_Queue, _} }->
+            _Queue;
+          _->
+            maps:size( Log )
+        end,
+      put(?transaction, State#state{ log = Log#{ OID =>{Queue,Value} }});
+    #state{ type = External } when is_pid( External )->
+      External ! {log, self(), OID, Value};
+    _->
+      throw( no_transaction )
+  end.
+
+%%-----------------------------------------------------------------------
+%% External transaction
+%%-----------------------------------------------------------------------
+external( Owner )->
+  todo.
 
 %%-----------------------------------------------------------------------
 %% Internal helpers

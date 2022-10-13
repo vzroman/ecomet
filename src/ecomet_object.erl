@@ -84,25 +84,6 @@
   on_delete/1
 ]).
 
--define(INTERNAL,#{
-  read=>read,
-  write=>write,
-  delete=>delete,
-  transaction=>internal_sync
-}).
--define(EXTERNAL,#{
-  read=>dirty_read,     % Reading is in dirty mode because it might be performed before the actual transaction starts
-  write=>write,
-  delete=>delete,
-  transaction=>internal_sync
-}).
--define(DIRTY,#{
-  read=>dirty_read,
-  write=>dirty_write,
-  delete=>dirty_delete,
-  transaction=>dirty
-}).
-
 % @edoc handler of ecomet object
 -record(object, {oid, edit, move, map, deleted=false, db}).
 
@@ -115,36 +96,7 @@
 
 -define(ObjectID(PatternID,ObjectID),{PatternID,ObjectID}).
 
--define(TRANSACTION(Fun),
-  case ecomet_transaction:get_type() of
-    _T when _T=:=none;_T=:=dirty->
-      ?LOGDEBUG("start internal transaction"),
-      case ecomet_transaction:internal_sync(Fun) of
-        {ok,_TResult}->_TResult;
-        {error,_TError}->?ERROR(_TError)
-      end;
-    _->
-      ?LOGDEBUG("skip transaction"),
-      Fun()
-  end).
--define(DIRTY_TRANSACTION(Fun),
-  case ecomet_transaction:get_type() of
-    none->
-      case ecomet_transaction:dirty(Fun) of
-        {ok,_TResult}->_TResult;
-        {error,_TError}->?ERROR(_TError)
-      end;
-    _-> Fun()
-  end).
-
--define(TMODE,
-  case ecomet_transaction:get_type() of
-    _T when _T=:=none;_T=:=dirty->?DIRTY;
-    external ->
-      ?EXTERNAL;
-    _->
-      ?INTERNAL
-  end).
+-define(TRANSACTION(Fun), ecomet_transaction:internal(Fun) ).
 
 -define(SERVICE_FIELDS,#{
   <<".oid">>=>fun ecomet_lib:to_oid/1,
