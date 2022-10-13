@@ -30,16 +30,16 @@
 ]).
 
 -define(transaction,?MODULE).
--record(state,{ type, on_commit, log }).
+-record(state,{ type, on_commit, log, owner }).
 
 internal(Fun)->
   case get(?transaction) of
     undefined->
-      put(?transaction, #state{ type = internal, on_commit = [], log = #{} }),
+      put(?transaction, #state{ type = internal, on_commit = [], log = #{}, owner = self() }),
       Result = ecomet_db:transaction(Fun),
       State = erase(?transaction),
       case Result of
-        {ok,_}-> commit( State );
+        {ok,_}-> tcommit( State );
         _-> ignore
       end,
       Result;
@@ -78,12 +78,9 @@ commit()->
     #state{ type = External } when is_pid(External)->
       External ! {commit, self()},
       receive
-        {commit, External}->
+        {result, External, Result}->
           erase(?transaction),
-          ok;
-        {abort, External, Reason}->
-          erase(?transaction),
-          {abort, Reason};
+          Result;
         {nested, External, Result}->
           Result
       end;
@@ -99,7 +96,7 @@ rollback()->
     #state{ type = External } when is_pid( External )->
       External ! {rollback, self()},
       receive
-        {abort, External}->
+        {result, External, _Result}->
           erase(?transaction),
           ok;
         {nested, External}->
@@ -139,6 +136,7 @@ read(DB, Storage, Type, Key, Lock)->
     #state{ type = External } when is_pid(External)->
       External ! {read, self(), DB, Storage, Type, Key, Lock},
       receive
+        {result, External, {abort,_}=Error}-> throw(Error);
         {result, External, Result}-> Result
       end;
     _->
@@ -152,6 +150,7 @@ write(DB, Storage, Type, Key, Value, Lock)->
     #state{ type = External } when is_pid(External)->
       External ! {write, self(), DB, Storage, Type, Key, Value, Lock},
       receive
+        {result, External, {abort,_}=Error}-> throw(Error);
         {result, External, Result}-> Result
       end;
     _->
@@ -165,6 +164,7 @@ delete(DB, Storage, Type, Key, Lock)->
     #state{ type = External } when is_pid(External)->
       External ! {delete, self(), DB, Storage, Type, Key, Lock},
       receive
+        {result, External, {abort,_}=Error}-> throw(Error);
         {result, External, Result}-> Result
       end;
     _->
@@ -192,32 +192,68 @@ log(OID, Value)->
 %% External transaction
 %%-----------------------------------------------------------------------
 external( Owner )->
-  todo.
+  link( Owner ),
+
+  put(?transaction, #state{ type = internal, on_commit = [], log = #{}, owner = Owner }),
+  Result =
+    ecomet_db:transaction(fun()->
+      external_loop( Owner )
+    end),
+
+  unlink(Owner),
+  Owner ! {result, self(), Result},
+
+  State = erase(?transaction),
+  case Result of
+    {ok,_}-> tcommit( State );
+    _-> ignore
+  end.
+
+external_loop( Owner )->
+  receive
+    {internal, Owner, Fun}->
+      Result = ecomet_db:transaction( Fun ),
+      Owner ! {result, self(), Result},
+      external_loop( Owner );
+    {external, Owner}->
+      todo;
+    {commit, Owner}->
+      ok;
+    {rollback, Owner}->
+      throw( rollback );
+    {on_commit, Owner, Fun}->
+      on_commit( Fun ),
+      external_loop( Owner );
+    {read, Owner, DB, Storage, Type, Key, Lock}->
+      Result = read(DB, Storage, Type, Key, Lock ),
+      Owner ! {result, self(), Result},
+      external_loop( Owner );
+    {write, Owner, DB, Storage, Type, Key, Value, Lock}->
+      Result = write(DB, Storage, Type, Key, Value, Lock),
+      Owner ! {result, self(), Result},
+      external_loop( Owner );
+    {delete, Owner, DB, Storage, Type, Key, Lock}->
+      Result = delete(DB, Storage, Type, Key, Lock),
+      Owner ! {result, self(), Result},
+      external_loop( Owner );
+    {log, Owner, OID, Value}->
+      log( OID, Value ),
+      external_loop( Owner );
+    _Unexpected->
+      external_loop( Owner )
+  end.
 
 %%-----------------------------------------------------------------------
 %% Internal helpers
 %%-----------------------------------------------------------------------
-tcommit()->
-  case get(?TKEY) of
-    undefined->?ERROR(no_transaction);
-    % Root transaction
-    #state{parent=none,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits }->
-      Commits = lists:reverse(lists:subtract(Log,DropLog)),
-      CommitLog = run_commit(Commits,Dict,[]),
-      erase(?TKEY),
-      {CommitLog,OnCommits};
-    #state{ dirty=IsDirty, parent = #state{ dirty = IsDirty } }=State->
-      % If the parent and child have the same dirty we merge commits
-      put(?TKEY,merge_commit(State)),
-      {[],[]};
-    #state{parent=Parent,log=Log,droplog = DropLog,dict=Dict,oncommit=OnCommits }->
-      % The parent and the child have different levels of dirty
-      % We perform the commit
-      Commits = lists:reverse(lists:subtract(Log,DropLog)),
-      CommitLog = run_commit(Commits,Dict,[]),
-      put(?TKEY,Parent),
-      {CommitLog,OnCommits}
-  end.
+tcommit( #state{ log = Log, on_commit = OnCommit, owner = Owner })->
+  catch run_log( Log ),
+  [ catch F() || F <- lists:reverse(OnCommit) ].
+
+run_log( Log )->
+  Ordered =
+    lists:usort([{Queue,OID,Value} || {OID,{Queue,Value}} <- maps:to_list( Log ) ]),
+
 
 % Commit changes to storage
 run_commit([OID|Rest],Dict,LogList)->
