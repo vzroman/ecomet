@@ -25,6 +25,7 @@
 -export([
   on_init/0,
   get_subscriptions/1,
+  commit/1,
   on_commit/1
 ]).
 
@@ -395,6 +396,11 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
     5->erlang:hibernate(?MODULE,?FUNCTION_NAME,[ Query ])
   end.
 
+%%------------------------------------------------------------
+%%  Trigger subscriptions
+%%------------------------------------------------------------
+commit( Log )->
+  todo.
 
 on_commit(#ecomet_log{
   object = #{<<".oid">> := OID} = Object,

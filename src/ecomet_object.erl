@@ -45,11 +45,10 @@
 -export([
   create/1,create/2,
   delete/1,
-  open/1,open/2,open/3,
+  open/1,open/2,
   exists/1,
   construct/1,
   edit/2,edit/3,
-  dirty_edit/2,dirty_edit/3,
   copy/2, copy/3,
   read_field/2,read_field/3,read_fields/2,read_fields/3,
   read_all/1,read_all/2,
@@ -96,7 +95,15 @@
 
 -define(ObjectID(PatternID,ObjectID),{PatternID,ObjectID}).
 
--define(TRANSACTION(Fun), ecomet_transaction:internal(Fun) ).
+-define(TRANSACTION(Fun),
+  case ecomet_transaction:get_type() of
+    none ->
+      case ecomet_transaction:internal(Fun) of
+        {ok,_@Result}->_@Result;
+        {abort,_@Reason}->throw(_@Reason)
+      end;
+    _-> Fun()
+  end ).
 
 -define(SERVICE_FIELDS,#{
   <<".oid">>=>fun ecomet_lib:to_oid/1,
@@ -170,7 +177,7 @@ delete(#object{oid=OID}=Object)->
     none->
       % Queue the procedure.
       ?TRANSACTION( fun()->
-        get_lock( write, Object, none ),
+        get_lock( write, Object ),
         save(Object#object{ deleted=true },Fields,on_delete),
         ok
       end );
@@ -180,9 +187,8 @@ delete(#object{oid=OID}=Object)->
   end.
 
 % Open object
-open(OID)->open(OID,none,none).
-open(OID,Lock)->open(OID,Lock,none).
-open(OID,Lock,Timeout)->
+open(OID)->open(OID,none).
+open(OID,Lock)->
   % Build object
   Object=
     case ecomet_transaction:dict_get({OID,object},none) of
@@ -203,7 +209,7 @@ open(OID,Lock,Timeout)->
   % Set lock if requested
   if
     Lock=/=none, Object =/= not_exists->
-      get_lock(Lock,Object,Timeout);
+      get_lock(Lock,Object);
     true->ok
   end,
   Object.
@@ -350,7 +356,7 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
   case ecomet_transaction:dict_get({OID,handler},none) of
     none->
       ?TRANSACTION(fun()->
-        try get_lock(write,Object,none)
+        try get_lock(write,Object)
         catch
           throw:not_found->
             % The key is not found in the storage, check if the object is just created
@@ -374,33 +380,6 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
       end );
     _->
       % If object is under behaviour handlers, just save changes to the dict
-      ecomet_transaction:dict_put([{{OID,fields},NewFields}])
-  end,
-  ok.
-
-% Dirty edit object
-dirty_edit(Object,Fields)->
-  dirty_edit(Object,Fields,#{}).
-dirty_edit(Object,Fields,Params) when is_list(Params)->
-  dirty_edit(Object,Fields,maps:from_list(Params));
-dirty_edit(#object{edit=false},_Fields,_Params)->?ERROR(access_denied);
-dirty_edit(#object{map=Map}=Object,Fields,#{format:=Format}=Params)->
-  ParsedFields= parse_fields(Format,Map,Fields),
-  Params1 = maps:remove(format,Params),
-  dirty_edit(Object,ParsedFields,Params1);
-dirty_edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
-  OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
-
-  NewFields=ecomet_field:merge(Map,OldFields,Fields),
-
-  % Check user rights for moving object
-  check_move( Object, NewFields ),
-
-  case ecomet_transaction:dict_get({OID,handler},none) of
-    none->
-      ?DIRTY_TRANSACTION(fun()->save(Object,NewFields,on_edit) end );
-    _->
-      % If object is under behaviour handlers, just save changes to dict
       ecomet_transaction:dict_put([{{OID,fields},NewFields}])
   end,
   ok.
@@ -547,7 +526,12 @@ get_behaviours(#object{map=Map})->
 % 2. If object is not locked, then it's dirty read. We can use cache, it may be as heavy as real lookup, but next dirty
 %		lookup (read next field value) will be fast
 load_storage(OID,Type)->
-  % Check transaction storage first. If object is locked it may be there
+  load_storage( ecomet_transaction:get_type(), OID, Type ).
+load_storage(none, OID, Type)->
+  % No transaction
+  todo;
+load_storage(_IsTransaction, OID, Type)->
+  % Check transaction storage first
   Storage =
     case ecomet_transaction:dict_get({OID,Type},undefined) of
       % Storage not loaded yet
@@ -889,7 +873,7 @@ new_id(_FolderID,?ObjectID(_,?PATTERN_PATTERN))->
   {?PATTERN_PATTERN,Id};
 new_id(FolderID,?ObjectID(_,PatternID))->
 
-  ID= ecomet_schema:local_increment({id,PatternID}),
+  ID= ecomet_id:new({pattern,PatternID}),
 
   DB = ecomet_folder:get_db_id( FolderID ),
 
@@ -941,24 +925,20 @@ get_pattern_oid(ServiceID)->
   ?ObjectID(?PATTERN_PATTERN,PatternID).
 
 % Acquire lock on object
-get_lock(Lock,#object{oid=OID,map=Map}=Object,Timeout)->
+get_lock(Lock,#object{oid=OID,map=Map}=Object)->
   % Define the key
   DB = get_db_name(OID),
   Type=ecomet_pattern:get_storage(Map),
-  Key = ecomet_transaction:lock_key(DB,?DATA,Type,OID),
-
-  % Set lock on main backtag storage
-  Storage = ecomet_transaction:lock(Key,Lock,Timeout),
+  Storage =
+    case ecomet_db:read(DB, ?DATA, Type, OID, Lock ) of
+      not_found-> none;
+      _Storage-> _Storage
+    end,
 
   ecomet_transaction:dict_put([
     {{OID,object},Object},
     {{OID,Type},Storage}
   ]).
-
-get_lock_key(OID,Map)->
-  DB = get_db_name(OID),
-  Type=ecomet_pattern:get_storage(Map),
-  ecomet_transaction:lock_key(DB,?DATA,Type,OID).
 
 % Fast object open, only for system dirty read
 construct(OID)->
@@ -998,7 +978,6 @@ save(#object{oid=OID,map=Map}=Object,Fields,Handler)->
     {{OID,fields},Fields},	% Project has next changes (may by empty)
     {{OID,handler},Handler}	% Object is under the Handler
   ]),
-  ecomet_transaction:queue_commit(OID),
 
   % Run behaviours
   [ case erlang:function_exported(Behaviour,Handler,1) of
@@ -1012,7 +991,7 @@ save(#object{oid=OID,map=Map}=Object,Fields,Handler)->
   ecomet_transaction:dict_remove([{OID,handler}]),
 
   % Confirm the commit
-  ecomet_transaction:apply_commit(OID),
+  ecomet_transaction:log(OID,true),
   % The result
   ok.
 

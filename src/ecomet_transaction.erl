@@ -29,18 +29,31 @@
   rollback/0
 ]).
 
+
+-export([
+  log/2,
+  dict_put/1,
+  dict_get/1,dict_get/2,
+  dict_remove/1
+]).
+
 -define(transaction,?MODULE).
--record(state,{ type, on_commit, log, owner }).
+-record(state,{ type, on_commit, log, dict, owner }).
 
 internal(Fun)->
   case get(?transaction) of
     undefined->
-      put(?transaction, #state{ type = internal, on_commit = [], log = #{}, owner = self() }),
-      Result = ecomet_db:transaction(Fun),
+      put(?transaction, #state{ type = internal, on_commit = [], log = #{}, dict = #{}, owner = self() }),
+      Result = ecomet_db:transaction(fun()->
+        Res = Fun(),
+        #state{log = Log,dict = Dict, owner = Owner} = get(?transaction),
+        ecomet_object:on_commit(Log, Dict, Owner),
+        Res
+      end),
       State = erase(?transaction),
       case Result of
         {ok,_}-> tcommit( State );
-        _-> ignore
+        _-> abort
       end,
       Result;
     #state{ type = internal } = State->
@@ -49,12 +62,13 @@ internal(Fun)->
         {abort,_}->
           put(?transaction, State);
         _->
-          ignore
+          ok
       end,
       Result;
     #state{ type = External } when is_pid( External )->
       External ! {internal, self(), Fun},
       receive
+        {result, External, {abort,_}=Error}-> throw(Error);
         {result, External, Result}-> Result
       end
   end.
@@ -66,10 +80,8 @@ start()->
       Self = self(),
       External = ecomet_user:spawn_session(fun()-> external( Self ) end),
       put(?transaction,#state{ type = External });
-    #state{type = External} when is_pid(External)->
-      External ! {external, self()};
     _->
-      throw(nested_external_transaction)
+      throw(nested_transaction)
   end.
 
 % Commit transaction
@@ -80,8 +92,6 @@ commit()->
       receive
         {result, External, Result}->
           erase(?transaction),
-          Result;
-        {nested, External, Result}->
           Result
       end;
     #state{type = internal}->
@@ -98,8 +108,6 @@ rollback()->
       receive
         {result, External, _Result}->
           erase(?transaction),
-          ok;
-        {nested, External}->
           ok
       end;
     #state{ type = internal }->
@@ -188,26 +196,74 @@ log(OID, Value)->
       throw( no_transaction )
   end.
 
+
+dict_put(KeyValueList) when is_list(KeyValueList)->
+  dict_put(maps:from_list(KeyValueList));
+dict_put(KeyValueMap) when is_map(KeyValueMap)->
+  case get(?transaction) of
+    #state{ type = internal, dict = Dict0 } = State->
+      Dict=maps:merge(Dict0,KeyValueMap),
+      put(?transaction, State#state{ dict = Dict});
+    #state{ type = External } when is_pid( External )->
+      External ! {dict_put, self(), KeyValueMap};
+    _->
+      throw( no_transaction )
+  end.
+
+dict_get(Key)->
+  case get(?transaction) of
+    #state{ type = internal, dict = Dict }->
+      maps:get(Key,Dict);
+    #state{ type = External } when is_pid( External )->
+      External ! {dict_get, self(), Key},
+      receive
+        {result, External, {abort,_}=Error}-> throw(Error);
+        {result, External, Result}-> Result
+      end;
+    _->
+      throw( no_transaction )
+  end.
+
+dict_get(Key,Default)->
+  case get(?transaction) of
+    #state{ type = internal, dict = Dict }->
+      maps:get(Key,Dict, Default);
+    #state{ type = External } when is_pid( External )->
+      External ! {dict_get, self(), Key, Default},
+      receive
+        {result, External, {abort,_}=Error}-> throw(Error);
+        {result, External, Result}-> Result
+      end;
+    _->
+      Default
+  end.
+
+dict_remove(KeyList) when is_list(KeyList)->
+  case get(?transaction) of
+    #state{ type = internal, dict = Dict0 }=State->
+      Dict=maps:without(KeyList,Dict0),
+      put(?transaction, State#state{ dict = Dict});
+    #state{ type = External } when is_pid( External )->
+      External ! {dict_remove, self(), KeyList};
+    _->
+      ok
+  end.
+
 %%-----------------------------------------------------------------------
 %% External transaction
 %%-----------------------------------------------------------------------
 external( Owner )->
   link( Owner ),
 
-  put(?transaction, #state{ type = internal, on_commit = [], log = #{}, owner = Owner }),
-  Result =
-    ecomet_db:transaction(fun()->
-      external_loop( Owner )
-    end),
+  Result = internal(fun()->
+    State = get(?transaction),
+    put(?transaction,State#state{owner = Owner}),
+    external_loop( Owner )
+  end),
 
   unlink(Owner),
-  Owner ! {result, self(), Result},
+  catch Owner ! {result, self(), Result}.
 
-  State = erase(?transaction),
-  case Result of
-    {ok,_}-> tcommit( State );
-    _-> ignore
-  end.
 
 external_loop( Owner )->
   receive
@@ -215,12 +271,6 @@ external_loop( Owner )->
       Result = ecomet_db:transaction( Fun ),
       Owner ! {result, self(), Result},
       external_loop( Owner );
-    {external, Owner}->
-      todo;
-    {commit, Owner}->
-      ok;
-    {rollback, Owner}->
-      throw( rollback );
     {on_commit, Owner, Fun}->
       on_commit( Fun ),
       external_loop( Owner );
@@ -239,6 +289,22 @@ external_loop( Owner )->
     {log, Owner, OID, Value}->
       log( OID, Value ),
       external_loop( Owner );
+    {dict_put, Owner, KeyValueMap}->
+      dict_put( KeyValueMap ),
+      external_loop( Owner );
+    {dict_get, Owner, Key}->
+      Owner ! {result,self(), dict_get( Key )},
+      external_loop( Owner );
+    {dict_get, Owner, Key, Default}->
+      Owner ! {result,self(), dict_get( Key, Default )},
+      external_loop( Owner );
+    {dict_remove, Owner, KeyList}->
+      dict_remove( KeyList ),
+      external_loop( Owner );
+    {commit, Owner}->
+      ok;
+    {rollback, Owner}->
+      throw( rollback );
     _Unexpected->
       external_loop( Owner )
   end.
@@ -246,67 +312,7 @@ external_loop( Owner )->
 %%-----------------------------------------------------------------------
 %% Internal helpers
 %%-----------------------------------------------------------------------
-tcommit( #state{ log = Log, on_commit = OnCommit, owner = Owner })->
-  catch run_log( Log ),
+tcommit( #state{ log = Log, on_commit = OnCommit })->
+  catch ecomet_subscription:commit( Log ),
   [ catch F() || F <- lists:reverse(OnCommit) ].
 
-run_log( Log )->
-  Ordered =
-    lists:usort([{Queue,OID,Value} || {OID,{Queue,Value}} <- maps:to_list( Log ) ]),
-
-
-% Commit changes to storage
-run_commit([OID|Rest],Dict,LogList)->
-  run_commit(Rest,Dict,[ecomet_object:commit(OID,Dict)|LogList]);
-run_commit([],_Dict,Log)->lists:reverse(Log).
-
-release_locks([{_Key,Lock}|Rest])->
-  release_stick_lock(Lock),
-  release_locks(Rest);
-release_locks([])->ok.
-
-% Merge results of the transaction to the parent
-merge_commit(#state{
-  locks=Locks,
-  dict=Dict,
-  log=Log,
-  droplog=DropLog,
-  oncommit=OnCommits,
-  parent=Parent
-})->
-  ClearedLog=lists:subtract(Log,DropLog),
-  MergedLog=merge_log(ClearedLog,Parent#state.log),
-  Parent#state{
-    locks=Locks,
-    dict=Dict,
-    log=MergedLog,
-    droplog=lists:subtract(Parent#state.droplog,ClearedLog),
-    oncommit=[OnCommits|Parent#state.oncommit]
-  }.
-
-merge_log([OID|Rest],Parentlog)->
-  Merged=
-    case lists:member(OID,Parentlog) of
-      false->[OID|Parentlog];
-      true->Parentlog
-    end,
-  merge_log(Rest,Merged);
-merge_log([],Parentlog)->Parentlog.
-
-on_commit(Log,OnCommits)->
-  run_notifications([L#ecomet_log{self = self()} || L <- Log]),
-  run_oncommits(lists:reverse(OnCommits)).
-
-% Run notifications
-run_notifications(Logs)->
-  ecomet_router:on_commit(Logs).
-
-% Execute fun
-run_oncommits([F|Rest]) when is_function(F)->
-  try F() catch _:_->ok end,
-  run_oncommits(Rest);
-% Execute brunch (result of sub transaction)
-run_oncommits([Branch|Rest]) when is_list(Branch)->
-  run_oncommits(lists:reverse(Branch)),
-  run_oncommits(Rest);
-run_oncommits([])->ok.

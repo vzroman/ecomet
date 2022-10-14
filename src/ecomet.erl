@@ -70,12 +70,10 @@
 -export([
   is_transaction/0,
   transaction/1,
-  transaction_sync/1,
   start_transaction/0,
   commit_transaction/0,
   rollback_transaction/0,
-  on_commit/1,
-  on_abort/1
+  on_commit/1
 ]).
 
 %%=================================================================
@@ -306,15 +304,14 @@ run_query(ParsedQuery)->
 is_transaction()->
   case ecomet_transaction:get_type() of
     none->false;
-    dirty->false;
     _->true
   end.
 
 transaction(Fun)->
-  ecomet_transaction:internal(Fun).
-
-transaction_sync(Fun)->
-  ecomet_transaction:internal_sync(Fun).
+  case ecomet_transaction:internal(Fun) of
+    {abort,Reason}->{error,Reason};
+    Ok->Ok
+  end.
 
 start_transaction()->
   ecomet_transaction:start().
@@ -328,8 +325,6 @@ rollback_transaction()->
 on_commit(Fun)->
   ecomet_transaction:on_commit(Fun).
 
-on_abort(Fun)->
-  ecomet_transaction:on_abort(Fun).
 
 %%=================================================================
 %%	Identification API
