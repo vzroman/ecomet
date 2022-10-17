@@ -158,7 +158,7 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
 
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
-        prepare_create(OID, Fields2 ,Object),
+        prepare_create(Fields2 ,Object),
         save(Object, on_create)
       end),
       Object;
@@ -327,46 +327,23 @@ edit(#object{map=Map}=Object,Fields,#{format:=Format}=Params)->
   ParsedFields= parse_fields(Format,Map,Fields),
   Params1 = maps:remove(format,Params),
   edit(Object,ParsedFields,Params1);
-edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
+edit(#object{oid = OID, map=Map}=Object,InFields,_Params)->
 
-  OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
-
-  NewFields=ecomet_field:merge(Map,OldFields,Fields),
-
+  Fields=ecomet_field:merge(Map,#{},InFields),
   % Check user rights for moving object
-  check_move( Object, NewFields ),
+  check_move( Object, Fields ),
 
   case ecomet_transaction:dict_get({OID,handler},none) of
-    none->
+    none ->
       ?TRANSACTION(fun()->
-        try get_lock(write,Object)
-        catch
-          throw:not_found->
-            % The key is not found in the storage, check if the object is just created
-            % and the transactions is not committed yet
-            case ecomet_transaction:dict_get({OID,object},none) of
-              none ->
-                % The object is not in the transaction dictionary
-                ?ERROR( not_found );
-              _Object->
-                % The object is just created and not committed yet, we can safely edit it
-                % without locking
-                ok
-            end;
-          % Preserve other exceptions because they might be handled by the mnesia
-          % https://stackoverflow.com/questions/8099261/unintentionally-intercepting-mnesias-transactional-retries-with-try-catch-resul
-          throw:Other -> throw( Other );
-          error:Other -> error( Other );
-          exit:Other -> exit( Other )
-        end,
-        save(Object,NewFields,on_edit)
-      end );
+        prepare_edit(Object, Fields),
+        save(Object, on_edit)
+      end);
     _->
       % If object is under behaviour handlers, just save changes
-      ecomet_transaction:dict_put([{{OID,fields},NewFields}])
+      prepare_edit(Object, Fields)
   end,
   ok.
-
 
 copy(Object, Replace)->
   Original = read_all(Object),
@@ -891,7 +868,7 @@ construct(OID)->
   DB = get_db_name(OID),
   #object{oid=OID,edit=false,move=false,map=Map,db=DB}.
 
-prepare_create(OID,Fields, #object{map = Map, db = DB})->
+prepare_create(Fields, #object{oid = OID, map = Map, db = DB})->
   ByTypes =
     maps:fold(fun(F,V,Acc)->
       {ok,T} = ecomet_field:get_storage( Map, F ),
@@ -905,6 +882,30 @@ prepare_create(OID,Fields, #object{map = Map, db = DB})->
     % Avoid looking up for rollback values
     ok = ecomet_transaction:on_abort( DB, ?DATA, Type, OID, delete )
   end, ByTypes).
+
+prepare_edit(Fields, #object{oid = OID, map = Map, db = DB})->
+  Updates =
+    maps:fold(fun(F,V,Acc)->
+      {ok,T} = ecomet_field:get_storage( Map, F ),
+      TypeData =
+        case Acc of
+          #{ T := #{fields := TFields} =TAcc }->
+            TAcc#{ fields => TFields#{ F => V }};
+          _->
+            case ecomet_transaction:read(DB, ?DATA, T, OID, _Lock=read ) of
+              #{fields := TFields} = Storage ->
+                Storage#{ fields => TFields#{ F => V }};
+              _->
+                #{ fields => #{F => V}}
+            end
+        end,
+      Acc#{ T => TypeData}
+    end,#{}, Fields),
+
+  % Transaction write
+  maps:map(fun(Type,Data)->
+    ok = ecomet_transaction:write( DB, ?DATA, Type, OID, Data, _Lock = none)
+  end, Updates).
 
 prepare_delete(OID, #object{map = Map, db = DB})->
   [ ok = ecomet_transaction:delete( DB, ?DATA, T, OID, _Lock = none ) || T <- ecomet_pattern:get_storage_types( Map ) ],
