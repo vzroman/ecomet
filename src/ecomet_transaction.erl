@@ -31,6 +31,11 @@
 
 
 -export([
+  read/5,
+  write/6,
+  delete/5,
+  on_abort/5,
+  changes/4,
   log/2,
   dict_put/1,
   dict_get/1,dict_get/2,
@@ -156,11 +161,7 @@ write(DB, Storage, Type, Key, Value, Lock)->
     #state{ type = internal }->
       ecomet_db:write( DB, Storage, Type, Key, Value, Lock );
     #state{ type = External } when is_pid(External)->
-      External ! {write, self(), DB, Storage, Type, Key, Value, Lock},
-      receive
-        {result, External, {abort,_}=Error}-> throw(Error);
-        {result, External, Result}-> Result
-      end;
+      External ! {write, self(), DB, Storage, Type, Key, Value, Lock};
     _->
       throw(no_transaction)
   end.
@@ -170,7 +171,27 @@ delete(DB, Storage, Type, Key, Lock)->
     #state{ type = internal }->
       ecomet_db:delete( DB, Storage, Type, Key, Lock );
     #state{ type = External } when is_pid(External)->
-      External ! {delete, self(), DB, Storage, Type, Key, Lock},
+      External ! {delete, self(), DB, Storage, Type, Key, Lock};
+    _->
+      throw(no_transaction)
+  end.
+
+on_abort( DB, Storage, Type, Key, Value )->
+  case get(?transaction) of
+    #state{ type = internal }->
+      ecomet_db:on_abort( DB, Storage, Type, Key, Value );
+    #state{ type = External } when is_pid(External)->
+      External ! {on_abort, self(), DB, Storage, Type, Key, Value};
+    _->
+      throw(no_transaction)
+  end.
+
+changes( DB, Storage, Type, Key )->
+  case get(?transaction) of
+    #state{ type = internal }->
+      ecomet_db:changes( DB, Storage, Type, Key );
+    #state{ type = External } when is_pid(External)->
+      External ! {changes, self(), DB, Storage, Type, Key},
       receive
         {result, External, {abort,_}=Error}-> throw(Error);
         {result, External, Result}-> Result
@@ -279,11 +300,16 @@ external_loop( Owner )->
       Owner ! {result, self(), Result},
       external_loop( Owner );
     {write, Owner, DB, Storage, Type, Key, Value, Lock}->
-      Result = write(DB, Storage, Type, Key, Value, Lock),
-      Owner ! {result, self(), Result},
+      ok = write(DB, Storage, Type, Key, Value, Lock),
       external_loop( Owner );
     {delete, Owner, DB, Storage, Type, Key, Lock}->
-      Result = delete(DB, Storage, Type, Key, Lock),
+      ok = delete(DB, Storage, Type, Key, Lock),
+      external_loop( Owner );
+    {on_abort, Owner, DB, Storage, Type, Key, Value}->
+      ok = on_abort(DB, Storage, Type, Key, Value),
+      external_loop( Owner );
+    {changes, Owner, DB, Storage, Type, Key}->
+      Result = changes(DB, Storage, Type, Key ),
       Owner ! {result, self(), Result},
       external_loop( Owner );
     {log, Owner, OID, Value}->

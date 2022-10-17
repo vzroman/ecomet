@@ -84,7 +84,7 @@
 ]).
 
 % @edoc handler of ecomet object
--record(object, {oid, edit, move, map, deleted=false, db}).
+-record(object, {oid, edit, move, map, db}).
 
 -type object_handler() :: #object{}.
 -export_type([object_handler/0]).
@@ -158,9 +158,8 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
 
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
-        % Put empty storages to dict. Trick for no real lookups
-        put_empty_storages(OID,Map),
-        save(Object,Fields2,on_create)
+        prepare_create(OID, Fields2 ,Object),
+        save(Object, on_create)
       end),
       Object;
     _->?ERROR(access_denied)
@@ -172,13 +171,13 @@ delete(#object{move=false})->?ERROR(access_denied);
 delete(#object{oid=OID}=Object)->
 
   % Check if the object is under on_create or on_edit procedure at the moment
-  Fields=ecomet_transaction:dict_get({OID,fields},#{}),
   case ecomet_transaction:dict_get({OID,handler},none) of
     none->
       % Queue the procedure.
       ?TRANSACTION( fun()->
         get_lock( write, Object ),
-        save(Object#object{ deleted=true },Fields,on_delete),
+        prepare_delete(OID ,Object),
+        save(Object, on_delete),
         ok
       end );
     _->
@@ -189,6 +188,17 @@ delete(#object{oid=OID}=Object)->
 % Open object
 open(OID)->open(OID,none).
 open(OID,Lock)->
+  open(OID, Lock, ecomet_transaction:get_type() =/= none).
+open(OID, _Lock = none, _IsTransaction = false)->
+  Object=construct(OID),
+  case check_rights(Object) of
+    none->throw(access_denied);
+    {read,CanMove}->New#object{edit = false, move = CanMove};
+    {write,CanMove}->New#object{edit = true, move = CanMove };
+    not_exists->not_exists
+  end;
+open(OID,Lock)->
+
   % Build object
   Object=
     case ecomet_transaction:dict_get({OID,object},none) of
@@ -346,6 +356,7 @@ edit(#object{map=Map}=Object,Fields,#{format:=Format}=Params)->
   Params1 = maps:remove(format,Params),
   edit(Object,ParsedFields,Params1);
 edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
+
   OldFields=ecomet_transaction:dict_get({OID,fields},#{}),
 
   NewFields=ecomet_field:merge(Map,OldFields,Fields),
@@ -379,7 +390,7 @@ edit(#object{oid=OID,map=Map}=Object,Fields,_Params)->
         save(Object,NewFields,on_edit)
       end );
     _->
-      % If object is under behaviour handlers, just save changes to the dict
+      % If object is under behaviour handlers, just save changes
       ecomet_transaction:dict_put([{{OID,fields},NewFields}])
   end,
   ok.
@@ -925,20 +936,15 @@ get_pattern_oid(ServiceID)->
   ?ObjectID(?PATTERN_PATTERN,PatternID).
 
 % Acquire lock on object
-get_lock(Lock,#object{oid=OID,map=Map}=Object)->
+get_lock(Lock,#object{oid=OID,map=Map})->
   % Define the key
   DB = get_db_name(OID),
   Type=ecomet_pattern:get_storage(Map),
-  Storage =
-    case ecomet_db:read(DB, ?DATA, Type, OID, Lock ) of
-      not_found-> none;
-      _Storage-> _Storage
-    end,
+  case ecomet_db:read(DB, ?DATA, Type, OID, Lock ) of
+    not_found-> none;
+    Storage-> Storage
+  end.
 
-  ecomet_transaction:dict_put([
-    {{OID,object},Object},
-    {{OID,Type},Storage}
-  ]).
 
 % Fast object open, only for system dirty read
 construct(OID)->
@@ -947,9 +953,25 @@ construct(OID)->
   DB = get_db_name(OID),
   #object{oid=OID,edit=false,move=false,map=Map,db=DB}.
 
-put_empty_storages(OID,Map)->
-  StorageTypes = [{{OID,Storage},none} || Storage<-ecomet_pattern:get_storage_types(Map) ],
-  ecomet_transaction:dict_put(StorageTypes).
+prepare_create(OID,Fields, #object{map = Map, db = DB})->
+  ByTypes =
+    maps:fold(fun(F,V,Acc)->
+      {ok,T} = ecomet_field:get_storage( Map, F ),
+      TAcc = maps:get(T, Acc, #{}),
+      Acc#{ T=> TAcc#{ F => V } }
+    end,#{}, Fields),
+
+  % Transaction write
+  maps:map(fun(Type,Data)->
+    ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => Data }, _Lock = none),
+    % Avoid looking up for rollback values
+    ok = ecomet_transaction:on_abort( DB, ?DATA, Type, OID, delete )
+  end, ByTypes).
+
+prepare_delete(OID, #object{map = Map, db = DB})->
+  [ ok = ecomet_transaction:delete( DB, ?DATA, T, OID, _Lock = none ) || T <- ecomet_pattern:get_storage_types( Map ) ],
+  ok.
+
 
 % Backtag handlers for commit routine
 load_storage_types(#object{map=Map} = Object,Dict)->
@@ -970,12 +992,10 @@ load_storage_types(#object{oid=OID,db=DB},Dict, Types)->
   maps:from_list(List).
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet
-save(#object{oid=OID,map=Map}=Object,Fields,Handler)->
+save(#object{oid=OID,map=Map}=Object, Handler)->
 
   % All operations within transaction. No changes applied if something is wrong
   ecomet_transaction:dict_put([
-    {{OID,object},Object},	% Object is opened (created)
-    {{OID,fields},Fields},	% Project has next changes (may by empty)
     {{OID,handler},Handler}	% Object is under the Handler
   ]),
 
@@ -992,6 +1012,7 @@ save(#object{oid=OID,map=Map}=Object,Fields,Handler)->
 
   % Confirm the commit
   ecomet_transaction:log(OID,true),
+
   % The result
   ok.
 

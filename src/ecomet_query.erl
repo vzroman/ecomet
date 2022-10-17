@@ -77,9 +77,9 @@
   case ecomet_transaction:get_type() of
     _T when _T=:=none;_T=:=dirty->
       ?LOGDEBUG("start internal transaction"),
-      case ecomet_transaction:internal_sync(Fun) of
+      case ecomet_transaction:internal(Fun) of
         {ok,_TResult}->_TResult;
-        {error,_TError}->?ERROR(_TError)
+        {abort,_TError}->?ERROR(_TError)
       end;
     _->
       ?LOGDEBUG("skip transaction"),
@@ -151,7 +151,7 @@ run_statement({transaction,Statements},Acc)->
     lists:foldl(fun run_statement/2,Acc,Statements)
   end) of
     {ok,Results}->Results;
-    {error,Error}->
+    {abort,Error}->
       Results=[{error,Error}||_<-lists:seq(1,length(Statements))],
       Results++Acc
   end.
@@ -964,14 +964,11 @@ read_up(none, get)->
   end;
 read_up(Lock, _Any)->
   fun(OID,Fields)->
-    Object = ecomet_object:open(OID,Lock),
-    if
-      Object =/= not_exists ->
-        object_map(Object,ecomet_object:read_fields(Object,Fields));
-      true ->
-        % TODO. The object doesn't exist.
-        % Currently we return the empty object.
-        % All its fields are none
+    try
+      Object = ecomet_object:open(OID,Lock),
+      object_map(Object,ecomet_object:read_fields(Object,Fields))
+    catch
+      _:not_exists->
         maps:merge(maps:from_list([{F,none}||F<-Fields]),#{
           <<".oid">>=> OID,
           object=> not_exists

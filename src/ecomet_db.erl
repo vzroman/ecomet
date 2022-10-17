@@ -66,7 +66,10 @@
   read/4, read/5,
   write/5, write/6,
   delete/4, delete/5,
-  transaction/1
+  transaction/1,
+
+  changes/4,
+  on_abort/5
 ]).
 
 %%=================================================================
@@ -328,6 +331,12 @@ delete(DB, Storage, Type, Key, Lock)->
 
 transaction(Fun)->
   zaya:transaction(Fun).
+
+changes(DB, Storage, Type, Key)->
+  zaya:changes(DB, [#key{type = Type, storage = Storage, key = Key}] ).
+
+on_abort(DB, Storage, Type, Key, Value)->
+  zaya:on_abort(DB, [{#key{type = Type, storage = Storage, key = Key}, Value}] ).
 
 %%=================================================================
 %%	SERVICE API
