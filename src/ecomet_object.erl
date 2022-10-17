@@ -186,43 +186,34 @@ delete(#object{oid=OID}=Object)->
   end.
 
 % Open object
-open(OID)->open(OID,none).
-open(OID,Lock)->
-  open(OID, Lock, ecomet_transaction:get_type() =/= none).
-open(OID, _Lock = none, _IsTransaction = false)->
+open(OID)->open(OID, _Lock = none).
+open(OID, Lock)->
+  IsTransaction = ecomet_transaction:get_type() =/= none,
+  open(OID, Lock, IsTransaction).
+open(OID, Lock, _IsTransaction = false)->
+  if
+    Lock =/= none-> throw(no_transaction);
+    true -> ok
+  end,
   Object=construct(OID),
   case check_rights(Object) of
+    {read,CanMove}->Object#object{edit = false, move = CanMove};
+    {write,CanMove}->Object#object{edit = true, move = CanMove };
     none->throw(access_denied);
-    {read,CanMove}->New#object{edit = false, move = CanMove};
-    {write,CanMove}->New#object{edit = true, move = CanMove };
-    not_exists->not_exists
+    not_exists->throw(not_exists)
   end;
-open(OID,Lock)->
-
-  % Build object
-  Object=
-    case ecomet_transaction:dict_get({OID,object},none) of
-      % No object in transaction dict yet, build new
-      none->
-        New=construct(OID),
-        case check_rights(New) of
-          none->?ERROR(access_denied);
-          {read,CanMove}->New#object{edit = false, move = CanMove};
-          {write,CanMove}->New#object{edit = true, move = CanMove };
-          not_exists->not_exists
-        end;
-      % Object is deleted
-      #object{deleted=true}->?ERROR(object_deleted);
-      % We have object in transaction dict, take it
-      FoundObject->FoundObject
-    end,
-  % Set lock if requested
-  if
-    Lock=/=none, Object =/= not_exists->
-      get_lock(Lock,Object);
-    true->ok
-  end,
-  Object.
+open(OID,Lock,_IsTransaction = true)->
+  Object = construct(OID),
+  case get_lock(Lock, Object) of
+    none-> throw(not_exists);
+    _->
+      case check_rights(Object) of
+        {read,CanMove}->Object#object{edit = false, move = CanMove};
+        {write,CanMove}->Object#object{edit = true, move = CanMove };
+        none->throw(access_denied);
+        not_exists->throw(not_exists)
+      end
+  end.
 
 exists(OID)->
   case try open(OID,none) catch _:_-> error end of
@@ -230,20 +221,13 @@ exists(OID)->
     _-> true
   end.
 
-% Read field value
-read_field(#object{oid=OID,map=Map}=Object,Field)->
+read_field(#object{oid = OID, map = Map} = Object, Field)->
   case ?SERVICE_FIELDS of
     #{Field:=Fun}->{ok,Fun(Object)};
     _->
-      % Check if we have project with changes in transaction dict
-      Fields=ecomet_transaction:dict_get({OID,fields},#{}),
-      case maps:find(Field,Fields) of
-        {ok,Value}->
-          {ok,Value};
-        error->
-          ecomet_field:get_value(Map,OID,Field)
-      end
+      ecomet_field:get_value(Map,OID,Field)
   end.
+
 read_field(Object,Field,Params) when is_list(Params)->
   read_field(Object,Field,maps:from_list(Params));
 read_field(Object,Field,Params) when is_map(Params)->
@@ -269,11 +253,7 @@ read_fields(Object,Fields,Params) when is_list(Params)->
   read_fields(Object,Fields,maps:from_list(Params));
 read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Fields),is_map(Params)->
 
-  % Check if we have project with changes in transaction dict
-  Project=ecomet_transaction:dict_get({OID,fields},#{}),
-
   % Load storage for fields absent in the project
-  ToLoad = maps:merge(Project,?SERVICE_FIELDS),
   Storage=
     maps:fold(fun(F,_,Acc)->
       case ecomet_field:get_storage(Map,F) of
@@ -290,7 +270,7 @@ read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Field
           % undefined_field
           Acc
       end
-    end,#{},maps:without(maps:keys(ToLoad),Fields)),
+    end,#{},maps:without(maps:keys(?SERVICE_FIELDS),Fields)),
 
   Formatter=
     case Params of
@@ -306,22 +286,13 @@ read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Field
       _->
         % The real field
         Value=
-          case Project of
-            #{ Name:= none }->
-              Default;
-            #{ Name:= New }->
-              % The field has changes in the transaction
-              New;
+          case ecomet_field:get_storage(Map,Name) of
+            {ok,S}->
+              #{S:=Values} = Storage,
+              maps:get(Name,Values,Default);
             _->
-              % Look up the field in the storage
-              case ecomet_field:get_storage(Map,Name) of
-                {ok,S}->
-                  #{S:=Values} = Storage,
-                  maps:get(Name,Values,Default);
-                _->
-                  % undefined_field
-                  undefined_field
-              end
+              % undefined_field
+              undefined_field
           end,
         if
           Value=/=undefined_field ->
@@ -348,9 +319,10 @@ read_all(#object{map=Map,oid = OID}=Object,Params) when is_map(Params)->
 % Edit object
 edit(Object,Fields)->
   edit(Object,Fields,#{}).
+edit(#object{edit=false},_Fields,_Params)->
+  throw(access_denied);
 edit(Object,Fields,Params) when is_list(Params)->
   edit(Object,Fields,maps:from_list(Params));
-edit(#object{edit=false},_Fields,_Params)->?ERROR(access_denied);
 edit(#object{map=Map}=Object,Fields,#{format:=Format}=Params)->
   ParsedFields= parse_fields(Format,Map,Fields),
   Params1 = maps:remove(format,Params),
@@ -532,54 +504,20 @@ get_behaviours(#object{map=Map})->
 %%=================================================================
 %%	Service API
 %%=================================================================
-% Load fields storage for object. We try to minimize real storage lookups.
-% 1. If object is locked, we save loaded storage to transaction dictionary. Next time we will retrieve it from there
-% 2. If object is not locked, then it's dirty read. We can use cache, it may be as heavy as real lookup, but next dirty
-%		lookup (read next field value) will be fast
 load_storage(OID,Type)->
-  load_storage( ecomet_transaction:get_type(), OID, Type ).
-load_storage(none, OID, Type)->
-  % No transaction
-  todo;
-load_storage(_IsTransaction, OID, Type)->
-  % Check transaction storage first
-  Storage =
-    case ecomet_transaction:dict_get({OID,Type},undefined) of
-      % Storage not loaded yet
-      undefined->
-        % Check lock on the object, if no, then it is dirty operation and we can use cache to boost reading
-        { UseCache, DB }=
-          case ecomet_transaction:dict_get({OID,object},none) of
-            % Object can not be locked, if it is not contained in the dict
-            none->{ true, get_db_name(OID) };
-            % Check lock
-            #object{map=Map,db= DBName }->
-              LockKey=get_lock_key(OID,Map),
-              case ecomet_transaction:find_lock(LockKey) of
-                % No lock, boost by cache
-                none->{ true, DBName };
-                % Strict reading
-                _->{ false, DBName }
-              end
-          end,
-        #{ read:=Read } =?TMODE,
-        LoadedStorage=
-          case ecomet_db:Read(DB,?DATA,Type,OID) of
-            not_found->none;
-            Loaded->Loaded
-          end,
-        % If object is locked (we do not use cache), then save storage to transaction dict
-        if
-          UseCache->ok;
-          true-> ecomet_transaction:dict_put(#{ {OID,Type} =>LoadedStorage })
-        end,
-        LoadedStorage;
-      % Storage is already loaded
-      TStorage-> TStorage
-    end,
-  if
-    is_map(Storage) -> maps:get(fields,Storage) ;
-    true -> none
+  IsTransaction = ecomet_transaction:get_type() =/= none,
+  load_storage( IsTransaction, OID, Type ).
+load_storage(_IsTransaction = false, OID, Type)->
+  DB = get_db_name( OID ),
+  case ecomet_db:read(DB, ?DATA, Type, OID ) of
+    #{ fields := Storage } -> Storage;
+    _ -> none
+  end;
+load_storage(_IsTransaction = true, OID, Type)->
+  DB = get_db_name( OID ),
+  case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock=none ) of
+    #{ fields := Storage } -> Storage;
+    _-> none
   end.
 
 % Save object changes to the storage
@@ -940,7 +878,7 @@ get_lock(Lock,#object{oid=OID,map=Map})->
   % Define the key
   DB = get_db_name(OID),
   Type=ecomet_pattern:get_storage(Map),
-  case ecomet_db:read(DB, ?DATA, Type, OID, Lock ) of
+  case ecomet_transaction:read(DB, ?DATA, Type, OID, Lock ) of
     not_found-> none;
     Storage-> Storage
   end.
