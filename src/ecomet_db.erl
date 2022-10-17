@@ -333,7 +333,11 @@ transaction(Fun)->
   zaya:transaction(Fun).
 
 changes(DB, Storage, Type, Key)->
-  zaya:changes(DB, [#key{type = Type, storage = Storage, key = Key}] ).
+  K = #key{type = Type, storage = Storage, key = Key},
+  case zaya:changes(DB, [K]) of
+    #{ K:= Changes }-> Changes;
+    _->none
+  end.
 
 on_abort(DB, Storage, Type, Key, Value)->
   zaya:on_abort(DB, [{#key{type = Type, storage = Storage, key = Key}, Value}] ).

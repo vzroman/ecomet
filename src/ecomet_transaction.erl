@@ -51,8 +51,9 @@ internal(Fun)->
       put(?transaction, #state{ type = internal, on_commit = [], log = #{}, dict = #{}, owner = self() }),
       Result = ecomet_db:transaction(fun()->
         Res = Fun(),
-        #state{log = Log,dict = Dict, owner = Owner} = get(?transaction),
-        ecomet_object:on_commit(Log, Dict, Owner),
+        #state{log = Log,owner = Owner} = get(?transaction),
+        OrderedLog = ordsets:from_list([{Queue,{OID,Value}} || {OID,{Queue, Value}} <- maps:to_list(Log)]),
+        ecomet_object:commit([LogEntry || {_,LogEntry} <- OrderedLog], Owner),
         Res
       end),
       State = erase(?transaction),
