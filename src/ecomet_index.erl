@@ -20,22 +20,32 @@
 -include("ecomet.hrl").
 
 -record(log,{field,value,type,storage,oper}).
+
 %% ====================================================================
-%% API functions
+%% Indexing API
 %% ====================================================================
 -export([
-  build_index/4,
-  delete_object/2,
-  read_tag/4,
+  build_index/3,
+  commit/1,
+  write/3
+]).
+
+%% ====================================================================
+%% Search API
+%% ====================================================================
+-export([
+  read_tag/4
+]).
+
+%% ====================================================================
+%% Utilities API
+%% ====================================================================
+-export([
   get_supported_types/0,
 
   build_3gram/2,
-  build_dt/2,
-
-  % only for tests
-  build_bitmap/7
+  build_dt/2
 ]).
-
 %%====================================================================
 %%		Test API
 %%====================================================================
@@ -49,55 +59,103 @@
 ]).
 -endif.
 
-% Build indexes for changed fields. Return:
-% {AddTags,UnchangedTags,DelTags,BackIndex}
-% BackIndex structure:
-%	#{storage1:=
-%   #{field1:=[{value,type}|...],
-%     field1:=[{value,type}|...]
-%   }
-%   ...
-% }
-%
-build_index(OID,Map,Fields,BackTags)->
-  % Build update
-  UpdatedBackTags=build_back_tags(Fields,Map),
-  % Calculate difference
-  {NewBackTags,Log}=merge_backtags(UpdatedBackTags,BackTags),
-  % Update storage
-  {Add,Del}=dump_log(OID,Log),
-  % Unchanged intersection of New and Old
-  Unchanged=get_unchanged(NewBackTags,BackTags),
-  % Return only changed storages
-  {Add,Unchanged,Del,maps:with(maps:keys(UpdatedBackTags),NewBackTags)}.
-
-% Delete object from indexes
-delete_object(OID,BackIndex)->
-  {_,Log}=merge_backtags(BackIndex,#{}),
-  dump_log(OID,[TLog#log{oper=del}||TLog<-Log]).
-%%------------------------------------------------------------------------------
-%%	 Step 1. Build backtag structure for changed fields
-%%------------------------------------------------------------------------------
-build_back_tags(Fields,Map)->
-  lists:foldl(fun({Name,Value},BackTag)->
-    case ecomet_field:get_index(Map,Name) of
-      {ok,none}->BackTag;
-      {ok,Types}->
-        ListValue=
-          if
-            is_list(Value) -> Value;
-            Value=:=none ->[];
-            true -> [ Value ]
-          end,
-        FieldTags=
-          lists:foldl(fun(Type,ValueList)->
-            [{TagValue,Type}||TagValue<-build_values(Type,ListValue)]++ValueList
-          end,[],Types),
-        {ok,Storage}=ecomet_field:get_storage(Map,Name),
-        StorageFields=maps:get(Storage,BackTag,#{}),
-        BackTag#{Storage=>StorageFields#{Name=>ordsets:from_list(FieldTags)}}
+%% ====================================================================
+%% Indexing
+%% ====================================================================
+build_index(Changes, BackTags, Map)->
+  % Build index tags for changed fields.
+  % BackIndex structure:
+  %	#{storage1:=
+  %   #{field1:=[{value,type}|...],
+  %     field1:=[{value,type}|...]
+  %   }
+  %   ...
+  % }
+  %
+  maps:fold(fun(Field,{_, Value},Acc)->
+    FieldTags =
+      if
+        Value =/= none->
+          field_tags( Field, Map, Value );
+        true->
+          []
+      end,
+    {ok,Type} = ecomet_field:get_storage(Map, Field),
+    TAcc0 = maps:get(Type, Acc, #{}),
+    TAcc =
+      if
+        length(FieldTags) >0 ->
+          TAcc0#{ Field => FieldTags };
+        true->
+          maps:remove( Field, TAcc0 )
+      end,
+    if
+      map_size( TAcc ) > 0 ->
+        Acc#{ Type => TAcc};
+      true->
+        maps:remove(Type, Acc)
     end
-  end,#{},Fields).
+  end,BackTags, Changes).
+
+field_tags( Field, Map, Value )->
+  case ecomet_field:get_index(Map, Field) of
+    {ok, none}->
+      [];
+    {ok, IndexTypes}->
+      ListValue =
+        case ecomet_field:get_type(Map, Field) of
+          {list,_}-> Value;
+          _-> [Value]
+        end,
+      lists:usort(lists:append(lists:foldl(fun(Type,Acc)->
+        [[{TagValue,Type}||TagValue<-build_values(Type,ListValue)]|Acc]
+      end,[],IndexTypes)))
+  end.
+
+commit(LogList)->
+  ByDBsTypes = group_by_dbs_types_tags( LogList ),
+
+
+  todo.
+
+group_by_dbs_types_tags( LogList )->
+  lists:foldl(fun(#{db := DB, object:=#{ <<".oid">>:=OID, object := Object }},Acc)->
+    lists:foldl(fun(Type, DBAcc)->
+      case ecomet_db:changes( DB, ?DATA, Type, OID ) of
+        { Data0, Data1 }->
+          case {maps:get(tags,Data0,#{}), maps:get(tags, Data1, #{})} of
+            {SameTags, SameTags}->
+              Acc;
+            {Tags0, Tags1}->
+              Fields = lists:usort(maps:keys(Tags0) ++ maps:keys(Tags1)),
+              lists:foldl(fun(Field, TypeAcc)->
+                case {maps:get(Field,Tags0,[]), maps:get(Field,Tags1,[])} of
+                  {SameFieldTags, SameFieldTags}->
+                    % No field tags changes
+                    TypeAcc;
+                  { FieldTags0, FieldTags1 }->
+                    %-----Add tags-------------------------
+                    TypeAcc1 =
+                      lists:foldl(fun({Value,IndexType}, TAcc)->
+                        Tag = {Field,Value,IndexType},
+                        TagAcc = maps:get(Tag,TAcc,#{}),
+                        TAcc#{ Tag => TagAcc#{ OID => true}}
+                      end,TypeAcc, FieldTags1 -- FieldTags0 ),
+                    %-----Delete tags-------------------------
+                    lists:foldl(fun({Value,IndexType}, TAcc)->
+                      Tag = {Field,Value,IndexType},
+                      TagAcc = maps:get(Tag,TAcc,#{}),
+                      TAcc#{ Tag => TagAcc#{ OID => false}}
+                    end, TypeAcc1, FieldTags0 -- FieldTags1 )
+                end
+              end, maps:get(DBAcc,Type,#{}), Fields)
+          end;
+        _->
+          % No DB storage type changes
+          DBAcc
+      end
+    end, maps:get( DB, Acc, #{}), ecomet_object:get_storage_types( Object ))
+  end,#{}, LogList).
 
 %----------------------------------------
 %   Indexing a value
@@ -156,6 +214,32 @@ dt_index(DT)->
     SS:2/binary,_/binary
   >>=DT,
   [{I,binary_to_integer(V)}||{I,V}<-[{y,YYYY},{m,MM},{d,DD},{h,HH},{mi,Min},{s,SS}]].
+
+%%------------------------------------------------------------------------------
+%%	 Step 1. Build backtag structure for changed fields
+%%------------------------------------------------------------------------------
+build_back_tags(Fields,Map)->
+  lists:foldl(fun({Name,Value},BackTag)->
+    case ecomet_field:get_index(Map,Name) of
+      {ok,none}->BackTag;
+      {ok,Types}->
+        ListValue=
+          if
+            is_list(Value) -> Value;
+            Value=:=none ->[];
+            true -> [ Value ]
+          end,
+        FieldTags=
+          lists:foldl(fun(Type,ValueList)->
+            [{TagValue,Type}||TagValue<-build_values(Type,ListValue)]++ValueList
+          end,[],Types),
+        {ok,Storage}=ecomet_field:get_storage(Map,Name),
+        StorageFields=maps:get(Storage,BackTag,#{}),
+        BackTag#{Storage=>StorageFields#{Name=>ordsets:from_list(FieldTags)}}
+    end
+  end,#{},Fields).
+
+
 
 %%------------------------------------------------------------------------------
 %% 	Step 2. Calculating difference between old tags and new

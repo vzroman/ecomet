@@ -54,6 +54,7 @@ internal(Fun)->
         State = #state{log = Log,owner = Owner} = erase(?transaction),
         OrderedLog = ordsets:from_list([{Queue,Value} || {Queue, Value} <- maps:values(Log)]),
         CommitLog = ecomet_object:commit([Value || {_,Value} <- OrderedLog]),
+        ecomet_index:commit( CommitLog ),
         {Res, State#state{ log = [Commit#{ self => Owner } || Commit <- CommitLog] }}
       end),
       case Result of

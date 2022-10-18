@@ -36,7 +36,8 @@
   get_pattern/1,
   get_pattern_oid/1,
   get_id/1,
-  get_service_id/2
+  get_service_id/2,
+  get_storage_types/1
 ]).
 
 %%=================================================================
@@ -757,6 +758,9 @@ get_pattern_oid(ServiceID)->
   PatternID = IDH * (1 bsl ?PATTERN_IDL_LENGTH) + IDL,
   ?ObjectID(?PATTERN_PATTERN,PatternID).
 
+get_storage_types(#object{ map = Map })->
+  ecomet_pattern:get_storage_types( Map ).
+
 % Acquire lock on object
 get_lock(Lock,#object{oid=OID,map=Map})->
   % Define the key
@@ -853,7 +857,6 @@ compile_changes( #object{oid = OID, map = Map, db = DB} )->
             Acc#{ Type => { Data0, #{ fields=>Fields }}};
           _->
             % Storage type is to be deleted
-            ok= ecomet_transaction:delete(DB, ?DATA, Type, OID, _Lock = none),
             Acc#{ Type=> {Data0, #{}} }
         end;
       {delete, #{fields := Fields1}}->
@@ -874,21 +877,22 @@ compile_changes( #object{oid = OID, map = Map, db = DB} )->
             % No real changes
             ecomet_transaction:on_abort(DB, ?DATA, Type, OID, delete),
             Acc
-        end
+        end;
+      _->
+        % No storage type changes
+        Acc
     end
   end,#{}, ecomet_pattern:get_storage_types(Map)).
 
-get_tags(#object{oid = OID, map = Map, db = DB}, Changes)->
+object_rollback(#object{oid = OID, map = Map, db = DB}, Changes)->
   lists:foldl(fun(Type,Acc)->
     case Changes of
-      {#{ Type := #{tags := Tags}}, _}->
-        Acc#{ Type => Tags };
-      {#{ Type := _}, _}->
-        Acc;
+      {#{ Type := Data0}, _} when is_map(Data0)->
+        Acc#{ Type => Data0 };
       _->
-        case ecomet_transaction:read(DB, ?DATA, Type, OID) of
-          #{ tags :=  Tags}->
-            Acc#{ Type => Tags };
+        case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock = none) of
+          Data0 when is_map( Data0 )->
+            Acc#{ Type => Data0 };
           _->
             Acc
         end
@@ -899,29 +903,80 @@ get_tags(#object{oid = OID, map = Map, db = DB}, Changes)->
 % Save object changes to the storage
 commit([])->
   [];
-commit([#object{oid = OID,map = Map}=Object|Rest])->
+commit([Object|Rest])->
   case compile_changes( Object ) of
     Changes when map_size( Changes ) > 0->
-      FieldsChanges =
-        maps:fold(fun(_Type,{ Data0, Data1 },Acc0)->
-          Fields0 = maps:get(fields,Data0,#{}),
-          Fields1 = maps:get(fields,Data1,#{}),
-          lists:foldl(fun(F, Acc)->
-            case {Fields0, Fields1} of
-              {#{F := V0}, #{F := V1}}->
-                Acc#{ F => {V0, V1}};
-              {_, #{F := V1}} ->
-                Acc#{ F => {none, V1} };
-              {#{F := V0}, _} ->
-                Acc#{ F => {V0, none} }
-            end
-          end, Acc0, lists:usort( maps:keys(Fields0) ++ maps:keys(Fields1)))
-        end,#{},Changes),
-      todo;
+      Rollback = object_rollback(Object, Changes ),
+      do_commit( Object, Changes, Rollback );
     _->
       % No real changes
       commit( Rest )
-  end,
+  end.
+
+do_commit( #object{oid = OID, map = Map, db = DB}=Object, Changes, Rollback )->
+  %----------Define fields changes-------------------
+  FieldsChanges =
+    maps:fold(fun(_Type,{ Data0, Data1 },Acc0)->
+      Fields0 = maps:get(fields,Data0,#{}),
+      Fields1 = maps:get(fields,Data1,#{}),
+      lists:foldl(fun(F, Acc)->
+        case {Fields0, Fields1} of
+          {#{F := V0}, #{F := V1}}->
+            Acc#{ F => {V0, V1}};
+          {_, #{F := V1}} ->
+            Acc#{ F => {none, V1} };
+          {#{F := V0}, _} ->
+            Acc#{ F => {V0, none} }
+        end
+      end, Acc0, lists:usort( maps:keys(Fields0) ++ maps:keys(Fields1)))
+   end, #{}, Changes),
+
+  Tags0 = maps:map(fun(_Type,TypeData)-> maps:get(tags,TypeData,#{}) end, Rollback),
+  Tags1 = ecomet_index:build_index(FieldsChanges, Tags0, Map),
+
+  %-----Commit changes---------------------------
+  maps:map(fun
+    (Type, #{fields := TFields}=TData) when map_size(TFields)>0->
+      Data=
+        case Tags1 of
+          #{Type := TTags}-> TData#{tags => TTags};
+          _-> TData
+        end,
+      ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data, _Lock = none);
+    (Type, _)->
+      ok = ecomet_transaction:delete(DB, ?DATA, Type, OID, _Lock = none)
+  end, Changes),
+
+  %--------------Prepare commit log-------------------
+  ObjectMap =
+    lists:foldl(fun(Type,Acc)->
+      TChanges = maps:get(fields,maps:get(Type, Changes, #{})),
+      TRollback = maps:get(fields,maps:get(Type, Rollback, #{})),
+      maps:merge( Acc, maps:merge(TRollback, TChanges))
+    end, #{}, lists:usort(maps:keys(Changes) ++ maps:keys(Changes))),
+
+  NewTags = ecomet_index:object_tags( Tags0 ),
+  DelTags = ecomet_index:object_tags( Tags1 ) -- NewTags,
+
+  % Actually changed fields with their previous values
+  Changes = maps:from_list([{Name,V0}||{Name,{V0,_}}<-FieldsChanges]),
+
+  % Log timestamp. If it is an object creation then timestamp must be the same as
+  % the timestamp of the object, otherwise it is taken as the current timestamp
+  TS =
+    case FieldsChanges of
+      #{<<".ts">>:={none, CreateTS}}->CreateTS;
+      _->ecomet_lib:log_ts()
+    end,
+
+  #{
+    object => ecomet_query:object_map(Object,ObjectMap),
+    db => DB,
+    ts => TS,
+    tags => { NewTags, DelTags},
+    changes => Changes
+  }
+
   % Retrieve the object from the transaction dictionary
   Object=maps:get({OID,object},Dict),
 
@@ -1031,13 +1086,7 @@ commit([#object{oid = OID,map = Map}=Object|Rest])->
           % Actually changed fields with their previous values
           Changes = maps:from_list([{Name,maps:get(Name,Version,none)}||{Name,_}<-ChangedFields]),
 
-          % Log timestamp. If it is an object creation then timestamp must be the same as
-          % the timestamp of the object, otherwise it is taken as the current timestamp
-          TS =
-            case Changes of
-              #{<<".ts">>:=none}->maps:get(<<".ts">>,NewVersion);
-              _->ecomet_lib:log_ts()
-            end,
+
 
           % The log record
           #ecomet_log{
