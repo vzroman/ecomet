@@ -975,159 +975,7 @@ do_commit( #object{oid = OID, map = Map, db = DB}=Object, Changes, Rollback )->
     ts => TS,
     tags => { NewTags, DelTags},
     changes => Changes
-  }
-
-  % Retrieve the object from the transaction dictionary
-  Object=maps:get({OID,object},Dict),
-
-  #object{ map=Map, db=DB } = Object,
-
-  % Load storage types that are not loaded yet
-  Storages=load_storage_types(Object,Dict),
-  BackTags = get_backtags(Storages),
-
-  % Get loaded fields grouped by storage types
-  LoadedFields=get_fields(Storages),
-
-  % Build the version of the object
-  Version=
-    maps:fold(fun(_T,TFields,Acc)->
-      maps:merge(Acc,TFields)
-              end,#{},LoadedFields),
-
-  if
-    Object#object.deleted->
-      %----------Delete procedure--------------------------
-      % The delete procedure is always wrapped into a true
-      % transaction, the 'delete' method MUST do it
-      % Purge object indexes
-      {[],Tags}= ecomet_index:delete_object(OID,BackTags),
-      % Purge object storage
-      [ ok = ecomet_db:delete(DB,?DATA,Type,OID,none) || Type <- maps:keys(Storages) ],
-      % The log record
-      #ecomet_log{
-        object = ecomet_query:object_map(Object,#{}),
-        db = DB,
-        ts=ecomet_lib:log_ts(),
-        tags={[],[],Tags},
-        rights = {[],[],[ V || {<<".readgroups">>,V,_} <-Tags]},
-        changes = maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map))
-      };
-    true->
-      %----------Create/Edit procedure-----------------------
-      % Step 1. Fields
-      Fields = maps:get({OID,fields},Dict),
-
-      % Get fields changes
-      {UpdatedFields,ChangedFields}=ecomet_field:save_changes(Map,Fields,LoadedFields,OID),
-
-      TransactionType = ecomet_transaction:get_type(),
-      % Indexed fields changes
-      Indexed = [ F || {F,_} <- ChangedFields,
-        case ecomet_field:get_index(Map,F) of
-          {ok,none}->false;
-          _->true
-        end],
-
-      if
-        length(ChangedFields)=:=0 ->
-          % No changes. Optimization
-          #ecomet_log{ };
-        TransactionType =:= dirty,length(Indexed) > 0->
-          % Dirty transaction. Optimization.
-          % If there are no changes in the indexed fields changes may
-          % be performed in the dirty mode.
-          % But if indexed are involved we have to wrap it into a true transaction to keep
-          % them consistent
-          Dict1 = maps:fold( fun(T,S,Acc)->Acc#{ {OID,T}=> S } end, Dict, Storages),
-          case ecomet_transaction:internal_sync(fun()-> commit(OID,Dict1) end) of
-            { ok, Log }->Log;
-            { error, Error }->
-              ?ERROR( Error )
-          end;
-        true ->
-          %---------------The dump procedure----------------------------------------------------
-          % Step 2. Indexes
-          % Update the object indexes and get changes
-          {Add,Unchanged,Del,UpdatedBackTags}= ecomet_index:build_index(OID,Map,ChangedFields,BackTags),
-
-          % Used backend handlers
-          #{ write := Write, delete := Delete } = ?TMODE,
-
-          % Step 3. Dump changes to the storage, build the new version of the object
-          NewVersion=
-            maps:fold(fun(T,S,Acc)->
-              case maps:find(T,UpdatedFields) of
-                error->
-                  % There are no changes in this type of the storage
-                  maps:merge(Acc,maps:get(fields,S,#{}));
-                {ok,TFields}->
-                  % The storage has changes
-                  case maps:size(TFields) of
-                    0->
-                      % Storage is empty now, delete it
-                      ok = ecomet_db:Delete(DB,?DATA,T,OID),
-                      Acc;
-                    _->
-                      % Update storage tags
-                      TTags = maps:get(T,UpdatedBackTags,maps:get(tags,S,#{})),
-                      NewStorage=
-                        case maps:size(TTags) of
-                          0->#{fields=>TFields};
-                          _->#{fields=>TFields, tags=>TTags}
-                        end,
-                      % Dump the new version of the storage
-                      ok = ecomet_db:Write(DB,?DATA,T,OID,NewStorage),
-                      maps:merge(Acc,TFields)
-                  end
-              end
-                      end,#{},Storages),
-
-          % Actually changed fields with their previous values
-          Changes = maps:from_list([{Name,maps:get(Name,Version,none)}||{Name,_}<-ChangedFields]),
-
-
-
-          % The log record
-          #ecomet_log{
-            object = ecomet_query:object_map(Object,NewVersion),
-            db = DB,
-            ts=TS,
-            tags={ Add, Unchanged, Del},
-            rights={
-              [ V || {<<".readgroups">>,V,_} <-Add],
-              [ V || {<<".readgroups">>,V,_} <-Unchanged],
-              [ V || {<<".readgroups">>,V,_} <-Del]
-            },
-            changes = Changes
-          }
-      end
-  end.
-
-get_backtags(Storage)->
-  maps:from_list([ { Type, Tags } || { Type, #{ tags := Tags} } <- maps:to_list(Storage) ]).
-
-get_fields(Storage)->
-  maps:from_list([ { Type, Fields } || { Type, #{ fields := Fields} } <- maps:to_list( Storage )]).
-
-% Backtag handlers for commit routine
-load_storage_types(#object{map=Map} = Object,Dict)->
-  Types = ecomet_pattern:get_storage_types(Map),
-  load_storage_types(Object, Dict, Types).
-load_storage_types(#object{oid=OID,db=DB},Dict, Types)->
-  #{read:=Read} = ?TMODE,
-  List=
-    [ case maps:find({OID,Type},Dict) of
-        {ok, none} -> { Type, #{} };
-        {ok, Loaded} -> { Type, Loaded };
-        error->
-          case ecomet_db:Read(DB,?DATA,Type,OID) of
-            not_found -> { Type, #{} };
-            Loaded -> { Type, Loaded }
-          end
-      end || Type <- Types ],
-  maps:from_list(List).
-
+  }.
 %%==============================================================================================
 %%	Reindexing
 %%==============================================================================================
@@ -1136,61 +984,62 @@ rebuild_index(OID)->
   Fields = ecomet_pattern:get_fields( PatternOID ),
   rebuild_index( OID, maps:keys(Fields) ).
 
-rebuild_index(OID, Fields)->
+rebuild_index(_OID, _Fields)->
 
-  ?TRANSACTION(fun()->
-
-    % Lock the object
-    Object = open(OID, write),
-
-    #object{ map=Map, db=DB } = Object,
-
-    % Define storage types for reindexed fields
-    StorageTypes =
-      lists:foldl(fun(F, Acc)->
-        {ok,S} = ecomet_field:get_storage(Map,F),
-        ordsets:add_element(S, Acc)
-      end, [], Fields),
-
-    % Load storage types that are not loaded yet
-    Storages=load_storage_types(Object, #{} ,StorageTypes),
-    BackTags = get_backtags( Storages ),
-
-    % Get loaded fields grouped by storage types
-    LoadedFields=get_fields(Storages),
-
-    % Build the version of the object
-    ChangedFields=
-      maps:to_list(maps:fold(fun(_Type,TFields,Acc)->
-        maps:merge(Acc,maps:with(Fields, TFields))
-      end,#{},LoadedFields)),
-
-    % Update the object indexes and get changes
-    {Add, _Unchanged, Del, UpdatedBackTags}= ecomet_index:build_index(OID,Map,ChangedFields,BackTags),
-
-    case {Add,Del} of
-      {[],[]} ->
-        ok;
-      _ ->
-        % Used backend handlers
-        #{ write := Write } = ?TMODE,
-
-        % Step 3. Dump changes to the storage, build the new version of the object
-        [begin
-           {ok,TFields} = maps:find(T, LoadedFields),
-
-           % Update storage tags
-           TTags = maps:get(T,UpdatedBackTags,maps:get(tags,S,#{})),
-           NewStorage=
-             case maps:size(TTags) of
-               0->#{fields=>TFields};
-               _->#{fields=>TFields, tags=>TTags}
-             end,
-           % Dump the new version of the storage
-           ok = ecomet_db:Write(DB,?DATA,T,OID,NewStorage)
-         end || {T, S} <- maps:to_list(Storages)],
-
-        ok
-    end
-
-  end).
+%%  ?TRANSACTION(fun()->
+%%
+%%    % Lock the object
+%%    Object = open(OID, write),
+%%
+%%    #object{ map=Map, db=DB } = Object,
+%%
+%%    % Define storage types for reindexed fields
+%%    StorageTypes =
+%%      lists:foldl(fun(F, Acc)->
+%%        {ok,S} = ecomet_field:get_storage(Map,F),
+%%        ordsets:add_element(S, Acc)
+%%      end, [], Fields),
+%%
+%%    % Load storage types that are not loaded yet
+%%    Storages=load_storage_types(Object, #{} ,StorageTypes),
+%%    BackTags = get_backtags( Storages ),
+%%
+%%    % Get loaded fields grouped by storage types
+%%    LoadedFields=get_fields(Storages),
+%%
+%%    % Build the version of the object
+%%    ChangedFields=
+%%      maps:to_list(maps:fold(fun(_Type,TFields,Acc)->
+%%        maps:merge(Acc,maps:with(Fields, TFields))
+%%      end,#{},LoadedFields)),
+%%
+%%    % Update the object indexes and get changes
+%%    {Add, _Unchanged, Del, UpdatedBackTags}= ecomet_index:build_index(OID,Map,ChangedFields,BackTags),
+%%
+%%    case {Add,Del} of
+%%      {[],[]} ->
+%%        ok;
+%%      _ ->
+%%        % Used backend handlers
+%%        #{ write := Write } = ?TMODE,
+%%
+%%        % Step 3. Dump changes to the storage, build the new version of the object
+%%        [begin
+%%           {ok,TFields} = maps:find(T, LoadedFields),
+%%
+%%           % Update storage tags
+%%           TTags = maps:get(T,UpdatedBackTags,maps:get(tags,S,#{})),
+%%           NewStorage=
+%%             case maps:size(TTags) of
+%%               0->#{fields=>TFields};
+%%               _->#{fields=>TFields, tags=>TTags}
+%%             end,
+%%           % Dump the new version of the storage
+%%           ok = ecomet_db:Write(DB,?DATA,T,OID,NewStorage)
+%%         end || {T, S} <- maps:to_list(Storages)],
+%%
+%%        ok
+%%    end
+%%
+%%  end).
+  todo.
