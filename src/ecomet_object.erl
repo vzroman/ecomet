@@ -878,12 +878,45 @@ compile_changes( #object{oid = OID, map = Map, db = DB} )->
     end
   end,#{}, ecomet_pattern:get_storage_types(Map)).
 
+get_tags(#object{oid = OID, map = Map, db = DB}, Changes)->
+  lists:foldl(fun(Type,Acc)->
+    case Changes of
+      {#{ Type := #{tags := Tags}}, _}->
+        Acc#{ Type => Tags };
+      {#{ Type := _}, _}->
+        Acc;
+      _->
+        case ecomet_transaction:read(DB, ?DATA, Type, OID) of
+          #{ tags :=  Tags}->
+            Acc#{ Type => Tags };
+          _->
+            Acc
+        end
+    end
+  end,#{}, ecomet_pattern:get_storage_types(Map)).
+
+
 % Save object changes to the storage
 commit([])->
   [];
 commit([#object{oid = OID,map = Map}=Object|Rest])->
   case compile_changes( Object ) of
     Changes when map_size( Changes ) > 0->
+      FieldsChanges =
+        maps:fold(fun(_Type,{ Data0, Data1 },Acc0)->
+          Fields0 = maps:get(fields,Data0,#{}),
+          Fields1 = maps:get(fields,Data1,#{}),
+          lists:foldl(fun(F, Acc)->
+            case {Fields0, Fields1} of
+              {#{F := V0}, #{F := V1}}->
+                Acc#{ F => {V0, V1}};
+              {_, #{F := V1}} ->
+                Acc#{ F => {none, V1} };
+              {#{F := V0}, _} ->
+                Acc#{ F => {V0, none} }
+            end
+          end, Acc0, lists:usort( maps:keys(Fields0) ++ maps:keys(Fields1)))
+        end,#{},Changes),
       todo;
     _->
       % No real changes
