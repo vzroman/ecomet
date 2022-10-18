@@ -29,7 +29,7 @@
 %%=================================================================
 -export([
   load_storage/2,
-  commit/2,
+  commit/1,
   get_db_id/1,
   get_db_name/1,
   get_node_id/1,
@@ -802,7 +802,7 @@ prepare_edit(Fields, #object{oid = OID, map = Map, db = DB})->
         % The storage type is not loaded yet
         case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock = none) of
           #{fields := Data0} = Storage->
-            ok = ecomet_transaction:write( DB, ?DATA, Type, OID, Storage#{ fields => maps:merge(Data0,Data) }, _Lock = none),
+            ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => maps:merge(Data0,Data) }, _Lock = none),
             ok = ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Storage);
           _->
             ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => Data }, _Lock = none),
@@ -835,13 +835,60 @@ save(#object{oid=OID,map=Map}=Object, Handler)->
   ecomet_transaction:dict_remove([{OID,handler}]),
 
   % Confirm the commit
-  ecomet_transaction:log(OID,true),
+  ecomet_transaction:log(OID,Object),
 
   % The result
   ok.
 
+compile_changes( #object{oid = OID, map = Map, db = DB} )->
+  lists:foldl(fun(Type, Acc)->
+    case ecomet_transaction:changes(DB, ?DATA, Type, OID) of
+      {#{fields := Fields0}=Data0, #{fields:=Fields1}}->
+        case maps:filter(fun(_F, V)-> V =/= none end, Fields1) of
+          Fields0 ->
+            % No real changes
+            ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data0, _Lock = none),
+            Acc;
+          Fields when map_size(Fields) > 0->
+            Acc#{ Type => { Data0, #{ fields=>Fields }}};
+          _->
+            % Storage type is to be deleted
+            ok= ecomet_transaction:delete(DB, ?DATA, Type, OID, _Lock = none),
+            Acc#{ Type=> {Data0, #{}} }
+        end;
+      {delete, #{fields := Fields1}}->
+        case maps:filter(fun(_F, V)-> V =/= none end, Fields1) of
+          Fields when map_size(Fields) > 0->
+            Acc#{ Type => { #{}, #{ fields=>Fields }}};
+          _->
+            % No real changes
+            ok = ecomet_transaction:delete(DB, ?DATA, Type, OID, _Lock = none),
+            Acc
+        end;
+      {delete}->
+        case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock = none) of
+          #{fields := _ } = Data0->
+            ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Data0),
+            Acc#{ Type => { Data0, #{}}};
+          _->
+            % No real changes
+            ecomet_transaction:on_abort(DB, ?DATA, Type, OID, delete),
+            Acc
+        end
+    end
+  end,#{}, ecomet_pattern:get_storage_types(Map)).
+
 % Save object changes to the storage
-commit([{OID,_}],Dict)->
+commit([])->
+  [];
+commit([#object{oid = OID,map = Map}=Object|Rest])->
+  case compile_changes( Object ) of
+    Changes when map_size( Changes ) > 0->
+      todo;
+    _->
+      % No real changes
+      commit( Rest )
+  end,
   % Retrieve the object from the transaction dictionary
   Object=maps:get({OID,object},Dict),
 
