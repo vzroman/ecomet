@@ -366,17 +366,17 @@ field_changes(#object{oid=OID,map=Map,db = DB},Field)->
   {ok,Type} = ecomet_field:get_storage(Map, Field),
   case ecomet_transaction:changes(DB, ?DATA, Type, OID ) of
     none -> none;
-%-------Object is under create-------------------------------------
+%-------Type storage is under create-------------------------------------
     {delete, #{fields := #{Field := NewValue}}}->
       {NewValue, none};
     {delete, _NewStorage}->
       none;
-%-------Object is under delete-------------------------------------
+%-------Type storage is under delete-------------------------------------
     {#{fields := #{Field := OldValue}}, delete}->
       {none, OldValue};
     {_OldStorage, delete}->
       none;
-%-------Object is under update-------------------------------------
+%-------Type storage is under update-------------------------------------
     {#{fields := OldFields}, #{fields := NewFields}}->
       case {OldFields, NewFields} of
         {#{Field := Same}, #{Field := Same}}->
@@ -390,22 +390,19 @@ field_changes(#object{oid=OID,map=Map,db = DB},Field)->
         {_,_}->
           none
       end;
-%---------Old value is not loaded yet----------------------------
-    {#{fields := #{Field := NewValue}}}->
-      OldValue =
-        case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock=none ) of
-          not_found ->
-            ecomet_transaction:on_abort(DB, ?DATA, Type, OID, delete),
-            none;
-          OldStorage->
-            ecomet_transaction:on_abort(DB, ?DATA, Type, OID, OldStorage),
-            case OldStorage of
-              #{ Field := _OldValue } -> _OldValue;
-              _-> none
-            end
-        end;
-    {_}->
-      none
+%---------Rollback value is not loaded yet (on delete only)----------------------------
+    {delete}->
+      case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock=none ) of
+        Rollback when is_map( Rollback )->
+          ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Rollback),
+          case Rollback of
+            #{ Field := OldValue } when OldValue=/=none -> {none, OldValue};
+            _-> none
+          end;
+        _ ->
+          ecomet_transaction:on_abort(DB, ?DATA, Type, OID, delete),
+          none
+      end
   end.
 
 % Check changes for the field within the transaction
@@ -777,13 +774,16 @@ construct(OID)->
   DB = get_db_name(OID),
   #object{oid=OID,edit=false,move=false,map=Map,db=DB}.
 
+by_storage_types( Fields, Map )->
+  maps:fold(fun(F,V,Acc)->
+    {ok,T} = ecomet_field:get_storage( Map, F ),
+    TAcc = maps:get(T, Acc, #{}),
+    Acc#{ T=> TAcc#{ F => V }}
+  end,#{}, Fields).
+
 prepare_create(Fields, #object{oid = OID, map = Map, db = DB})->
-  ByTypes =
-    maps:fold(fun(F,V,Acc)->
-      {ok,T} = ecomet_field:get_storage( Map, F ),
-      TAcc = maps:get(T, Acc, #{}),
-      Acc#{ T=> TAcc#{ F => V } }
-    end,#{}, Fields),
+
+  ByTypes = by_storage_types( Fields, Map),
 
   % Transaction write
   maps:map(fun(Type,Data)->
@@ -793,31 +793,23 @@ prepare_create(Fields, #object{oid = OID, map = Map, db = DB})->
   end, ByTypes).
 
 prepare_edit(Fields, #object{oid = OID, map = Map, db = DB})->
-  Updates =
-    maps:fold(fun(F,V,Acc)->
-      {ok,T} = ecomet_field:get_storage( Map, F ),
-      TypeData =
-        case Acc of
-          #{ T := #{fields := TFields} =TAcc }->
-            TAcc#{ fields => TFields#{ F => V }};
-          _->
-            % Set lock read as the
-            case ecomet_transaction:changes(DB, ?DATA, T, OID ) of
-              {_,#{fields := TFields} = Storage}  ->
-                Storage#{ fields => TFields#{ F => V }};
-              {#{fields := TFields} = Storage}  ->
-                Storage#{ fields => TFields#{ F => V }};
-              _->
-                #{ fields => #{F => V}}
-            end
-        end,
-      Acc#{ T => TypeData}
-    end,#{}, Fields),
-
-  % Transaction write
+  ByTypes = by_storage_types( Fields, Map ),
   maps:map(fun(Type,Data)->
-    ok = ecomet_transaction:write( DB, ?DATA, Type, OID, Data, _Lock = none)
-  end, Updates).
+    case ecomet_transaction:changes(DB, ?DATA, Type, OID ) of
+      {_, #{fields := Data0}}->
+        ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => maps:merge(Data0,Data) }, _Lock = none);
+      _->
+        % The storage type is not loaded yet
+        case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock = none) of
+          #{fields := Data0} = Storage->
+            ok = ecomet_transaction:write( DB, ?DATA, Type, OID, Storage#{ fields => maps:merge(Data0,Data) }, _Lock = none),
+            ok = ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Storage);
+          _->
+            ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => Data }, _Lock = none),
+            ok = ecomet_transaction:on_abort(DB, ?DATA, Type, OID, delete)
+        end
+    end
+  end, ByTypes).
 
 prepare_delete(OID, #object{map = Map, db = DB})->
   [ ok = ecomet_transaction:delete( DB, ?DATA, T, OID, _Lock = none ) || T <- ecomet_pattern:get_storage_types( Map ) ],
