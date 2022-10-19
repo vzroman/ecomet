@@ -42,6 +42,12 @@
 ]).
 
 %%====================================================================
+%% Module remote call API
+%%====================================================================
+-export([
+	single_node_transaction/5
+]).
+%%====================================================================
 %% Subscriptions API
 %%====================================================================
 -export([
@@ -527,7 +533,7 @@ transaction([DB|Rest] = DBs, Conditions, Map, Reduce, Union)->
 				true->
 					local_transaction( DBs, Conditions, Map, Reduce, Union );
 				_->
-					single_node_transaction(DBs, Conditions, Map, Reduce, Union)
+					single_node_transaction(Nodes, DBs, Conditions, Map, Reduce, Union)
 			end
 	end.
 
@@ -537,6 +543,36 @@ x_nodes([DB|Rest],Nodes)->
 	x_nodes(Rest, Nodes -- (Nodes -- ecomet_db:available_nodes(DB)));
 x_nodes([], Nodes)->
 	Nodes.
+
+local_transaction( DBs, Conditions, Map, Reduce, Union )->
+	Results = [ execute_local(DB,Conditions,Map,Union) || DB <- DBs ],
+	Reduce( Results ).
+
+single_node_transaction(Nodes, DBs, Conditions, Map, Reduce, Union)->
+	case ecall:call_any(Nodes, ?MODULE, single_node_transaction,[DBs, Conditions, Map, Reduce, Union]) of
+		{error,Error}->
+			throw(Error);
+		Result->
+			Result
+	end.
+single_node_transaction(DBs, Conditions, Map, Reduce, Union)->
+	ecomet:transaction(fun()->local_transaction(DBs, Conditions, Map, Reduce, Union) end).
+
+cross_nodes_transaction( DBs, Conditions, Map, Reduce, Union )->
+	todo.
+
+db_transaction(DB, Conditions, Map, Union)->
+	case ecomet_db:available_nodes( DB ) of
+		[]->
+			throw({DB, not_available});
+		Nodes->
+			case lists:member(node(), Nodes) of
+				true->
+					execute_local(DB,Conditions,Map,Union);
+				_->
+					ecall:call_any(Nodes,?MODULE,?FUNCTION_NAME,[DB, Conditions, Map, Union])
+			end
+	end.
 
 execute([DB],Conditions,Map,Reduce,Union)->
 	%--------single DB search----------------------
