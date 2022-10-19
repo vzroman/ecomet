@@ -273,7 +273,7 @@ prepare_rollback([])->
 write(Module, Ref, Updates)->
   maps:fold(fun
     ({{Tag,{idl,PatternID,IDHN}}, IDLs},_)->
-      {ok, Unlock} = elock:lock(?LOCKS, {Ref,Tag}, _IsShared = false, _Timeout=infinity),
+      {ok, Unlock} = elock:lock(?INDEX_LOCKS, {Ref,Tag}, _IsShared = false, _Timeout=infinity),
       try build_bitmap(Module, Ref, Tag, PatternID, IDHN, IDLs)
       after
         Unlock()
@@ -312,7 +312,7 @@ build_bitmap(Module, Ref, Tag, PatternID, IDHN, IDLs)->
       end
   end.
 
-%%--------------Add an ID to the index level--------------------------------------
+%%--------------Add/Delete IDs to the index level--------------------------------------
 bitmap_level(Module, Ref,Tag,{Add,Del})->
   case Module:read(Ref,[{?INDEX,[Tag]}]) of
     []->
