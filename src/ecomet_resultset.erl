@@ -521,6 +521,16 @@ db_no_transaction(DB, Conditions, Map, Union)->
 			end
 	end.
 
+order_DBs([DB|Rest],Results)->
+	case lists:keytake(DB, 1, Results) of
+		{value,{_,DBResult},RestResults}->
+			[DBResult | order_DBs(Rest, RestResults)];
+		_->
+			order_DBs(Rest, Results)
+	end;
+order_DBs([],_Results)->
+	[].
+
 %%---------------------------------------------------------------------
 %%	TRANSACTIONAL QUERY
 %%---------------------------------------------------------------------
@@ -561,59 +571,7 @@ single_node_transaction(DBs, Conditions, Map, Reduce, Union)->
 cross_nodes_transaction( DBs, Conditions, Map, Reduce, Union )->
 	todo.
 
-db_transaction(DB, Conditions, Map, Union)->
-	case ecomet_db:available_nodes( DB ) of
-		[]->
-			throw({DB, not_available});
-		Nodes->
-			case lists:member(node(), Nodes) of
-				true->
-					execute_local(DB,Conditions,Map,Union);
-				_->
-					ecall:call_any(Nodes,?MODULE,?FUNCTION_NAME,[DB, Conditions, Map, Union])
-			end
-	end.
 
-execute([DB],Conditions,Map,Reduce,Union)->
-	%--------single DB search----------------------
-	case db_execute(DB, Conditions, Map, Union, ecomet:is_transaction()) of
-		{error,_}-> Reduce([]);
-		Result -> Reduce([Result])
-	end;
-execute(DBs,Conditions,Map,Reduce,Union)->
-	% Search steps:
-	% 1. start remote databases search
-	% 2. execute local databases search
-	% 3. reduce remote search results
-	% 4. Construct query result
-	{LocalDBs,RemoteDBs}=lists:foldl(fun(DB,{Local,Remote})->
-		case ecomet_db:is_local(DB) of
-			true->{[DB|Local],Remote};
-			false->{Local,[DB|Remote]}
-		end
-	end,{[],[]},DBs),
-	% Step 1. Start remote search
-	PID=execute_remote(RemoteDBs,Conditions,Map,Union),
-	% Step 2. Local search
-	LocalResult=lists:foldl(fun(DB,Result)->
-		[{DB,execute_local(DB,Conditions,Map,Union)}|Result]
-	end,[],LocalDBs),
-	% Step 3. Reduce remote, order by database
-	SearchResult=order_DBs(DBs,wait_remote(PID,LocalResult)),
-	% Step 4. Return result
-	Reduce(SearchResult).
-
-
-
-order_DBs([DB|Rest],Results)->
-	case lists:keytake(DB, 1, Results) of
-		{value,{_,DBResult},RestResults}->
-			[DBResult | order_DBs(Rest, RestResults)];
-		_->
-			order_DBs(Rest, Results)
-	end;
-order_DBs([],_Results)->
-	[].
 
 % 1. Map search to remote nodes
 % 2. Reduce results, reply
