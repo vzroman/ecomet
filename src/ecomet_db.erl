@@ -79,7 +79,7 @@
   init/0,
   wait_local_dbs/0,
   is_local/1,
-  get_search_node/2,
+  available_nodes/1,
   get_databases/0,
   get_name/1,
   get_by_name/1,
@@ -389,9 +389,8 @@ get_name(DB)->
 is_local(DB)->
   lists:member(node(),zaya:db_available_nodes(DB)).
 
-get_search_node(_Name,_Exclude)->
-  % TODO
-  node().
+available_nodes( DB )->
+  zaya:db_available_nodes(DB).
 
 get_databases()->
   ecomet_schema:get_registered_databases().

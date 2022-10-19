@@ -30,6 +30,7 @@
 	new/0,
 	new_branch/0,
 	execute/5,
+	db_execute/5,
 	execute_local/4,
 	remote_call/6,
 	count/1,
@@ -451,6 +452,83 @@ new_branch()->{none,maps:new()}.
 %%	QUERY EXECUTION
 %%=====================================================================
 execute(DBs,Conditions,Map,Reduce,Union)->
+	case ecomet:is_transaction() of
+		true->
+			transaction(DBs, Conditions, Map, Reduce, Union);
+		_->
+			no_transaction(DBs, Conditions, Map, Reduce, Union)
+	end.
+
+%%---------------------------------------------------------------------
+%%	NO TRANSACTION QUERY
+%%---------------------------------------------------------------------
+no_transaction([DB], Conditions, Map, Reduce, Union)->
+	case db_no_transaction(DB, Conditions, Map, Union) of
+		{error,_}->Reduce([]);
+		Result-> Reduce([Result])
+	end;
+no_transaction(DBs, Conditions, Map, Reduce, Union)->
+	Self = self(),
+	Master =
+		spawn(fun()->
+			MasterSelf = self(),
+			Workers =
+				[ begin
+						 {W,_} = spawn_monitor(fun()->
+							 MasterSelf ! {result, self(), db_no_transaction(DB, Conditions, Map, Union)}
+						 end),
+					 {W,DB}
+				 end || DB <- DBs],
+			Results = no_transaction_wait( maps:from_list( Workers )),
+			Self ! { results, self(), Results}
+		end),
+	receive
+		{ results, Master, Results}->
+			Reduce( order_DBs(DBs,Results) )
+	end.
+
+no_transaction_wait( Workers ) when map_size(Workers) > 0->
+	receive
+		{result, W, Result}->
+			case maps:take( W, Workers ) of
+				{DB, RestWorkers}->
+					[{DB, Result}| no_transaction_wait(RestWorkers)];
+				_->
+					no_transaction_wait( Workers )
+			end;
+		{'DOWN', _, process, W, _}->
+			no_transaction_wait(maps:remove(W, Workers))
+	end;
+no_transaction_wait( _Workers )->
+	[].
+
+db_no_transaction(DB, Conditions, Map, Union)->
+	case ecomet_db:available_nodes( DB ) of
+		[]->
+			{error,not_available};
+		Nodes->
+			case lists:member(node(), Nodes) of
+				true->
+					execute_local(DB,Conditions,Map,Union);
+				_->
+					ecall:call_any(Nodes,?MODULE,?FUNCTION_NAME,[DB, Conditions, Map, Union])
+			end
+	end.
+
+%%---------------------------------------------------------------------
+%%	TRANSACTIONAL QUERY
+%%---------------------------------------------------------------------
+transaction([DB], Conditions, Map, Reduce, Union)->
+
+
+
+execute([DB],Conditions,Map,Reduce,Union)->
+	%--------single DB search----------------------
+	case db_execute(DB, Conditions, Map, Union, ecomet:is_transaction()) of
+		{error,_}-> Reduce([]);
+		Result -> Reduce([Result])
+	end;
+execute(DBs,Conditions,Map,Reduce,Union)->
 	% Search steps:
 	% 1. start remote databases search
 	% 2. execute local databases search
@@ -473,14 +551,17 @@ execute(DBs,Conditions,Map,Reduce,Union)->
 	% Step 4. Return result
 	Reduce(SearchResult).
 
-order_DBs(DBs,Results)->
-	order_DBs(DBs,Results,[]).
-order_DBs([DB|Rest],Results,Acc)->
-	case lists:keytake(DB,1,Results) of
-		false->order_DBs(Rest,Results,Acc);
-		{value,{_,DBResult},RestResults}->order_DBs(Rest,RestResults,[DBResult|Acc])
+
+
+order_DBs([DB|Rest],Results)->
+	case lists:keytake(DB, 1, Results) of
+		{value,{_,DBResult},RestResults}->
+			[DBResult | order_DBs(Rest, RestResults)];
+		_->
+			order_DBs(Rest, Results)
 	end;
-order_DBs([],_Results,Acc)->Acc.
+order_DBs([],_Results)->
+	[].
 
 % 1. Map search to remote nodes
 % 2. Reduce results, reply
