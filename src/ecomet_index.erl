@@ -285,15 +285,13 @@ write(Module, Ref, Updates)->
   ok.
 
 build_bitmap(Module, Ref, Tag, PatternID, IDHN, IDLs)->
-  {Add0, Del0}=
+  {Add, Del}=
     maps:fold(fun(IDLN,Value,{AddAcc,DelAcc})->
       if
         Value -> { ecomet_bitmap:set_bit(AddAcc,IDLN), DelAcc };
         true-> { AddAcc, ecomet_bitmap:set_bit(DelAcc,IDLN) }
       end
     end,{<<>>,<<>>}, IDLs),
-  Add = ecomet_bitmap:zip( Add0 ),
-  Del = ecomet_bitmap:zip( Del0 ),
   case bitmap_level(Module, Ref,{Tag,{idl,PatternID,IDHN}},{Add,Del}) of
     stop->ok;
     IDH->
@@ -319,7 +317,8 @@ bitmap_level(Module, Ref,Tag,{Add,Del})->
   case Module:read(Ref,[{?INDEX,[Tag]}]) of
     []->
       case ecomet_bitmap:zip( ecomet_bitmap:bit_andnot(Add,Del)) of
-        <<>>-> delete;
+        <<>>->
+          stop;
         LevelValue->
           ok = Module:write( Ref, [{{?INDEX,[Tag]}, LevelValue}]),
           add
