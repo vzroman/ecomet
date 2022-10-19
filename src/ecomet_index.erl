@@ -199,6 +199,15 @@ commit(LogList)->
 
 
 group_by_dbs_types_tags( LogList )->
+  % #{
+  %   DB => #{
+  %     Type => #{
+  %       Tag => #{
+  %         OID => true | false
+  %       }
+  %     }
+  %   }
+  % }
   lists:foldl(fun(#{db := DB, object:=#{ <<".oid">>:=OID, object := Object }},Acc)->
     DBAcc1 =lists:foldl(fun(Type, DBAcc)->
       case ecomet_db:changes( DB, ?DATA, Type, OID ) of

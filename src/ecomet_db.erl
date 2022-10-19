@@ -228,11 +228,26 @@ write(Ref, KVs)->
   ByTypes =
     lists:foldl(fun({#key{ type = T, storage = S, key = K }, V}, Acc)->
       TypeAcc = maps:get(T,Acc,[]),
-      Acc#{ T => [{{S,[K]}, V} | TypeAcc]}
+      Acc#{ T => [{S,K,V} | TypeAcc]}
     end,#{}, KVs),
   maps:map(fun(Type, Recs)->
     { Module, TRef } = maps:get(Type, Ref),
-    ok = Module:write( TRef, Recs )
+    {Data, Indexes}=
+      lists:foldl(fun({S,K,V},{DAcc,IAcc})->
+        if
+          S =:= ?INDEX, is_map(V)->
+            % The trick.
+            % If the value of the index is a map it's an index update as a result of commit
+            % but not real value. This write must be done by ecomet_index module
+            {DAcc,[{K,V}|IAcc]};
+          true->
+            {[{{S,[K]}, V}|DAcc], IAcc}
+        end
+      end,{[],[]}, Recs),
+    % Write data
+    ok = Module:write( TRef, Data ),
+    % Update indexes
+    ok = ecomet_index:write(Module, TRef, Indexes )
   end, ByTypes),
   ok.
 
