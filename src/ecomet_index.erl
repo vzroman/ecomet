@@ -52,16 +52,16 @@
 -ifdef(TEST).
 
 -export([
-  build_back_tags/2,
-  merge_backtags/2,
-  dump_log/2,
-  get_unchanged/2
+
 ]).
 -endif.
 
 %% ====================================================================
 %% Indexing
 %% ====================================================================
+%------------------PHASE 1---------------------------------------------
+%               Prepare object tags
+%----------------------------------------------------------------------
 build_index(Changes, BackTags, Map)->
   % Build index tags for changed fields.
   % BackIndex structure:
@@ -111,51 +111,6 @@ field_tags( Field, Map, Value )->
         [[{TagValue,Type}||TagValue<-build_values(Type,ListValue)]|Acc]
       end,[],IndexTypes)))
   end.
-
-commit(LogList)->
-  ByDBsTypes = group_by_dbs_types_tags( LogList ),
-
-
-  todo.
-
-group_by_dbs_types_tags( LogList )->
-  lists:foldl(fun(#{db := DB, object:=#{ <<".oid">>:=OID, object := Object }},Acc)->
-    lists:foldl(fun(Type, DBAcc)->
-      case ecomet_db:changes( DB, ?DATA, Type, OID ) of
-        { Data0, Data1 }->
-          case {maps:get(tags,Data0,#{}), maps:get(tags, Data1, #{})} of
-            {SameTags, SameTags}->
-              Acc;
-            {Tags0, Tags1}->
-              Fields = lists:usort(maps:keys(Tags0) ++ maps:keys(Tags1)),
-              lists:foldl(fun(Field, TypeAcc)->
-                case {maps:get(Field,Tags0,[]), maps:get(Field,Tags1,[])} of
-                  {SameFieldTags, SameFieldTags}->
-                    % No field tags changes
-                    TypeAcc;
-                  { FieldTags0, FieldTags1 }->
-                    %-----Add tags-------------------------
-                    TypeAcc1 =
-                      lists:foldl(fun({Value,IndexType}, TAcc)->
-                        Tag = {Field,Value,IndexType},
-                        TagAcc = maps:get(Tag,TAcc,#{}),
-                        TAcc#{ Tag => TagAcc#{ OID => true}}
-                      end,TypeAcc, FieldTags1 -- FieldTags0 ),
-                    %-----Delete tags-------------------------
-                    lists:foldl(fun({Value,IndexType}, TAcc)->
-                      Tag = {Field,Value,IndexType},
-                      TagAcc = maps:get(Tag,TAcc,#{}),
-                      TAcc#{ Tag => TagAcc#{ OID => false}}
-                    end, TypeAcc1, FieldTags0 -- FieldTags1 )
-                end
-              end, maps:get(DBAcc,Type,#{}), Fields)
-          end;
-        _->
-          % No DB storage type changes
-          DBAcc
-      end
-    end, maps:get( DB, Acc, #{}), ecomet_object:get_storage_types( Object ))
-  end,#{}, LogList).
 
 %----------------------------------------
 %   Indexing a value
@@ -215,136 +170,92 @@ dt_index(DT)->
   >>=DT,
   [{I,binary_to_integer(V)}||{I,V}<-[{y,YYYY},{m,MM},{d,DD},{h,HH},{mi,Min},{s,SS}]].
 
-%%------------------------------------------------------------------------------
-%%	 Step 1. Build backtag structure for changed fields
-%%------------------------------------------------------------------------------
-build_back_tags(Fields,Map)->
-  lists:foldl(fun({Name,Value},BackTag)->
-    case ecomet_field:get_index(Map,Name) of
-      {ok,none}->BackTag;
-      {ok,Types}->
-        ListValue=
-          if
-            is_list(Value) -> Value;
-            Value=:=none ->[];
-            true -> [ Value ]
-          end,
-        FieldTags=
-          lists:foldl(fun(Type,ValueList)->
-            [{TagValue,Type}||TagValue<-build_values(Type,ListValue)]++ValueList
-          end,[],Types),
-        {ok,Storage}=ecomet_field:get_storage(Map,Name),
-        StorageFields=maps:get(Storage,BackTag,#{}),
-        BackTag#{Storage=>StorageFields#{Name=>ordsets:from_list(FieldTags)}}
-    end
-  end,#{},Fields).
+
+%------------------PHASE 2---------------------------------------------
+%               Prepare changes for each tag
+%----------------------------------------------------------------------
+commit(LogList)->
+  ByDBsTypes = group_by_dbs_types_tags( LogList ),
+  maps:fold(fun(DB,Types,_)->
+    maps:fold(fun(Type,Tags,_)->
+      maps:fold(fun(Tag,OIDs,_)->
+        Commit = prepare_commit(Tag, OIDs),
+        Rollback = prepare_rollback(Commit),
+        ok = ecomet_db:bulk_write(DB,?INDEX,Type,Commit,_Lock = none),
+        ok = ecomet_db:bulk_on_abort(DB,?INDEX,Type,Rollback)
+      end, undefined, Tags)
+    end, undefined, Types)
+  end, undefined, ByDBsTypes).
 
 
-
-%%------------------------------------------------------------------------------
-%% 	Step 2. Calculating difference between old tags and new
-%%------------------------------------------------------------------------------
-merge_backtags(Updated,Old)->
-  lists:foldl(fun({Storage,Fields},{BackIndex,SLog})->
-    OldFields=maps:get(Storage,BackIndex,#{}),
-    Log=
-      lists:foldl(fun({Field,Tags},FLog)->
-        OldTags=maps:get(Field,OldFields,[]),
-        [#log{field=Field,value=Value,type=Type,storage=Storage,oper=add}||{Value,Type}<-ordsets:subtract(Tags,OldTags)]++
-        [#log{field=Field,value=Value,type=Type,storage=Storage,oper=del}||{Value,Type}<-ordsets:subtract(OldTags,Tags)]++
-        FLog
-      end,SLog,maps:to_list(Fields)),
-    SFields=maps:merge(OldFields,Fields),
-    {BackIndex#{Storage=>SFields},Log}
-  end,{Old,[]},maps:to_list(Updated)).
-
-%%------------------------------------------------------------------------------
-%%	Step 3. Save indexes to storage
-%%------------------------------------------------------------------------------
-dump_log(OID,Log)->
-  DB=ecomet_object:get_db_name(OID),
-  PatternID=ecomet_object:get_pattern(OID),
-  ObjectID=ecomet_object:get_id(OID),
-  IDHN=ObjectID div ?BITSTRING_LENGTH,
-  IDLN=ObjectID rem ?BITSTRING_LENGTH,
-  % Sorting solves next issues:
-  % 1. log has structure {  field, value , type, storage, oper }. So, we sort fields by their names first.
-  % When we run through log, we obtain locks on tags we change. If two concurrent processes want a couple of same tags,
-  % then they will try obtain locks on these tags in the same order. So we exclude states when process1 locked tag1 and tries
-  % to lock tag2, and this time process2 locked tag2 and tries to lock tag1. Mnesia as backend is deadlock free, but it is time consuming.
-  % 2. We reverse sorted tag_logs. So, system fields such as ".folder", ".pattern" and so on are in the tail and  locked after others.
-  % We do not hold locks on them while indexing other fields.
-  lists:foldl(fun(#log{field=Field,value=Value,type=Type,storage=Storage,oper=Oper},{Add,Del})->
-    Tag={Field,Value,Type},
-    ecomet_index:build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN),
-    case Oper of
-      add->{[Tag|Add],Del};
-      del->{Add,[Tag|Del]}
-    end
-  end,{[],[]},lists:reverse(ordsets:from_list(Log))).
-
-%%------------------------------------------------------------------------------
-%%	Step 4. Calculate unchanged tags
-%%------------------------------------------------------------------------------
-get_unchanged(New,Old)->
-  maps:fold(fun(Storage,Fields,SAcc)->
-    NewFields=maps:get(Storage,New),
-    maps:fold(fun(Field,Tags,FAcc)->
-      NewTags=maps:get(Field,NewFields),
-      [{Field,Value,Type}||{Value,Type}<-ordsets:intersection(Tags,NewTags)]++FAcc
-    end,SAcc,maps:with(maps:keys(NewFields),Fields))
-  end,[],maps:with(maps:keys(New),Old)).
-
-%%------------------------------------------------------------------------------
-%%		Bitmap indexes
-%%------------------------------------------------------------------------------
-build_bitmap(Oper,Tag,DB,Storage,PatternID,IDHN,IDLN)->
-  case bitmap_level(Oper,DB,Storage,{Tag,{idl,PatternID,IDHN}},IDLN) of
-    stop->ok;
-    up->
-      case bitmap_level(Oper,DB,Storage,{Tag,{idh,PatternID}},IDHN) of
-        stop->ok;
-        up->bitmap_level(Oper,DB,Storage,{Tag,patterns},PatternID)
-      end
-  end.
-
-%%--------------Add an ID to the index level--------------------------------------
-bitmap_level(add,DB,Storage,Tag,ID)->
-  case ecomet_db:read(DB,?INDEX,Storage,Tag,write) of
-    not_found->
-      Value = ecomet_bitmap:zip(ecomet_bitmap:set_bit(<<>>,ID)),
-      ok = ecomet_db:write(DB,?INDEX,Storage,Tag,Value),
-      % The index didn't exist before, we need to add the value to the upper level also
-      up;
-    LevelValue->
-      Value = ecomet_bitmap:zip(ecomet_bitmap:set_bit(LevelValue,ID)),
-      ok = ecomet_db:write(DB,?INDEX,Storage,Tag,Value),
-      % The index already exists, no need to update the upper level
-      stop
-  end;
-%%--------------Remove an ID from the index level--------------------------------------
-bitmap_level(del,DB,Storage,Tag,ID)->
-  case ecomet_db:read(DB,?INDEX,Storage,Tag,write) of
-    not_found->
-      % Why are we here?
-      ?LOGWARNING("an attempt to delete an ID in the absent index level, ID ~p, DB ~p, storage type ~p, tag ~p",[
-        ID,DB,Storage,Tag
-      ]),
-      % We are not sure if the upper level index exits, so we need to try to update it too
-      up;
-    LevelValue->
-      LeftValue = ecomet_bitmap:zip(ecomet_bitmap:reset_bit(LevelValue,ID)),
-      case ecomet_bitmap:is_empty(LeftValue) of
-        true->
-          ok = ecomet_db:delete(DB,?INDEX,Storage,Tag),
-          % The level is deleted, we need to update the upper level index
-          up;
+group_by_dbs_types_tags( LogList )->
+  lists:foldl(fun(#{db := DB, object:=#{ <<".oid">>:=OID, object := Object }},Acc)->
+    DBAcc1 =lists:foldl(fun(Type, DBAcc)->
+      case ecomet_db:changes( DB, ?DATA, Type, OID ) of
+        { Data0, Data1 }->
+          case {maps:get(tags,Data0,#{}), maps:get(tags, Data1, #{})} of
+            {SameTags, SameTags}->
+              DBAcc;
+            {Tags0, Tags1}->
+              Fields = lists:usort(maps:keys(Tags0) ++ maps:keys(Tags1)),
+              TypeAcc1 = lists:foldl(fun(Field, TypeAcc)->
+                case {maps:get(Field,Tags0,[]), maps:get(Field,Tags1,[])} of
+                  {SameFieldTags, SameFieldTags}->
+                    % No field tags changes
+                    TypeAcc;
+                  { FieldTags0, FieldTags1 }->
+                    %-----Add tags-------------------------
+                    TypeAcc1 =
+                      lists:foldl(fun({Value,IndexType}, TAcc)->
+                        Tag = {Field,Value,IndexType},
+                        TagAcc = maps:get(Tag,TAcc,#{}),
+                        TAcc#{ Tag => TagAcc#{ OID => true}}
+                      end,TypeAcc, FieldTags1 -- FieldTags0 ),
+                    %-----Delete tags-------------------------
+                    lists:foldl(fun({Value,IndexType}, TAcc)->
+                      Tag = {Field,Value,IndexType},
+                      TagAcc = maps:get(Tag,TAcc,#{}),
+                      TAcc#{ Tag => TagAcc#{ OID => false}}
+                    end, TypeAcc1, FieldTags0 -- FieldTags1 )
+                end
+              end, maps:get(DBAcc,Type,#{}), Fields),
+              DBAcc#{ Type => TypeAcc1 }
+          end;
         _->
-          ok = ecomet_db:write(DB,?INDEX,Storage,Tag,LeftValue),
-          % The level is updated (not removed) therefore there is no need to update the upper level
-          stop
+          % No DB storage type changes
+          DBAcc
       end
-  end.
+    end, maps:get( DB, Acc, #{}), ecomet_object:get_storage_types( Object )),
+    Acc#{ DB => DBAcc1 }
+  end,#{}, LogList).
+
+prepare_commit(Tag, OIDs)->
+  maps:to_list(maps:fold(fun(OID,Value,Acc)->
+    PatternID=ecomet_object:get_pattern(OID),
+    ObjectID=ecomet_object:get_id(OID),
+    IDHN=ObjectID div ?BITSTRING_LENGTH,
+    IDLN=ObjectID rem ?BITSTRING_LENGTH,
+    IDLAcc =  maps:get({Tag,{idl,PatternID,IDHN}},Acc,#{}),
+    Acc#{
+      {Tag,patterns} =>#{},
+      {Tag,{idh,PatternID}} => #{},
+      {Tag,{idl,PatternID,IDHN}} => IDLAcc#{ IDLN => Value }
+    }
+  end,#{},OIDs)).
+
+prepare_rollback([{Tag, Commit}| Rest])->
+  [{Tag, maps:map(fun(_ID,Value)-> not Value end, Commit )} | prepare_rollback(Rest)];
+prepare_rollback([])->
+  [].
+
+%------------------PHASE 3---------------------------------------------
+%               Write changes to the real database
+%----------------------------------------------------------------------
+write(Module, Ref, Updates)->
+  todo.
+
+
+
 
 %%==============================================================================================
 %%	Search

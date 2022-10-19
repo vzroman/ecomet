@@ -63,13 +63,13 @@
 %%	ECOMET API
 %%=================================================================
 -export([
-  read/4, read/5,
-  write/5, write/6,
-  delete/4, delete/5,
+  read/4, read/5, bulk_read/4, bulk_read/5,
+  write/5, write/6, bulk_write/4, bulk_write/5,
+  delete/4, delete/5, bulk_delete/4, bulk_delete/5,
   transaction/1,
 
-  changes/4,
-  on_abort/5
+  changes/4, bulk_changes/4,
+  on_abort/5, bulk_on_abort/4
 ]).
 
 %%=================================================================
@@ -318,16 +318,33 @@ read(DB, Storage, Type, Key, Lock)->
     [{_,Value}] -> Value;
     _->not_found
   end.
+bulk_read(DB, Storage, Type, Keys)->
+  KVs = zaya:read(DB, [#key{ type = Type, storage = Storage, key = K } || K <- Keys]),
+  [{K,V} || {#key{key = K},V} <- KVs].
+bulk_read(DB, Storage, Type, Keys, Lock)->
+  KVs = zaya:read(DB, [#key{ type = Type, storage = Storage, key = K } || K <- Keys], Lock),
+  [{K,V} || {#key{key = K},V} <- KVs].
 
 write(DB, Storage, Type, Key, Value)->
   zaya:write(DB, [{#key{type = Type, storage = Storage, key = Key}, Value}]).
 write(DB, Storage, Type, Key, Value, Lock)->
   zaya:write(DB, [{#key{type = Type, storage = Storage, key = Key}, Value}], Lock).
 
+bulk_write(DB, Storage, Type, KVs)->
+  zaya:write(DB, [{#key{type = Type, storage = Storage, key = K},V} || {K,V} <- KVs]).
+bulk_write(DB, Storage, Type, KVs, Lock)->
+  zaya:write(DB, [{#key{type = Type, storage = Storage, key = K},V} || {K,V} <- KVs], Lock).
+
 delete(DB, Storage, Type, Key)->
   zaya:delete(DB, [#key{type = Type, storage = Storage, key = Key}]).
 delete(DB, Storage, Type, Key, Lock)->
   zaya:delete(DB, [#key{type = Type, storage = Storage, key = Key}], Lock).
+
+bulk_delete(DB, Storage, Type, Keys)->
+  zaya:delete(DB, [#key{type = Type, storage = Storage, key = K} || K <-Keys]).
+bulk_delete(DB, Storage, Type, Keys, Lock)->
+  zaya:delete(DB, [#key{type = Type, storage = Storage, key = K} || K <-Keys],Lock).
+
 
 transaction(Fun)->
   zaya:transaction(Fun).
@@ -338,9 +355,14 @@ changes(DB, Storage, Type, Key)->
     #{ K:= Changes }-> Changes;
     _->none
   end.
+bulk_changes(DB, Storage, Type, Keys)->
+  Result = zaya:changes(DB, [#key{type = Type, storage = Storage, key = K} || K <- Keys]),
+  maps:fold(fun(#key{key = K}, V, Acc)->Acc#{ K => V } end, #{}, Result).
 
 on_abort(DB, Storage, Type, Key, Value)->
   zaya:on_abort(DB, [{#key{type = Type, storage = Storage, key = Key}, Value}] ).
+bulk_on_abort(DB, Storage, Type, KVs)->
+  zaya:on_abort(DB, [{#key{type = Type, storage = Storage, key = K}, V} || {K,V} <- KVs] ).
 
 %%=================================================================
 %%	SERVICE API
