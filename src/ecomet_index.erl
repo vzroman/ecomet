@@ -26,6 +26,7 @@
 %% ====================================================================
 -export([
   build_index/3,
+  object_tags/1,
   commit/1,
   write/3
 ]).
@@ -96,6 +97,15 @@ build_index(Changes, BackTags, Map)->
         maps:remove(Type, Acc)
     end
   end,BackTags, Changes).
+
+object_tags(BackTags)->
+  maps:keys(maps:fold(fun(_StorageType,Fields,Acc0)->
+    maps:fold(fun(Field, Tags, Acc1)->
+      lists:foldl(fun({Value,IndexType}, Acc)->
+        Acc#{ {Field, Value, IndexType}=>1 }
+      end,Acc1,Tags)
+    end, Acc0, Fields)
+  end,#{}, BackTags)).
 
 field_tags( Field, Map, Value )->
   case ecomet_field:get_index(Map, Field) of
@@ -268,7 +278,7 @@ read_tag(DB,Storage,Vector,Tag)->
       [PatternID]->{Tag,{idh,PatternID}};
       []->{Tag,patterns}
     end,
-  case ecomet_db:dirty_read(DB,?INDEX,Storage,Key) of
+  case ecomet_db:read(DB,?INDEX,Storage,Key) of
     not_found->none;
     IndexValue-> IndexValue
   end.
