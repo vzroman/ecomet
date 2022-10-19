@@ -35,7 +35,6 @@
   insert/2,
   delete/2,delete/3,
   object_map/2,
-  execute/2,execute/3,
   compile/3,compile/4,
   system/3
 ]).
@@ -75,14 +74,12 @@
 
 -define(TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
-    _T when _T=:=none;_T=:=dirty->
-      ?LOGDEBUG("start internal transaction"),
+    none->
       case ecomet_transaction:internal(Fun) of
         {ok,_TResult}->_TResult;
         {abort,_TError}->?ERROR(_TError)
       end;
     _->
-      ?LOGDEBUG("skip transaction"),
       Fun()
   end).
 
@@ -180,11 +177,10 @@ get(DBs,Fields,Conditions,Params)->
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
   case maps:get(lock,Params,none) of
     none ->
-      % All operations are dirty - no need to start transaction
-      execute(CompiledQuery,DBs,Union);
+      % All operations are dirty
+      execute(no_transaction,CompiledQuery,DBs,Union);
     _->
-      % Operations require locks - wrap the query into transactions
-      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
+      execute(execute,CompiledQuery,DBs,Union)
   end.
 
 system(DBs,Fields,Conditions)->
@@ -195,7 +191,7 @@ system(DBs,Fields,Conditions)->
     map = Map,
     reduce = Reduce
   },
-  execute(Compiled,DBs,{'OR',ecomet_resultset:new()}).
+  execute(no_transaction,Compiled,DBs,{'OR',ecomet_resultset:new()}).
 
 %%=====================================================================
 %%	SUBSCRIBE
@@ -279,15 +275,7 @@ set(DBs,Fields,Conditions,Params) when is_list(Params)->
 set(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(set,Fields,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-
-  case maps:get(lock,Params,none) of
-    none ->
-      % All operations are dirty - no need to start transaction
-      execute(CompiledQuery,DBs,Union);
-    _->
-      % Operations require locks - wrap the query into transactions
-      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
-  end.
+  execute(execute,CompiledQuery,DBs,Union).
 
 %%=====================================================================
 %%	INSERT
@@ -333,15 +321,8 @@ delete(DBs,Conditions,Params) when is_list(Params)->
 delete(DBs,Conditions,Params)->
   CompiledQuery=compile(delete,none,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
+  execute(execute,CompiledQuery,DBs,Union).
 
-  case maps:get(lock,Params,none) of
-    none ->
-      % All operations are dirty - no need to start transaction
-      execute(CompiledQuery,DBs,Union);
-    _->
-      % Operations require locks - wrap the query into transactions
-      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
-  end.
 %%=====================================================================
 %%	COMPILE
 %%=====================================================================
@@ -361,15 +342,13 @@ compile(Type,Fields,Conditions,Params)->
 %%=====================================================================
 %%	EXECUTE
 %%=====================================================================
-execute(CompiledQuery,DBs)->
-  execute(CompiledQuery,DBs,{'OR',ecomet_resultset:new()}).
-execute(#compiled_query{conditions = Conditions,map = Map,reduce = Reduce},DBs,Union)->
+execute(Handler,#compiled_query{conditions = Conditions,map = Map,reduce = Reduce},DBs,Union)->
   DBs1=
     case DBs of
       '*'-> ecomet_db:get_databases();
       _-> DBs
     end,
-  ecomet_resultset:execute(DBs1,Conditions,Map,Reduce,Union).
+  ecomet_resultset:Handler(DBs1,Conditions,Map,Reduce,Union).
 
 %%-------------GET------------------------------------------------
 %% Search params is a map:

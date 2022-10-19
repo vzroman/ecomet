@@ -30,7 +30,7 @@
 	new/0,
 	new_branch/0,
 	execute/5,
-	db_execute/5,
+	no_transaction/5,
 	execute_local/4,
 	remote_call/6,
 	count/1,
@@ -518,9 +518,25 @@ db_no_transaction(DB, Conditions, Map, Union)->
 %%---------------------------------------------------------------------
 %%	TRANSACTIONAL QUERY
 %%---------------------------------------------------------------------
-transaction([DB], Conditions, Map, Reduce, Union)->
+transaction([DB|Rest] = DBs, Conditions, Map, Reduce, Union)->
+	case x_nodes(Rest, ecomet_db:available_nodes(DB)) of
+		[]->
+			cross_nodes_transaction( DBs, Conditions, Map, Reduce, Union );
+		Nodes->
+			case lists:member(node(), Nodes) of
+				true->
+					local_transaction( DBs, Conditions, Map, Reduce, Union );
+				_->
+					single_node_transaction(DBs, Conditions, Map, Reduce, Union)
+			end
+	end.
 
-
+x_nodes(_DBs, [])->
+	[];
+x_nodes([DB|Rest],Nodes)->
+	x_nodes(Rest, Nodes -- (Nodes -- ecomet_db:available_nodes(DB)));
+x_nodes([], Nodes)->
+	Nodes.
 
 execute([DB],Conditions,Map,Reduce,Union)->
 	%--------single DB search----------------------
