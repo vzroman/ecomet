@@ -271,10 +271,70 @@ prepare_rollback([])->
 %               Write changes to the real database
 %----------------------------------------------------------------------
 write(Module, Ref, Updates)->
-  todo.
+  maps:fold(fun
+    ({{Tag,{idl,PatternID,IDHN}}, IDLs},_)->
+      {ok, Unlock} = elock:lock(?LOCKS, {Ref,Tag}, _IsShared = false, _Timeout=infinity),
+      try build_bitmap(Module, Ref, Tag, PatternID, IDHN, IDLs)
+      after
+        Unlock()
+      end;
+    (_,_)->
+      % {idh,PatternID} and {Tag,patterns} are updated during IDLs update
+      ignore
+  end, undefined,Updates),
+  ok.
 
+build_bitmap(Module, Ref, Tag, PatternID, IDHN, IDLs)->
+  {Add0, Del0}=
+    maps:fold(fun(IDLN,Value,{AddAcc,DelAcc})->
+      if
+        Value -> { ecomet_bitmap:set_bit(AddAcc,IDLN), DelAcc };
+        true-> { AddAcc, ecomet_bitmap:set_bit(DelAcc,IDLN) }
+      end
+    end,{<<>>,<<>>}, IDLs),
+  Add = ecomet_bitmap:zip( Add0 ),
+  Del = ecomet_bitmap:zip( Del0 ),
+  case bitmap_level(Module, Ref,{Tag,{idl,PatternID,IDHN}},{Add,Del}) of
+    stop->ok;
+    IDH->
+      {IDHAdd,ADHDel} =
+        if
+          IDH =:= add-> {ecomet_bitmap:set_bit(<<>>, IDHN),<<>>};
+          true -> {<<>>, ecomet_bitmap:set_bit(<<>>, IDHN)}
+        end,
+      case bitmap_level(Module, Ref,{Tag,{idh,PatternID}},{IDHAdd,ADHDel}) of
+        stop->ok;
+        IDP->
+          {PatternAdd,PatternDel} =
+            if
+              IDP =:= add-> {ecomet_bitmap:set_bit(<<>>, PatternID),<<>>};
+              true -> {<<>>, ecomet_bitmap:set_bit(<<>>, PatternID)}
+            end,
+        bitmap_level(Module, Ref,{Tag,patterns},{PatternAdd,PatternDel})
+      end
+  end.
 
-
+%%--------------Add an ID to the index level--------------------------------------
+bitmap_level(Module, Ref,Tag,{Add,Del})->
+  case Module:read(Ref,[{?INDEX,[Tag]}]) of
+    []->
+      case ecomet_bitmap:zip( ecomet_bitmap:bit_andnot(Add,Del)) of
+        <<>>-> delete;
+        LevelValue->
+          ok = Module:write( Ref, [{{?INDEX,[Tag]}, LevelValue}]),
+          add
+      end;
+    LevelValue0->
+      LevelValue1 = ecomet_bitmap:bit_or(LevelValue0, Add ),
+      case ecomet_bitmap:zip( ecomet_bitmap:bit_andnot(LevelValue1,Del)) of
+        <<>>->
+          ok = Module:delete( Ref, [{?INDEX,[Tag]}]),
+          delete;
+        LevelValue->
+          ok = Module:write( Ref, [{{?INDEX,[Tag]}, LevelValue}]),
+          stop
+      end
+  end.
 
 %%==============================================================================================
 %%	Search
