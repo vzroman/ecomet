@@ -52,7 +52,7 @@ internal(Fun)->
       Result = ecomet_db:transaction(fun()->
         Res = Fun(),
         State = #state{log = Log,owner = Owner} = erase(?transaction),
-        OrderedLog = ordsets:from_list([{Queue,Value} || {Queue, Value} <- maps:values(Log)]),
+        OrderedLog = lists:usort([{Queue,Value} || {Queue, Value} <- maps:values(Log)]),
         CommitLog = ecomet_object:commit([Value || {_,Value} <- OrderedLog]),
         ecomet_index:commit( CommitLog ),
         {Res, State#state{ log = [Commit#{ self => Owner } || Commit <- CommitLog] }}
@@ -208,7 +208,7 @@ log(OID, Value)->
     #state{ type = internal, log = Log } = State->
       Queue =
         case Log of
-          #{ OID, {_Queue, _} }->
+          #{ OID := {_Queue, _} }->
             _Queue;
           _->
             maps:size( Log )

@@ -179,9 +179,9 @@ type_params(Type, Params, #{dir := Dir} = OtherParams )->
   maps:merge( OtherParams#{ dir => Dir ++ "/" ++ atom_to_list(Type) }, maps:without([dir],Params) ).
 
 close( Ref )->
-  case maps:fold(fun(_Type,{Module, Ref},Errs)->
+  case maps:fold(fun(_Type,{Module, TRef},Errs)->
     try
-      Module:close( Ref ),
+      Module:close( TRef ),
       Errs
     catch
       _:E->[E|Errs]

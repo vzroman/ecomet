@@ -30,7 +30,6 @@
   get_attached_nodes/0,
   get_ready_nodes/0,
   is_master/0, is_master/1,
-  attach_node/1,
   detach_node/1,
   set_ready/2,
   sync/0

@@ -399,7 +399,7 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
 %%------------------------------------------------------------
 %%  Trigger subscriptions
 %%------------------------------------------------------------
-commit( Log )->
+commit( _Log )->
   todo.
 
 on_commit(#ecomet_log{
