@@ -82,10 +82,10 @@ get_configured_nodes( Filter )->
   [N||[N]<-Result].
 
 get_attached_nodes()->
-  dlss:get_nodes().
+  zaya:all_nodes().
 
 get_ready_nodes()->
-  dlss:get_ready_nodes().
+  zaya:ready_nodes().
 
 update_ready( Node )->
   case [N || N <- get_configured_nodes(), N=:=Node] of
@@ -97,19 +97,11 @@ update_ready( Node )->
         end,
       set_ready( Node, IsReady );
     _->
-      ?LOGWARNING("~p is not in the schema yet",[Node])
+      ?LOGDEBUG("~p is not in the schema yet",[Node])
   end.
 
-attach_node(Node) when is_atom(Node)->
-  dlss:add_node(Node);
-attach_node(Node) when is_binary(Node)->
-  attach_node(binary_to_atom(Node,utf8));
-attach_node(Node)->
-  {ok,Name}=ecomet:read_field(?OBJECT(Node),<<".name">>),
-  attach_node(Name).
-
 detach_node(Node) when is_atom(Node)->
-  dlss:remove_node(Node);
+  zaya:remove_node(Node);
 detach_node(Node) when is_binary(Node)->
   detach_node(binary_to_atom(Node,utf8));
 detach_node(Node)->
@@ -132,19 +124,13 @@ set_ready(Node,Value)->
 is_master()->
   is_master(node()).
 is_master(Node)->
-  Nodes =
-    [ N || N <- get_ready_nodes(), case ecomet:read_field(ecomet:open(<<"/root/.nodes/",(atom_to_binary(N,utf8))/binary>>), <<"is_ready">> ) of
-      {ok, true}-> true;
-      _ -> false
-      end],
-  case Nodes of
+  case lists:usort([ N || N <- get_ready_nodes()]) of
     [Node|_]->
       % The master is the first node in the list of ready nodes
       true;
     _->
       false
   end.
-
 
 sync()->
 
@@ -156,17 +142,12 @@ sync()->
       Configured = get_configured_nodes(),
       Attached = get_attached_nodes(),
 
-      % Attach new nodes
-      [attach_node(N) || N <- Configured -- Attached],
-
       % Detach removed nodes
-      [detach_node(N) || N <- Attached -- Configured],
+      [catch detach_node(N) || N <- Attached -- Configured],
 
       % Update ready nodes
-      BackendReady = get_ready_nodes(),
-      DBReady = get_configured_nodes({<<"is_ready">>,'=',true}),
-      [ set_ready( N, true ) || N <- BackendReady -- DBReady ],
-      [ set_ready( N, false ) || N <- DBReady -- BackendReady ],
+      Ready = get_ready_nodes(),
+      [ set_ready( N, false ) || N <- Configured -- Ready ],
 
       ok;
     _->
