@@ -210,10 +210,20 @@ group_by_dbs_types_tags( LogList )->
     DBAcc1 =lists:foldl(fun(Type, DBAcc)->
       case ecomet_db:changes( DB, ?DATA, Type, OID ) of
         { Data0, Data1 }->
-          case {maps:get(tags,Data0,#{}), maps:get(tags, Data1, #{})} of
-            {SameTags, SameTags}->
+          Tags0 =
+            if
+              is_map( Data0 )-> maps:get(tags,Data0,#{});
+              true -> #{}
+            end,
+          Tags1 =
+            if
+              is_map( Data1 )-> maps:get(tags,Data1,#{});
+              true -> #{}
+            end,
+          case Tags0 of
+            Tags1->
               DBAcc;
-            {Tags0, Tags1}->
+            _->
               Fields = lists:usort(maps:keys(Tags0) ++ maps:keys(Tags1)),
               TypeAcc1 = lists:foldl(fun(Field, TypeAcc)->
                 case {maps:get(Field,Tags0,[]), maps:get(Field,Tags1,[])} of
@@ -235,7 +245,7 @@ group_by_dbs_types_tags( LogList )->
                       TAcc#{ Tag => TagAcc#{ OID => false}}
                     end, TypeAcc1, FieldTags0 -- FieldTags1 )
                 end
-              end, maps:get(DBAcc,Type,#{}), Fields),
+              end, maps:get(Type, DBAcc,#{}), Fields),
               DBAcc#{ Type => TypeAcc1 }
           end;
         _->
@@ -269,7 +279,7 @@ prepare_rollback([])->
 %               Write changes to the real database
 %----------------------------------------------------------------------
 write(Module, Ref, Updates)->
-  maps:fold(fun
+  lists:foldl(fun
     ({{Tag,{idl,PatternID,IDHN}}, IDLs},_)->
       {ok, Unlock} = elock:lock(?INDEX_LOCKS, {Ref,Tag}, _IsShared = false, _Timeout=infinity,[node()]),
       try build_bitmap(Module, Ref, Tag, PatternID, IDHN, IDLs)
@@ -321,7 +331,7 @@ bitmap_level(Module, Ref,Tag,{Add,Del})->
           ok = Module:write( Ref, [{{?INDEX,[Tag]}, LevelValue}]),
           add
       end;
-    LevelValue0->
+    [{_,LevelValue0}]->
       LevelValue1 = ecomet_bitmap:bit_or(LevelValue0, Add ),
       case ecomet_bitmap:zip( ecomet_bitmap:bit_andnot(LevelValue1,Del)) of
         <<>>->
