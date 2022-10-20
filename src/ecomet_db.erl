@@ -112,7 +112,8 @@ init()->
   case application:ensure_started( zaya ) of
     ok->ok;
     {error,Error}->
-      ?LOGERROR("backend init error ~p, close the application fix the error and try to start again",[Error])
+      ?LOGERROR("backend init error ~p, close the application fix the error and try to start again",[Error]),
+      timer:sleep(infinity)
   end,
   wait_local_dbs().
 

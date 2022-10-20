@@ -143,7 +143,7 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read =
   stateless := Stateless
 })->
 
-  esubscribe:subscribe({log,OID}, self()),
+  esubscribe:subscribe(?ESUBSCRIPTIONS,{log,OID}, self()),
 
   if
     Stateless -> ignore;
@@ -157,13 +157,13 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read =
 
 object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedback = NoFeedback } = Monitor )->
   receive
-    {'$esubscription', {log,OID}, {_Tags, _Object, _Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
+    {?ESUBSCRIPTIONS, {log,OID}, {_Tags, _Object, _Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
       object_monitor( Monitor );
-    {'$esubscription', {log,OID}, {[], _Object, _Changes, _Self}, _Node, _Actor}->
+    {?ESUBSCRIPTIONS, {log,OID}, {[], _Object, _Changes, _Self}, _Node, _Actor}->
       Owner! ?SUBSCRIPTION(ID,delete,OID,#{}),
-      esubscribe:unsubscribe({log,OID},[node()], self()),
+      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID},[node()], self()),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
-    {'$esubscription', {log,OID}, {_Tags, Object, Changes, _Self}, _Node, _Actor}->
+    {?ESUBSCRIPTIONS, {log,OID}, {_Tags, Object, Changes, _Self}, _Node, _Actor}->
       Updates = Read( Changes, Object ),
       case maps:size(Updates) of
         0-> ignore;
@@ -171,10 +171,10 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
       end,
       object_monitor( Monitor );
     {unsubscribe, Owner}->
-      esubscribe:unsubscribe({log,OID},[node()], self()),
+      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID},[node()], self()),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     {'DOWN', _Ref, process, Owner, _Reason}->
-      esubscribe:unsubscribe({log,OID},[node()], self()),
+      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID},[node()], self()),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     _->
       object_monitor( Monitor )
@@ -406,7 +406,7 @@ on_commit(#{
   self := Self
 })->
   % Run object monitors
-  esubscribe:notify( {log,OID}, { TAdd, Object, Changes, Self } ),
+  esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, { TAdd, Object, Changes, Self } ),
 
   % Run the search on the other nodes
   search(OID, DB, TAdd ++ TDel, Object, Changes, Self).

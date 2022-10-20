@@ -58,7 +58,7 @@ init([]) ->
 
   ESubsriptionsServer = #{
     id=>esubscribe,
-    start=>{esubscribe,start_link,[]},
+    start=>{esubscribe,start_link,[?ESUBSCRIPTIONS]},
     restart=>permanent,
     shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
     type=>worker,

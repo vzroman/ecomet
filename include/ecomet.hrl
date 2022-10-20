@@ -40,6 +40,8 @@
 -define(LOCKS,'$ecomet_locks$').
 -define(INDEX_LOCKS,'$ecomet_index_locks$').
 
+-define(ESUBSCRIPTIONS,'$ecomet_esubscriptions$').
+
 -define(ERROR(Error),erlang:error(Error)).
 
 -define(PIPE(Items,Acc),ecomet_lib:pipe(Items,Acc)).
