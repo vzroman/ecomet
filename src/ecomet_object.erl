@@ -337,12 +337,12 @@ edit(#object{oid = OID, map=Map}=Object,InFields,_Params)->
   case ecomet_transaction:dict_get({OID,handler},none) of
     none ->
       ?TRANSACTION(fun()->
-        prepare_edit(Object, Fields),
+        prepare_edit(Fields, Object),
         save(Object, on_edit)
       end);
     _->
       % If object is under behaviour handlers, just save changes
-      prepare_edit(Object, Fields)
+      prepare_edit(Fields, Object)
   end,
   ok.
 
