@@ -94,7 +94,7 @@
 %%=================================================================
 %%	SCHEMA
 %%=================================================================
--define(SCHEMA,?MODULE).
+-define(SCHEMA,'ECOMET_SCHEMA').
 -define(schemaModule,zaya_ets_leveldb).
 -define(schemaParams,
   #{
@@ -553,7 +553,9 @@ wait_root()->
     []->
       ?LOGINFO("wait for root database..."),
       timer:sleep(1000),
-      wait_root()
+      wait_root();
+    _->
+      ok
   end.
 
 register_node()->
