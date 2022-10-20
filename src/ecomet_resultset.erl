@@ -31,8 +31,6 @@
 	new_branch/0,
 	execute/5,
 	no_transaction/5,
-	execute_local/4,
-	remote_call/6,
 	count/1,
 	foldr/3,
 	foldr/4,
@@ -45,7 +43,8 @@
 %% Module remote call API
 %%====================================================================
 -export([
-	single_node_transaction/5
+	single_node_transaction/5,
+	db_transaction_request/5
 ]).
 %%====================================================================
 %% Subscriptions API
@@ -66,9 +65,7 @@
 	has_direct/1,
 	optimize/1,
 	search_patterns/3,
-	seacrh_idhs/3,
-	execute_remote/4,
-	wait_remote/2
+	seacrh_idhs/3
 ]).
 
 -endif.
@@ -569,99 +566,95 @@ single_node_transaction(DBs, Conditions, Map, Reduce, Union)->
 	ecomet:transaction(fun()->local_transaction(DBs, Conditions, Map, Reduce, Union) end).
 
 cross_nodes_transaction( DBs, Conditions, Map, Reduce, Union )->
-	todo.
-
-
-
-% 1. Map search to remote nodes
-% 2. Reduce results, reply
-execute_remote([],_Conditions,_Map,_Union)->none;
-execute_remote(DBs,Conditions,Map,Union)->
-	ReplyPID=self(),
-	IsTransaction=ecomet:is_transaction(),
-	spawn_link(fun()->
-		process_flag(trap_exit,true),
-		StartedList=start_remote(DBs,Conditions,Map,Union,IsTransaction),
-		ReplyPID!{remote_result,self(),reduce_remote(StartedList,[])}
-	end).
-
-% Wait for results from remote databases
-wait_remote(none,RS)->RS;
-wait_remote(PID,RS)->
-	receive
-		{remote_result,PID,RemoteRS}->RS++RemoteRS
-	after
-		?TIMEOUT->
-			PID!query_timeout,
-			receive
-				{remote_result,PID,RemoteRS}->RS++RemoteRS
-			after
-				2000->?LOGWARNING(remote_request_timeout)
+	Self = self(),
+	Master =
+		spawn(fun()->
+			MasterSelf = self(),
+			Workers =
+				[ begin
+						{W,_} = spawn_monitor(fun()->
+							db_transaction(DB, Conditions, Map, Union, MasterSelf)
+						end),
+						{W,DB}
+					end || DB <- DBs],
+			case transaction_wait( maps:from_list( Workers )) of
+				{abort, Reason}->
+					catch Self ! { abort, self(), Reason},
+					exit(Reason);
+				Results->
+					catch Self ! { results, self(), Results}
 			end
+		end),
+
+	receive
+		{results, Master, Results}->
+			Reduce( order_DBs( DBs, Results) );
+		{abort, Master, Reason}->
+			throw( Reason )
 	end.
 
-%% Starting remote search
-start_remote(DBs,Conditions,Map,Union,IsTransaction)->
-	lists:foldl(fun(DB,Result)->
-		case ecomet_db:get_search_node(DB,[]) of
-			none->Result;
-			Node->
-				SearchParams=[DB,Conditions,Union,Map,IsTransaction],
-				[{spawn_link(Node,?MODULE,remote_call,[self()|SearchParams]),SearchParams,[Node]}|Result]
-		end
-	end,[],DBs).
-
-%% Search for remote process
-remote_call(PID,DB,Conditions,Union,Map,IsTransaction)->
-	LocalResult=
-		if
-			IsTransaction ->
-				case ecomet:transaction(fun()->
-					execute_local(DB,Conditions,Map,Union)
-				end) of
-					{ok,Result}->Result;
-					{error,Error}->exit(Error)
-				end;
-			true ->execute_local(DB,Conditions,Map,Union)
-		end,
-	PID!{ecomet_resultset,self(),{DB,LocalResult}}.
-
-%% Reducing remote results
-reduce_remote([],ReadyResult)->ReadyResult;
-% Wait remote results
-reduce_remote(WaitList,ReadyResult)->
+transaction_wait( Workers ) when map_size(Workers) > 0->
 	receive
-		% Result received
-		{ecomet_resultset,PID,DBResult}->
-			case lists:keyfind(PID,1,WaitList) of
-				% We are waiting for this result
-				{PID,_,_}->reduce_remote(lists:keydelete(PID,1,WaitList),[DBResult|ReadyResult]);
-				% Unexpected result
-				false->reduce_remote(WaitList,ReadyResult)
+		{result, W, Result}->
+			case maps:take( W, Workers ) of
+				{DB, RestWorkers}->
+					[{DB, Result}| transaction_wait(RestWorkers)];
+				_->
+					transaction_wait( Workers )
 			end;
-		% Remote process is down
-		{'EXIT',PID,Reason}->
-			case lists:keyfind(PID,1,WaitList) of
-				% It's process that we are waiting result from. Node is node available now,
-				% let's try another one form the cluster
-				{PID,Params,TriedNodes} when Reason==noconnection->
-					case ecomet_db:get_search_node(lists:nth(1,Params),TriedNodes) of
-						% No other nodes can search this domain
-						none->
-							?LOGWARNING({no_search_nodes_available,lists:nth(1,Params)}),
-							reduce_remote(lists:keydelete(PID,1,WaitList),ReadyResult);
-						% Let's try another node
-						NextNode->
-							% Start task
-							NewPID=spawn_link(NextNode,?MODULE,remote_call,[self()|Params]),
-							reduce_remote(lists:keyreplace(PID,1,WaitList,{NewPID,Params,[NextNode|TriedNodes]}),ReadyResult)
-					end;
-				% We caught exit from some linked process.
-				% Variant 1. Parent process get exit, stop the task
-				% Variant 2. Process we are waiting is crashed due to error in the user fun
-				_->exit(Reason)
+		{'DOWN', _, process, _, Reason}->
+			{abort, Reason}
+	end;
+transaction_wait( _Workers )->
+	[].
+
+db_transaction(DB, Conditions, Map, Union, Master)->
+	erlang:monitor(process, Master),
+	Nodes = ecomet_db:available_nodes(DB),
+	case lists:member(node(), Nodes) of
+		true->
+			db_transaction_request(DB, Conditions, Map, Union, Master);
+		_->
+			db_transaction(Nodes, DB, Conditions, Map, Union, Master)
+	end.
+
+db_transaction([], DB, _Conditions, _Map, _Union, _Master)->
+	exit({DB, not_available});
+db_transaction(Nodes, DB, Conditions, Map, Union, Master)->
+	I = erlang:phash2(make_ref(),length(Nodes)),
+	Node = lists:nth(I+1, Nodes),
+	Worker = spawn(Node, ?MODULE, db_transaction_request, [DB, Conditions, Map, Union, _Master = self()]),
+	erlang:monitor(process, Worker),
+	receive
+		{result, Worker, Result}->
+			catch Master ! {result, self(), Result},
+			receive
+				{'DOWN', _, process, Master, normal}->
+					ok;
+				{'DOWN', _, process, _, Reason}->
+					exit(Reason)
 			end;
-		query_timeout->ReadyResult
+		{'DOWN', _, process, Worker, _Reason}->
+			db_transaction( Nodes--[Node], DB, Conditions, Map, Union, Master );
+		{'DOWN', _, process, Master, Reason}->
+			exit(Reason)
+	end.
+
+db_transaction_request(DB, Conditions, Map, Union, Master)->
+	case ecomet:transaction(fun()->
+		Result = execute_local(DB,Conditions,Map,Union),
+		catch Master ! {result, self(), Result},
+		receive
+			{'DOWN', _, process, Master, normal}->
+				ok;
+			{'DOWN', _, process, Master, Reason}->
+				throw(Reason)
+		end
+	end) of
+		{abort,Reason}->
+			exit( Reason );
+		_->
+			ok
 	end.
 
 %% Local search:
