@@ -901,17 +901,17 @@ object_rollback(#object{oid = OID, map = Map, db = DB}, Changes)->
 
 
 % Save object changes to the storage
-commit([])->
-  [];
 commit([Object|Rest])->
   case compile_changes( Object ) of
     Changes when map_size( Changes ) > 0->
       Rollback = object_rollback(Object, Changes ),
-      do_commit( Object, Changes, Rollback );
+      [do_commit( Object, Changes, Rollback )| commit([Object|Rest]) ];
     _->
       % No real changes
       commit( Rest )
-  end.
+  end;
+commit([])->
+  [].
 
 do_commit( #object{oid = OID, map = Map, db = DB}=Object, Changes, Rollback )->
   %----------Define fields changes-------------------

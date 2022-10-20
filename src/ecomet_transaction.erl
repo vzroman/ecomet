@@ -60,9 +60,9 @@ internal(Fun)->
       case Result of
         {ok,{ FunRes, State }}->
           tcommit( State ),
-          FunRes;
+          {ok,FunRes};
         _->
-          abort
+          Result
       end;
     #state{ type = internal } = State->
       Result = ecomet_db:transaction(Fun),
@@ -74,7 +74,7 @@ internal(Fun)->
       end,
       Result;
     #state{ type = External } when is_pid( External )->
-      External ! {internal, self(), Fun},
+      catch External ! {internal, self(), Fun},
       receive
         {result, External, {abort,_}=Error}-> throw(Error);
         {result, External, Result}-> Result

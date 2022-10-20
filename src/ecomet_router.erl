@@ -39,37 +39,27 @@ on_init( PoolSize )->
 
 worker_loop()->
   receive
-    #ecomet_log{} = Log->
-      try
-        ecomet_subscription:on_commit( Log )
+    Log = [H|_] when is_map(H) ->
+      [try ecomet_subscription:on_commit( L )
       catch
         _:Error:Stack->
           ?LOGERROR("log error ~p, ~p, ~p",[ Log, Error, Stack ])
-      end;
+      end || L <- Log];
     Unexpected->
       ?LOGWARNING("unexpected message ~p", [Unexpected])
   end,
   worker_loop().
 
-on_commit( #ecomet_log{changes = undefined} )->
-  ignore;
-on_commit( Logs0 )->
-  case [L || L=#ecomet_log{changes = C} <- Logs0, C=/=undefined] of
-    []->
-      ignore;
-    Logs->
-      [ rpc:cast( N, ?MODULE , notify,[ Logs ]) || N <- persistent_term:get({?MODULE,ready_nodes}) ],
-      notify( Logs )
-  end.
+on_commit( Log )->
+  [ rpc:cast( N, ?MODULE , notify,[ Log ]) || N <- persistent_term:get({?MODULE,ready_nodes}) ],
+  notify( Log ).
 
-notify( Logs )->
+notify( Log )->
   case persistent_term:get({?MODULE,pool_size},none) of
     PoolSize when is_integer(PoolSize)->
-      [ begin
-          I = erlang:phash(Log, PoolSize),
-          Worker = persistent_term:get({?MODULE,I}),
-          Worker ! Log
-        end || Log <- Logs ],
+      I = erlang:phash(Log, PoolSize),
+      Worker = persistent_term:get({?MODULE,I}),
+      Worker ! Log,
       ok;
     _->
       % Not initialized yet

@@ -40,16 +40,6 @@
 -define(LOCKS,'$ecomet_locks$').
 -define(INDEX_LOCKS,'$ecomet_index_locks$').
 
--record(ecomet_log,{
-  object,
-  db,
-  ts,
-  tags,
-  rights,
-  changes,
-  self
-}).
-
 -define(ERROR(Error),erlang:error(Error)).
 
 -define(PIPE(Items,Acc),ecomet_lib:pipe(Items,Acc)).

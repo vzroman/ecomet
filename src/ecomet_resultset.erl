@@ -492,6 +492,8 @@ no_transaction(DBs, Conditions, Map, Reduce, Union)->
 
 no_transaction_wait( Workers ) when map_size(Workers) > 0->
 	receive
+		{result, W, {error, _}}->
+			no_transaction_wait(maps:remove(W, Workers));
 		{result, W, Result}->
 			case maps:take( W, Workers ) of
 				{DB, RestWorkers}->
@@ -512,9 +514,17 @@ db_no_transaction(DB, Conditions, Map, Union)->
 		Nodes->
 			case lists:member(node(), Nodes) of
 				true->
-					execute_local(DB,Conditions,Map,Union);
+					try execute_local(DB,Conditions,Map,Union)
+					catch
+						_:E->{error, E}
+					end;
 				_->
-					ecall:call_any(Nodes,?MODULE,?FUNCTION_NAME,[DB, Conditions, Map, Union])
+					case ecall:call_one(Nodes,?MODULE,?FUNCTION_NAME,[DB, Conditions, Map, Union]) of
+						{ok,{_Node,Result}}->
+							Result;
+						Error->
+							Error
+					end
 			end
 	end.
 
@@ -556,14 +566,19 @@ local_transaction( DBs, Conditions, Map, Reduce, Union )->
 	Reduce( Results ).
 
 single_node_transaction(Nodes, DBs, Conditions, Map, Reduce, Union)->
-	case ecall:call_any(Nodes, ?MODULE, single_node_transaction,[DBs, Conditions, Map, Reduce, Union]) of
+	case ecall:call_one(Nodes, ?MODULE, single_node_transaction,[DBs, Conditions, Map, Reduce, Union]) of
 		{error,Error}->
 			throw(Error);
-		Result->
+		{ok,{_Node,Result}}->
 			Result
 	end.
 single_node_transaction(DBs, Conditions, Map, Reduce, Union)->
-	ecomet:transaction(fun()->local_transaction(DBs, Conditions, Map, Reduce, Union) end).
+	case ecomet:transaction(fun()->local_transaction(DBs, Conditions, Map, Reduce, Union) end) of
+		{ok,Result}->
+			Result;
+		Error->
+			Error
+	end.
 
 cross_nodes_transaction( DBs, Conditions, Map, Reduce, Union )->
 	Self = self(),
@@ -651,12 +666,15 @@ db_transaction_request(DB, Conditions, Map, Union, Master)->
 				throw(Reason)
 		end
 	end) of
-		{abort,Reason}->
+		{error,Reason}->
 			exit( Reason );
 		_->
 			ok
 	end.
 
+%%=====================================================================
+%%	SEARCH ENGINE
+%%=====================================================================
 %% Local search:
 %% 1. Search patterns. Match all conditions against Pattern level index. This is optional step, we need it
 %% 		only if patterns not explicitly defined in conditions.
