@@ -25,7 +25,6 @@
 -export([
   on_init/0,
   get_subscriptions/1,
-  commit/1,
   on_commit/1
 ]).
 
@@ -144,7 +143,7 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read =
   stateless := Stateless
 })->
 
-  esubscribe:subscribe({log,OID}, [node()], self(), infinity),
+  esubscribe:subscribe({log,OID}, self()),
 
   if
     Stateless -> ignore;
@@ -399,22 +398,18 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
 %%------------------------------------------------------------
 %%  Trigger subscriptions
 %%------------------------------------------------------------
-commit( _Log )->
-  todo.
-
-on_commit(#ecomet_log{
-  object = #{<<".oid">> := OID} = Object,
-  db = DB,
-  tags = {TAdd, TOld, TDel},
-  changes = Changes,
-  self = Self
+on_commit(#{
+  object := #{<<".oid">> := OID} = Object,
+  db := DB,
+  tags := {TAdd, TDel},
+  changes := Changes,
+  self := Self
 })->
   % Run object monitors
-  NewTags = TAdd ++ TOld,
-  esubscribe:notify( {log,OID}, { NewTags, Object, Changes, Self } ),
+  esubscribe:notify( {log,OID}, { TAdd, Object, Changes, Self } ),
 
   % Run the search on the other nodes
-  search(OID, DB, NewTags ++ TDel, Object, Changes, Self).
+  search(OID, DB, TAdd ++ TDel, Object, Changes, Self).
 
 search( OID, DB, Tags, Object, Changes, Self )->
   case ets:lookup(?S_INDEX, global) of
