@@ -39,7 +39,7 @@ on_init( PoolSize )->
 
 worker_loop()->
   receive
-    Log = [H|_] when is_map(H) ->
+    {log,Log} ->
       [try ecomet_subscription:on_commit( L )
       catch
         _:Error:Stack->
@@ -59,7 +59,7 @@ notify( Log )->
     PoolSize when is_integer(PoolSize)->
       I = erlang:phash(Log, PoolSize),
       Worker = persistent_term:get({?MODULE,I}),
-      Worker ! Log,
+      Worker ! {log,Log},
       ok;
     _->
       % Not initialized yet

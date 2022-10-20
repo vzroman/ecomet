@@ -887,7 +887,7 @@ compile_changes( #object{oid = OID, map = Map, db = DB} )->
 object_rollback(#object{oid = OID, map = Map, db = DB}, Changes)->
   lists:foldl(fun(Type,Acc)->
     case Changes of
-      {#{ Type := Data0}, _} when is_map(Data0)->
+      #{ Type := {Data0, _}} when is_map(Data0)->
         Acc#{ Type => Data0 };
       _->
         case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock = none) of
@@ -905,7 +905,7 @@ commit([Object|Rest])->
   case compile_changes( Object ) of
     Changes when map_size( Changes ) > 0->
       Rollback = object_rollback(Object, Changes ),
-      [do_commit( Object, Changes, Rollback )| commit([Object|Rest]) ];
+      [do_commit( Object, Changes, Rollback )| commit(Rest) ];
     _->
       % No real changes
       commit( Rest )
@@ -936,7 +936,7 @@ do_commit( #object{oid = OID, map = Map, db = DB}=Object, Changes, Rollback )->
 
   %-----Commit changes---------------------------
   maps:map(fun
-    (Type, #{fields := TFields}=TData) when map_size(TFields)>0->
+    (Type,{_, #{fields := TFields}=TData}) when map_size(TFields)>0->
       Data=
         case Tags1 of
           #{Type := TTags}-> TData#{tags => TTags};
@@ -950,16 +950,17 @@ do_commit( #object{oid = OID, map = Map, db = DB}=Object, Changes, Rollback )->
   %--------------Prepare commit log-------------------
   ObjectMap =
     lists:foldl(fun(Type,Acc)->
-      TChanges = maps:get(fields,maps:get(Type, Changes, #{})),
-      TRollback = maps:get(fields,maps:get(Type, Rollback, #{})),
-      maps:merge( Acc, maps:merge(TRollback, TChanges))
+      {_,TChanges} = maps:get(Type, Changes, {#{},#{}}),
+      TFields1 = maps:get(fields,TChanges,#{}),
+      TFields0 = maps:get(fields,maps:get(Type, Rollback, #{}),#{}),
+      maps:merge( Acc, maps:merge(TFields0, TFields1))
     end, #{}, lists:usort(maps:keys(Changes) ++ maps:keys(Changes))),
 
-  NewTags = ecomet_index:object_tags( Tags0 ),
-  DelTags = ecomet_index:object_tags( Tags1 ) -- NewTags,
+  NewTags = ecomet_index:object_tags( Tags1 ),
+  DelTags = ecomet_index:object_tags( Tags0 ) -- NewTags,
 
   % Actually changed fields with their previous values
-  Changes = maps:from_list([{Name,V0}||{Name,{V0,_}}<-FieldsChanges]),
+  Changes0 = maps:map(fun(_F,{V0,_})-> V0 end,FieldsChanges),
 
   % Log timestamp. If it is an object creation then timestamp must be the same as
   % the timestamp of the object, otherwise it is taken as the current timestamp
@@ -974,7 +975,7 @@ do_commit( #object{oid = OID, map = Map, db = DB}=Object, Changes, Rollback )->
     db => DB,
     ts => TS,
     tags => { NewTags, DelTags},
-    changes => Changes
+    changes => Changes0
   }.
 %%==============================================================================================
 %%	Reindexing

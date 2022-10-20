@@ -51,15 +51,15 @@ internal(Fun)->
       put(?transaction, #state{ type = internal, on_commit = [], log = #{}, dict = #{}, owner = self() }),
       Result = ecomet_db:transaction(fun()->
         Res = Fun(),
-        State = #state{log = Log,owner = Owner} = get(?transaction),
+        #state{log = Log} = get(?transaction),
         OrderedLog = lists:usort([{Queue,Value} || {Queue, Value} <- maps:values(Log)]),
         CommitLog = ecomet_object:commit([Value || {_,Value} <- OrderedLog]),
         ecomet_index:commit( CommitLog ),
-        erase(?transaction),
-        {Res, State#state{ log = [Commit#{ self => Owner } || Commit <- CommitLog] }}
+        Res
       end),
       case Result of
-        {ok,{ FunRes, State }}->
+        {ok, FunRes}->
+          State = erase(?transaction),
           tcommit( State ),
           {ok,FunRes};
         _->
@@ -342,7 +342,7 @@ external_loop( Owner )->
 %%-----------------------------------------------------------------------
 %% Internal helpers
 %%-----------------------------------------------------------------------
-tcommit( #state{ log = Log, on_commit = OnCommit })->
-  catch ecomet_subscription:commit( Log ),
+tcommit( #state{ log = Log, on_commit = OnCommit, owner = Owner })->
+  catch ecomet_router:on_commit( [ L#{ self => Owner } || L <- Log ] ),
   [ catch F() || F <- lists:reverse(OnCommit) ].
 
