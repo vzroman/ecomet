@@ -75,7 +75,7 @@
 -endif.
 %%====================================================================
 
--define(DEFAULT_LEVELDB_PARAMS,#{
+-define(DEFAULT_LEVELDB_PARAMS(Sync),#{
   eleveldb => #{
     open_options=>#{
       paranoid_checks => false,
@@ -86,7 +86,7 @@
       verify_checksums => false
     },
     write => #{
-      sync => true
+      sync => Sync
     }
   }
 }).
@@ -99,7 +99,7 @@
 -define(schemaParams,
   #{
     ets => #{},
-    leveldb => ?DEFAULT_LEVELDB_PARAMS
+    leveldb => ?DEFAULT_LEVELDB_PARAMS(true)
   }
 ).
 
@@ -117,12 +117,12 @@
       module => zaya_ets_leveldb,
       params => #{
         ets => #{},
-        leveldb => ?DEFAULT_LEVELDB_PARAMS
+        leveldb => ?DEFAULT_LEVELDB_PARAMS(false)
       }
     },
     ?DISC =>#{
       module => zaya_leveldb,
-      params => ?DEFAULT_LEVELDB_PARAMS
+      params => ?DEFAULT_LEVELDB_PARAMS(false)
     }
   }
 ).

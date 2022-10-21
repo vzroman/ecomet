@@ -46,7 +46,7 @@
         verify_checksums => false
       },
       write => #{
-        sync => false
+        sync => true
       }
     }
   }

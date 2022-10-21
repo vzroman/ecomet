@@ -61,7 +61,9 @@
   get_oid/1,
   check_rights/1,
   get_behaviours/1,
-  rebuild_index/1, rebuild_index/2
+  rebuild_index/1, rebuild_index/2,
+
+  debug/1
 ]).
 %%====================================================================
 %%		Test API
@@ -1044,3 +1046,21 @@ rebuild_index(_OID, _Fields)->
 %%
 %%  end).
   todo.
+
+debug(Count)->
+  ecomet:dirty_login(<<"system">>),
+  P = ?OID(<<"/root/.patterns/test_pattern">>),
+  F = ?OID(<<"/root/test">>),
+  fill(#{<<".folder">> => F, <<".pattern">> => P}, Count).
+
+fill(Fields,C) when C>0 ->
+  if C rem 1000 =:= 0-> ?LOGINFO("DEBUG: write ~p",[C]); true->ignore end,
+  create(maps:merge(Fields,#{
+    <<".name">> => integer_to_binary( C ),
+    <<"f1">> => integer_to_binary(erlang:phash2({C}, 200000000)),
+    <<"f2">> => integer_to_binary(erlang:phash2(C, 200000000))
+  })),
+  %timer:sleep(10),
+  fill(Fields,C-1);
+fill(_F,_C)->
+  ok.

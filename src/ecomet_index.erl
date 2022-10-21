@@ -112,7 +112,7 @@ field_tags( Field, Map, Value )->
     {ok, IndexTypes}->
       ListValue =
         case ecomet_field:get_type(Map, Field) of
-          {list,_}-> Value;
+          {ok,{list,_}}-> Value;
           _-> [Value]
         end,
       lists:usort(lists:append(lists:foldl(fun(Type,Acc)->
