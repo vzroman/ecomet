@@ -75,6 +75,9 @@
 -endif.
 %%====================================================================
 
+%%=================================================================
+%%	SCHEMA
+%%=================================================================
 -define(DEFAULT_LEVELDB_PARAMS(Sync),#{
   eleveldb => #{
     open_options=>#{
@@ -91,9 +94,6 @@
   }
 }).
 
-%%=================================================================
-%%	SCHEMA
-%%=================================================================
 -define(SCHEMA,'ECOMET_SCHEMA').
 -define(schemaModule,zaya_ets_leveldb).
 -define(schemaParams,
@@ -106,6 +106,20 @@
 %%=================================================================
 %%	ROOT
 %%=================================================================
+-define(DEFAULT_ROCKSDB_PARAMS(Sync),#{
+  rocksdb => #{
+    open_options=>#{
+      paranoid_checks => false
+    },
+    read => #{
+      verify_checksums => false
+    },
+    write => #{
+      sync => Sync
+    }
+  }
+}).
+
 -define(rootModule,ecomet_db).
 -define(rootParams,
   #{
@@ -121,8 +135,8 @@
       }
     },
     ?DISC =>#{
-      module => zaya_leveldb,
-      params => ?DEFAULT_LEVELDB_PARAMS(false)
+      module => zaya_rocksdb,
+      params => ?DEFAULT_ROCKSDB_PARAMS(false)
     }
   }
 ).
