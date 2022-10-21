@@ -63,7 +63,7 @@
   get_behaviours/1,
   rebuild_index/1, rebuild_index/2,
 
-  debug/2
+  debug/3
 ]).
 %%====================================================================
 %%		Test API
@@ -87,7 +87,7 @@
 ]).
 
 % @edoc handler of ecomet object
--record(object, {oid, edit, move, map, db}).
+-record(object, {oid, edit, move, pattern, db}).
 
 -type object_handler() :: #object{}.
 -export_type([object_handler/0]).
@@ -97,6 +97,7 @@
 -define(PATTERN_IDL_LENGTH,16).
 
 -define(ObjectID(PatternID,ObjectID),{PatternID,ObjectID}).
+-define(map(P), ecomet_pattern:get_map(P)).
 
 -define(TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
@@ -157,7 +158,7 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
 
       % Generate new ID for the object
       OID=new_id(FolderID,PatternID),
-      Object=#object{ oid=OID, edit=true, move=true, map=Map, db=get_db_name(OID) },
+      Object=#object{ oid=OID, edit=true, move=true, pattern=PatternID, db=get_db_name(OID) },
 
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
@@ -223,11 +224,11 @@ exists(OID)->
     _-> true
   end.
 
-read_field(#object{oid = OID, map = Map} = Object, Field)->
+read_field(#object{oid = OID, pattern = P} = Object, Field)->
   case ?SERVICE_FIELDS of
     #{Field:=Fun}->{ok,Fun(Object)};
     _->
-      ecomet_field:get_value(Map,OID,Field)
+      ecomet_field:get_value(?map(P),OID,Field)
   end.
 
 read_field(Object,Field,Params) when is_list(Params)->
@@ -238,7 +239,7 @@ read_field(Object,Field,Params) when is_map(Params)->
       case {Params,Value} of
         { #{default:=Default}, none}->{ok,Default};
         { #{format:=Format}, _ }->
-          {ok,Type}=ecomet_field:get_type(Object#object.map,Field),
+          {ok,Type}=ecomet_field:get_type(?map(Object#object.pattern),Field),
           {ok,Format(Type,Value)};
         _->
           {ok,Value}
@@ -253,8 +254,9 @@ read_fields(Object,Fields,Params) when is_list(Fields)->
   read_fields(Object,FieldsMap,Params);
 read_fields(Object,Fields,Params) when is_list(Params)->
   read_fields(Object,Fields,maps:from_list(Params));
-read_fields(#object{oid = OID,map = Map}=Object,Fields,Params) when is_map(Fields),is_map(Params)->
+read_fields(#object{oid = OID,pattern = P}=Object,Fields,Params) when is_map(Fields),is_map(Params)->
 
+  Map = ?map(P),
   % Load storage for fields absent in the project
   Storage=
     maps:fold(fun(F,_,Acc)->
@@ -311,7 +313,8 @@ read_all(Object)->
   read_all(Object,#{}).
 read_all(Object,Params) when is_list(Params)->
   read_all(Object,maps:from_list(Params));
-read_all(#object{map=Map,oid = OID}=Object,Params) when is_map(Params)->
+read_all(#object{pattern = P,oid = OID}=Object,Params) when is_map(Params)->
+  Map = ?map(P),
   Fields=maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map)),
   Fields1=Fields#{
     <<".oid">>=>OID
@@ -325,13 +328,13 @@ edit(#object{edit=false},_Fields,_Params)->
   throw(access_denied);
 edit(Object,Fields,Params) when is_list(Params)->
   edit(Object,Fields,maps:from_list(Params));
-edit(#object{map=Map}=Object,Fields,#{format:=Format}=Params)->
-  ParsedFields= parse_fields(Format,Map,Fields),
+edit(#object{pattern =P}=Object,Fields,#{format:=Format}=Params)->
+  ParsedFields= parse_fields(Format,?map(P),Fields),
   Params1 = maps:remove(format,Params),
   edit(Object,ParsedFields,Params1);
-edit(#object{oid = OID, map=Map}=Object,InFields,_Params)->
+edit(#object{oid = OID, pattern = P}=Object,InFields,_Params)->
 
-  Fields=ecomet_field:merge(Map,#{},InFields),
+  Fields=ecomet_field:merge(?map(P),#{},InFields),
   % Check user rights for moving object
   check_move( Object, Fields ),
 
@@ -364,8 +367,8 @@ parse_fields(Formatter,Map,Fields)->
 
 
 % Check changes for the field within the transaction
-field_changes(#object{oid=OID,map=Map,db = DB},Field)->
-  {ok,Type} = ecomet_field:get_storage(Map, Field),
+field_changes(#object{oid=OID,pattern = P,db = DB},Field)->
+  {ok,Type} = ecomet_field:get_storage(?map(P), Field),
   case ecomet_transaction:changes(DB, ?DATA, Type, OID ) of
     none -> none;
 %-------Type storage is under create-------------------------------------
@@ -390,8 +393,8 @@ field_changes(#object{oid=OID,map=Map,db = DB},Field)->
   end.
 
 % Check changes for the field within the transaction
-object_changes(#object{map = Map} = Object)->
-  Fields = ecomet_pattern:get_fields( Map ),
+object_changes(#object{pattern = P} = Object)->
+  Fields = ecomet_pattern:get_fields( ?map(P) ),
   lists:foldl(fun(F,Acc)->
     case field_changes( Object, F ) of
       {_,_} = FieldChanges->
@@ -401,10 +404,10 @@ object_changes(#object{map = Map} = Object)->
     end
   end,#{}, Fields).
 
-field_type(#object{map=Map},Field)->
+field_type(#object{pattern = P},Field)->
   case ?SERVICE_FIELDS of
     #{Field:=_}-> {ok, string};
-    _->ecomet_field:get_type(Map,Field)
+    _->ecomet_field:get_type(?map(P),Field)
   end.
 
 is_object(#object{})->
@@ -506,8 +509,8 @@ check_move( #object{move=CanMove}=Object, EditFields )->
 
   ok.
 
-get_behaviours(#object{map=Map})->
-  ecomet_pattern:get_behaviours(Map).
+get_behaviours(#object{pattern = P})->
+  ecomet_pattern:get_behaviours(?map(P)).
 
 %%=================================================================
 %%	Service API
@@ -745,14 +748,14 @@ get_pattern_oid(ServiceID)->
   PatternID = IDH * (1 bsl ?PATTERN_IDL_LENGTH) + IDL,
   ?ObjectID(?PATTERN_PATTERN,PatternID).
 
-get_storage_types(#object{ map = Map })->
-  ecomet_pattern:get_storage_types( Map ).
+get_storage_types(#object{ pattern = P })->
+  ecomet_pattern:get_storage_types( ?map(P) ).
 
 % Acquire lock on object
-get_lock(Lock,#object{oid=OID,map=Map})->
+get_lock(Lock,#object{oid=OID,pattern = P})->
   % Define the key
   DB = get_db_name(OID),
-  Type=ecomet_pattern:get_storage(Map),
+  Type=ecomet_pattern:get_storage(?map(P)),
   case ecomet_transaction:read(DB, ?DATA, Type, OID, Lock ) of
     not_found-> none;
     Storage-> Storage
@@ -761,9 +764,8 @@ get_lock(Lock,#object{oid=OID,map=Map})->
 % Fast object open, only for system dirty read
 construct(OID)->
   PatternID=get_pattern_oid(OID),
-  Map=ecomet_pattern:get_map(PatternID),
   DB = get_db_name(OID),
-  #object{oid=OID,edit=false,move=false,map=Map,db=DB}.
+  #object{oid=OID,edit=false,move=false,pattern = PatternID, db=DB}.
 
 by_storage_types( Fields, Map )->
   maps:fold(fun(F,V,Acc)->
@@ -772,9 +774,9 @@ by_storage_types( Fields, Map )->
     Acc#{ T=> TAcc#{ F => V }}
   end,#{}, Fields).
 
-prepare_create(Fields, #object{oid = OID, map = Map, db = DB})->
+prepare_create(Fields, #object{oid = OID, pattern = P, db = DB})->
 
-  ByTypes = by_storage_types( Fields, Map),
+  ByTypes = by_storage_types( Fields, ?map(P)),
 
   % Transaction write
   maps:map(fun(Type,Data)->
@@ -783,8 +785,8 @@ prepare_create(Fields, #object{oid = OID, map = Map, db = DB})->
     ok = ecomet_transaction:on_abort( DB, ?DATA, Type, OID, delete )
   end, ByTypes).
 
-prepare_edit(Fields, #object{oid = OID, map = Map, db = DB})->
-  ByTypes = by_storage_types( Fields, Map ),
+prepare_edit(Fields, #object{oid = OID, pattern = P, db = DB})->
+  ByTypes = by_storage_types( Fields, ?map(P) ),
   maps:map(fun(Type,Data)->
     case ecomet_transaction:changes(DB, ?DATA, Type, OID ) of
       {_, #{fields := Data0}}->
@@ -802,12 +804,13 @@ prepare_edit(Fields, #object{oid = OID, map = Map, db = DB})->
     end
   end, ByTypes).
 
-prepare_delete(OID, #object{map = Map, db = DB})->
+prepare_delete(OID, #object{pattern = P, db = DB})->
+  Map = ?map(P),
   [ ok = ecomet_transaction:delete( DB, ?DATA, T, OID, _Lock = none ) || T <- ecomet_pattern:get_storage_types( Map ) ],
   ok.
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet
-save(#object{oid=OID,map=Map}=Object, Handler)->
+save(#object{oid=OID,pattern = P}=Object, Handler)->
 
   % All operations within transaction. No changes applied if something is wrong
   ecomet_transaction:dict_put([
@@ -820,7 +823,7 @@ save(#object{oid=OID,map=Map}=Object, Handler)->
         Behaviour:Handler(Object);
       _ ->
         ?LOGWARNING("invalid behaviour ~p:~p",[Behaviour, Handler])
-  end || Behaviour <- ecomet_pattern:get_behaviours(Map) ],
+  end || Behaviour <- ecomet_pattern:get_behaviours(?map(P)) ],
 
   % Release object from under the Handler
   ecomet_transaction:dict_remove([{OID,handler}]),
@@ -831,7 +834,7 @@ save(#object{oid=OID,map=Map}=Object, Handler)->
   % The result
   ok.
 
-compile_changes( #object{oid = OID, map = Map, db = DB} )->
+compile_changes( #object{oid = OID, pattern = P, db = DB} )->
   lists:foldl(fun(Type, Acc)->
     case ecomet_transaction:changes(DB, ?DATA, Type, OID) of
       {#{fields := Fields0}=Data0, #{fields:=Fields1}}->
@@ -871,9 +874,9 @@ compile_changes( #object{oid = OID, map = Map, db = DB} )->
         % No storage type changes
         Acc
     end
-  end,#{}, ecomet_pattern:get_storage_types(Map)).
+  end,#{}, ecomet_pattern:get_storage_types(?map(P))).
 
-object_rollback(#object{oid = OID, map = Map, db = DB}, Changes)->
+object_rollback(#object{oid = OID, pattern = P, db = DB}, Changes)->
   lists:foldl(fun(Type,Acc)->
     case Changes of
       #{ Type := {Data0, _}} when is_map(Data0)->
@@ -886,7 +889,7 @@ object_rollback(#object{oid = OID, map = Map, db = DB}, Changes)->
             Acc
         end
     end
-  end,#{}, ecomet_pattern:get_storage_types(Map)).
+  end,#{}, ecomet_pattern:get_storage_types(?map(P))).
 
 
 % Save object changes to the storage
@@ -902,7 +905,7 @@ commit([Object|Rest])->
 commit([])->
   [].
 
-do_commit( #object{oid = OID, map = Map, db = DB}=Object, Changes, Rollback )->
+do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )->
   %----------Define fields changes-------------------
   FieldsChanges =
     maps:fold(fun(_Type,{ Data0, Data1 },Acc0)->
@@ -921,7 +924,7 @@ do_commit( #object{oid = OID, map = Map, db = DB}=Object, Changes, Rollback )->
    end, #{}, Changes),
 
   Tags0 = maps:map(fun(_Type,TypeData)-> maps:get(tags,TypeData,#{}) end, Rollback),
-  Tags1 = ecomet_index:build_index(FieldsChanges, Tags0, Map),
+  Tags1 = ecomet_index:build_index(FieldsChanges, Tags0, ?map(P)),
 
   %-----Commit changes---------------------------
   maps:map(fun
@@ -1034,11 +1037,14 @@ rebuild_index(_OID, _Fields)->
 %%  end).
   todo.
 
-debug(Count, Batch)->
+debug(Folder, Count, Batch)->
   ecomet:dirty_login(<<"system">>),
   P = ?OID(<<"/root/.patterns/test_pattern">>),
-  F = ?OID(<<"/root/test">>),
-  fill(#{<<".folder">> => F, <<".pattern">> => P}, 0, Batch, Count).
+  F = ?OID(<<"/root/",Folder/binary>>),
+  spawn(fun()->
+    ecomet:dirty_login(<<"system">>),
+    fill(#{<<".folder">> => F, <<".pattern">> => P}, 0, Batch, Count)
+  end).
 
 fill(Fields,C, Batch, Stop) when C < Stop ->
   Res = ecomet:transaction(fun()->
@@ -1049,8 +1055,10 @@ fill(Fields,C, Batch, Stop) when C < Stop ->
     })) ||I <- lists:seq(C,C-1+Batch)],
     ok
   end),
-  ?LOGINFO("DEBUG: write ~p res ~p",[C+Batch,Res]),
+  if (C rem 10000) =:= 0-> ?LOGINFO("DEBUG: write ~p res ~p",[C+Batch,Res]); true-> ignore end,
   %timer:sleep(10),
   fill(Fields,C+Batch,Batch,Stop);
 fill(_F,_C,_B,_S)->
   ok.
+
+% ecomet_object:debug(<<"test1">>, 1000000, 10000).
