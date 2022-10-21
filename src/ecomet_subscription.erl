@@ -109,14 +109,8 @@ do_subscribe({<<".path">>,'=',Path}, Owner, ID, DBs, Read, Params )->
   do_subscribe({<<".oid">>,'=',?OID(Path)}, Owner, ID, DBs, Read, Params );
 do_subscribe({<<".oid">>,'=',OID}, Owner, ID, _DBs, Read, Params )->
   % Object subscription
-  case ecomet_object:open(OID) of
-    not_exists->
-      throw({not_exists, OID});
-    {error,Error}->
-      throw(Error);
-    Object->
-      subscribe_object(ID,Object,Owner,Read,Params)
-  end;
+  Object = ecomet_object:open(OID),
+  subscribe_object(ID,Object,Owner,Read,Params);
 do_subscribe(Conditions, Owner, ID, DBs, Read, Params )->
   subscribe_query(ID, Conditions, Owner, DBs, Read, Params ).
 

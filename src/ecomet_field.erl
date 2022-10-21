@@ -29,7 +29,6 @@
   get_storage/2,
   get_index/2,
   fields_storages/1,
-  save_changes/4,
   is_required/2
 ]).
 
@@ -66,8 +65,6 @@
 %%====================================================================
 -ifdef(TEST).
 -export([
-  get_changes/3,
-  merge_storages/4,
   check_name/2,
   check_folder/2,
   check_storage/2,
@@ -174,22 +171,26 @@ get_storage(Map,Name)->
 
 % Build fields structure on object creation
 build_new(Map, NewFields)->
-  Fields=
-    [begin
-       Value =
-         case NewFields of
-           #{ Name:= Defined } -> Defined;
-           #{ <<".pattern">>:= PatternID }->
-             Key = { PatternID, Name},
-             auto_value(Config, Key)
-         end,
-       case check_value(Config,Value) of
-         ok->ok;
-         {error,Error}->?ERROR({Name,Error})
-       end,
-       { Name ,Value }
-     end || {Name,Config} <- maps:to_list(Map),is_binary(Name)],
-  maps:from_list(Fields).
+  maps:fold(fun
+    (Name,Config,Acc) when is_binary(Name)->
+      Value =
+        case NewFields of
+          #{ Name:= Defined } -> Defined;
+          #{ <<".pattern">>:= PatternID }->
+            Key = { PatternID, Name},
+            auto_value(Config, Key)
+        end,
+      case check_value(Config,Value) of
+        ok->ok;
+        {error,Error}->?ERROR({Name,Error})
+      end,
+      if
+        Value =/= none -> Acc#{ Name => Value };
+        true -> Acc
+      end;
+    (_Name,_Config, Acc)->
+      Acc
+  end,#{},Map).
 
 % Merge new values on object edit
 merge(Map,Project,NewFields)->
@@ -200,7 +201,12 @@ merge(Map,Project,NewFields)->
           ok->ok;
           {error,Error}->?ERROR({Name,Error})
         end,
-        OutProject#{Name=>Value};
+        if
+          Value =/= none->
+            OutProject#{Name=>Value};
+          true->
+            OutProject
+        end;
       _->?ERROR({undefined_field,Name})
     end
   end,Project,NewFields).
@@ -211,7 +217,7 @@ auto_value(#{default:=Default, autoincrement:=Increment, type := Type}, Key)->
     none ->
       case Increment of
         true ->
-          ID = ecomet_schema:local_increment(Key),
+          ID = ecomet_id:new(Key),
           Value = (ID bsl 16) + ecomet_node:get_unique_id(),
           case ecomet_types:parse_safe(Type, Value) of
             {ok, ParsedValue} ->
@@ -258,63 +264,6 @@ fields_storages(Map)->
   Types =
     [Type||{Name,#{storage:=Type}}<-maps:to_list(Map),is_binary(Name)],
   ordsets:from_list(Types).
-
-% Save field changes to storage
-save_changes(Map,Project,Loaded,OID)->
-  % 1. Group project by storages
-  Changed=get_changes(maps:to_list(Project),Map,#{}),
-  % 2. Merge existing values into changed storages
-  {Updated,ChangedFields}=merge_storages(maps:to_list(Changed),Loaded,OID,{#{},[]}),
-  % 3. Merge changes
-  { Updated, ChangedFields }.
-
-
-% Build storage changes from project
-get_changes([{Name,Value}|Rest],Map,Storages)->
-  {ok,StorageType}=get_storage(Map,Name),
-  Storage=maps:get(StorageType,Storages,#{}),
-  get_changes(Rest,Map,Storages#{StorageType=>Storage#{Name=>Value}});
-get_changes([],_Map,Result)->Result.
-
-% Merge unchanged values into changed storages
-merge_storages([{Storage,Fields}|Rest],PreLoaded,OID,{Merged,Changes})->
-  OldFields=
-    case PreLoaded of
-      #{ Storage := none }-> #{};
-      #{ Storage := StorageFields } -> StorageFields;
-      _->
-        % Storage did not exists
-        #{}
-    end,
-  StorageChanges=
-    maps:fold(fun(Field,Value,ChangesList)->
-      case maps:get(Field,OldFields,none) of
-        % Value not changed
-        Value->ChangesList;
-        % Really changed
-        _->[{Field,Value}|ChangesList]
-      end
-    end,[],Fields),
-  StorageResult=
-    case StorageChanges of
-      % No real changes to storage, no need to save
-      []->Merged;
-      _->
-        MergedFields=maps:merge(OldFields,Fields),
-        ClearedFields=maps:filter(fun(_,Value)-> Value=/=none end,MergedFields),
-        case {maps:size(OldFields),maps:size(ClearedFields)} of
-          % Storage did not exist and nothing to save now
-          {0,0}->Merged;
-          % We here, if:
-          % 1. storage had not existed before, but we have data to write now
-          % 2. storage is updated
-          % 3. storage had existed before, but all data is cleared (empty will be deleted on dump step)
-          _->Merged#{Storage=>ClearedFields}
-        end
-    end,
-  merge_storages(Rest,PreLoaded,OID,{StorageResult,StorageChanges++Changes});
-merge_storages([],_PreLoaded,_OID,Result)->Result.
-
 
 % Check if field is required
 is_required(Description, FieldName) ->

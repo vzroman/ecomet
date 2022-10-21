@@ -34,7 +34,7 @@
 %%=================================================================
 -export([
   create_object/1,create_object/2,
-  open/1,open/2,open/3,open_nolock/1,open_rlock/1,open_wlock/1,
+  open/1,open/2,open_nolock/1,open_rlock/1,open_wlock/1,
   exists/1,
   read_field/2,read_field/3,read_fields/2,read_fields/3,
   read_all/1,read_all/2,
@@ -42,7 +42,6 @@
   object_changes/1,
   field_type/2,
   edit_object/2,edit_object/3,
-  dirty_edit_object/2,dirty_edit_object/3,
   delete_object/1,
   copy_object/2, copy_object/3
 ]).
@@ -179,9 +178,6 @@ open(ID)->
 open(ID, Lock)->
   ecomet_lib:to_object(ID, Lock).
 
-open(ID,Lock,Timeout)->
-  ecomet_lib:to_object(ID, Lock, Timeout).
-
 exists(OID)->
   ecomet_object:exists(OID).
 
@@ -240,12 +236,6 @@ edit_object(Object, Fields)->
 
 edit_object(Object, Fields, Params)->
   ecomet_object:edit(Object, Fields, Params).
-
-dirty_edit_object(Object, Fields)->
-  ecomet_object:dirty_edit(Object, Fields).
-
-dirty_edit_object(Object, Fields, Params)->
-  ecomet_object:dirty_edit(Object, Fields, Params).
 
 % @edoc Deletes existing ecomet object
 -spec delete_object(Object :: object_handler()) -> ok.

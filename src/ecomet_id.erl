@@ -102,8 +102,8 @@ log_open()->
 new(Scope)->
   ID = ets:update_counter(?etsRef, Scope, {2,1}, {Scope,0}),
   if
-    ID rem ?BITSTRING_LENGTH =:= 0->
-      ?logModule:write(?logRef,[{Scope,ID + ?BITSTRING_LENGTH}]);
+    ID rem ?BITSTRING_LENGTH =:= 1->
+      ?logModule:write(?logRef,[{Scope,ID + ?BITSTRING_LENGTH - 1}]);
     true->
       ignore
   end,
