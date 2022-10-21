@@ -178,9 +178,8 @@ delete(#object{oid=OID}=Object)->
     none->
       % Queue the procedure.
       ?TRANSACTION( fun()->
-        get_lock( write, Object ),
-        prepare_delete(OID ,Object),
         save(Object, on_delete),
+        prepare_delete(OID ,Object),
         ok
       end );
     _->
@@ -374,11 +373,6 @@ field_changes(#object{oid=OID,map=Map,db = DB},Field)->
       {NewValue, none};
     {delete, _NewStorage}->
       none;
-%-------Type storage is under delete-------------------------------------
-    {#{fields := #{Field := OldValue}}, delete}->
-      {none, OldValue};
-    {_OldStorage, delete}->
-      none;
 %-------Type storage is under update-------------------------------------
     {#{fields := OldFields}, #{fields := NewFields}}->
       case {OldFields, NewFields} of
@@ -391,19 +385,6 @@ field_changes(#object{oid=OID,map=Map,db = DB},Field)->
         {_, #{Field := NewValue}}->
           {NewValue, none};
         {_,_}->
-          none
-      end;
-%---------Rollback value is not loaded yet (on delete only)----------------------------
-    {delete}->
-      case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock=none ) of
-        Rollback when is_map( Rollback )->
-          ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Rollback),
-          case Rollback of
-            #{ Field := OldValue } when OldValue=/=none -> {none, OldValue};
-            _-> none
-          end;
-        _ ->
-          ecomet_transaction:on_abort(DB, ?DATA, Type, OID, delete),
           none
       end
   end.
@@ -537,14 +518,18 @@ load_storage(OID,Type)->
 load_storage(_IsTransaction = false, OID, Type)->
   DB = get_db_name( OID ),
   case ecomet_db:read(DB, ?DATA, Type, OID ) of
-    #{ fields := Storage } -> Storage;
+    #{ fields := Fields } -> Fields;
     _ -> none
   end;
 load_storage(_IsTransaction = true, OID, Type)->
   DB = get_db_name( OID ),
   case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock=none ) of
-    #{ fields := Storage } -> Storage;
-    _-> none
+    #{ fields := Fields } = Storage->
+      ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Storage),
+      Fields;
+    _->
+      ecomet_transaction:on_abort(DB, ?DATA, Type, OID, delete),
+      none
   end.
 
 %%=====================================================================
@@ -870,6 +855,8 @@ compile_changes( #object{oid = OID, map = Map, db = DB} )->
             ok = ecomet_transaction:delete(DB, ?DATA, Type, OID, _Lock = none),
             Acc
         end;
+      {Data0,delete}->
+        Acc#{ Type => { Data0, #{}}};
       {delete}->
         case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock = none) of
           #{fields := _ } = Data0->

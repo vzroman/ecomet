@@ -279,49 +279,63 @@ prepare_rollback([])->
 %               Write changes to the real database
 %----------------------------------------------------------------------
 write(Module, Ref, Updates)->
-  lists:foldl(fun
-    ({{Tag,{idl,PatternID,IDHN}}, IDLs},_)->
-      {ok, Unlock} = elock:lock(?INDEX_LOCKS, {Ref,Tag}, _IsShared = false, _Timeout=infinity,[node()]),
-      try build_bitmap(Module, Ref, Tag, PatternID, IDHN, IDLs)
-      after
-        Unlock()
-      end;
-    (_,_)->
-      % {idh,PatternID} and {Tag,patterns} are updated during IDLs update
-      ignore
-  end, undefined,Updates),
+  ByTags = group_by_tags( Updates ),
+  maps:fold(fun(Tag,Patterns,_)->
+    {ok, Unlock} = elock:lock(?INDEX_LOCKS, {Ref,Tag}, _IsShared = false, _Timeout=infinity,[node()]),
+    try update_tag(Module, Ref, Tag, Patterns)
+    after
+      Unlock()
+    end,
+    ignore
+  end,ignore,ByTags),
   ok.
 
-build_bitmap(Module, Ref, Tag, PatternID, IDHN, IDLs)->
-  {Add, Del}=
-    maps:fold(fun(IDLN,Value,{AddAcc,DelAcc})->
-      if
-        Value -> { ecomet_bitmap:set_bit(AddAcc,IDLN), DelAcc };
-        true-> { AddAcc, ecomet_bitmap:set_bit(DelAcc,IDLN) }
-      end
-    end,{<<>>,<<>>}, IDLs),
-  case bitmap_level(Module, Ref,{Tag,{idl,PatternID,IDHN}},{Add,Del}) of
-    stop->ok;
-    IDH->
-      {IDHAdd,ADHDel} =
-        if
-          IDH =:= add-> {ecomet_bitmap:set_bit(<<>>, IDHN),<<>>};
-          true -> {<<>>, ecomet_bitmap:set_bit(<<>>, IDHN)}
-        end,
-      case bitmap_level(Module, Ref,{Tag,{idh,PatternID}},{IDHAdd,ADHDel}) of
-        stop->ok;
-        IDP->
-          {PatternAdd,PatternDel} =
-            if
-              IDP =:= add-> {ecomet_bitmap:set_bit(<<>>, PatternID),<<>>};
-              true -> {<<>>, ecomet_bitmap:set_bit(<<>>, PatternID)}
-            end,
-        bitmap_level(Module, Ref,{Tag,patterns},{PatternAdd,PatternDel})
-      end
-  end.
+group_by_tags( Updates )->
+  % #{
+  %   Tag => #{
+  %     Pattern => #{
+  %       IDH => #{
+  %         IDL => true | false
+  %       }
+  %     }
+  %   }
+  % }
+  lists:foldl(fun
+    ({{Tag,{idl,PatternID,IDH}}, IDLs},Acc)->
+      TAcc = maps:get(Tag,Acc,#{}),
+      PAcc = maps:get(PatternID,TAcc,#{}),
+      Acc#{ Tag => TAcc#{ PatternID=> PAcc#{ IDH =>IDLs } } };
+    (_,Acc)->
+      Acc
+  end, #{} ,Updates).
 
-%%--------------Add/Delete IDs to the index level--------------------------------------
-bitmap_level(Module, Ref,Tag,{Add,Del})->
+update_tag( Module, Ref, Tag, Patterns )->
+  Ps =
+    maps:fold(fun(P,IDHs,PAcc)->
+      Hs = maps:fold(fun(H,Ls,HAcc)->
+        case build_bitmap(Module, Ref, {Tag,{idl,P,H}},Ls) of
+          stop-> HAcc;
+          Value -> HAcc#{ H => Value }
+        end
+      end,#{},IDHs),
+      case build_bitmap(Module, Ref, {Tag,{idh,P}}, Hs) of
+        stop-> PAcc;
+        Value -> PAcc#{ P => Value }
+      end
+    end,#{}, Patterns),
+  build_bitmap(Module, Ref, {Tag,patterns}, Ps).
+
+build_bitmap(_Module, _Ref, _Tag, Update) when map_size(Update) =:= 0->
+  stop;
+build_bitmap(Module, Ref, Tag, Update)->
+  {Add, Del}=
+    maps:fold(fun(ID,Value,{AddAcc,DelAcc})->
+      if
+        Value -> { ecomet_bitmap:set_bit(AddAcc,ID), DelAcc };
+        true-> { AddAcc, ecomet_bitmap:set_bit(DelAcc,ID) }
+      end
+    end,{<<>>,<<>>}, Update),
+
   case Module:read(Ref,[{?INDEX,[Tag]}]) of
     []->
       case ecomet_bitmap:zip( ecomet_bitmap:bit_andnot(Add,Del)) of
@@ -329,19 +343,20 @@ bitmap_level(Module, Ref,Tag,{Add,Del})->
           stop;
         LevelValue->
           ok = Module:write( Ref, [{{?INDEX,[Tag]}, LevelValue}]),
-          add
+          true
       end;
     [{_,LevelValue0}]->
       LevelValue1 = ecomet_bitmap:bit_or(LevelValue0, Add ),
       case ecomet_bitmap:zip( ecomet_bitmap:bit_andnot(LevelValue1,Del)) of
         <<>>->
           ok = Module:delete( Ref, [{?INDEX,[Tag]}]),
-          delete;
+          false;
         LevelValue->
           ok = Module:write( Ref, [{{?INDEX,[Tag]}, LevelValue}]),
           stop
       end
   end.
+
 
 %%==============================================================================================
 %%	Search
