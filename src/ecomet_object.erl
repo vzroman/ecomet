@@ -63,7 +63,7 @@
   get_behaviours/1,
   rebuild_index/1, rebuild_index/2,
 
-  debug/1
+  debug/2
 ]).
 %%====================================================================
 %%		Test API
@@ -1047,20 +1047,23 @@ rebuild_index(_OID, _Fields)->
 %%  end).
   todo.
 
-debug(Count)->
+debug(Count, Batch)->
   ecomet:dirty_login(<<"system">>),
   P = ?OID(<<"/root/.patterns/test_pattern">>),
   F = ?OID(<<"/root/test">>),
-  fill(#{<<".folder">> => F, <<".pattern">> => P}, Count).
+  fill(#{<<".folder">> => F, <<".pattern">> => P}, 0, Batch, Count).
 
-fill(Fields,C) when C>0 ->
-  if C rem 1000 =:= 0-> ?LOGINFO("DEBUG: write ~p",[C]); true->ignore end,
-  create(maps:merge(Fields,#{
-    <<".name">> => integer_to_binary( C ),
-    <<"f1">> => integer_to_binary(erlang:phash2({C}, 200000000)),
-    <<"f2">> => integer_to_binary(erlang:phash2(C, 200000000))
-  })),
+fill(Fields,C, Batch, Stop) when C < Stop ->
+  Res = ecomet:transaction(fun()->
+    [ create(maps:merge(Fields,#{
+      <<".name">> => integer_to_binary( I ),
+      <<"f1">> => integer_to_binary(erlang:phash2({I}, 200000000)),
+      <<"f2">> => integer_to_binary(erlang:phash2(I, 200000000))
+    })) ||I <- lists:seq(C,C-1+Batch)],
+    ok
+  end),
+  ?LOGINFO("DEBUG: write ~p res ~p",[C+Batch,Res]),
   %timer:sleep(10),
-  fill(Fields,C-1);
-fill(_F,_C)->
+  fill(Fields,C+Batch,Batch,Stop);
+fill(_F,_C,_B,_S)->
   ok.

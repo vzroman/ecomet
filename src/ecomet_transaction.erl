@@ -58,9 +58,9 @@ internal(Fun)->
         put(?transaction,State#state{log = CommitLog}),
         Res
       end),
+      State = erase(?transaction),
       case Result of
         {ok, FunRes}->
-          State = erase(?transaction),
           tcommit( State ),
           {ok,FunRes};
         _->
