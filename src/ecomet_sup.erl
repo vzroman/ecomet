@@ -38,9 +38,18 @@ start_link() ->
 
 init([]) ->
 
-  SubsLockServer = #{
-    id=>elock_subs,
-    start=>{elock,start_link,[ '$subsLocks$' ]},
+  LockServer = #{
+    id=>?LOCKS,
+    start=>{elock,start_link,[ ?LOCKS ]},
+    restart=>permanent,
+    shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+    type=>worker,
+    modules=>[elock]
+  },
+
+  IndexLockServer = #{
+    id=>?INDEX_LOCKS,
+    start=>{elock,start_link,[ ?INDEX_LOCKS ]},
     restart=>permanent,
     shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
     type=>worker,
@@ -49,7 +58,7 @@ init([]) ->
 
   ESubsriptionsServer = #{
     id=>esubscribe,
-    start=>{esubscribe,start_link,[]},
+    start=>{esubscribe,start_link,[?ESUBSCRIPTIONS]},
     restart=>permanent,
     shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
     type=>worker,
@@ -78,7 +87,8 @@ init([]) ->
 
   {ok, {Supervisor,
     [
-      SubsLockServer,
+      LockServer,
+      IndexLockServer,
       ESubsriptionsServer,
       SchemaSrv
       |Listeners]

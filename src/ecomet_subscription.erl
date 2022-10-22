@@ -143,7 +143,7 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read =
   stateless := Stateless
 })->
 
-  esubscribe:subscribe({log,OID}, [node()], self(), infinity),
+  esubscribe:subscribe(?ESUBSCRIPTIONS,{log,OID}, self()),
 
   if
     Stateless -> ignore;
@@ -157,13 +157,13 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read =
 
 object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedback = NoFeedback } = Monitor )->
   receive
-    {'$esubscription', {log,OID}, {_Tags, _Object, _Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
+    {?ESUBSCRIPTIONS, {log,OID}, {_Tags, _Object, _Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
       object_monitor( Monitor );
-    {'$esubscription', {log,OID}, {[], _Object, _Changes, _Self}, _Node, _Actor}->
+    {?ESUBSCRIPTIONS, {log,OID}, {[], _Object, _Changes, _Self}, _Node, _Actor}->
       Owner! ?SUBSCRIPTION(ID,delete,OID,#{}),
-      esubscribe:unsubscribe({log,OID},[node()], self()),
+      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID},[node()], self()),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
-    {'$esubscription', {log,OID}, {_Tags, Object, Changes, _Self}, _Node, _Actor}->
+    {?ESUBSCRIPTIONS, {log,OID}, {_Tags, Object, Changes, _Self}, _Node, _Actor}->
       Updates = Read( Changes, Object ),
       case maps:size(Updates) of
         0-> ignore;
@@ -171,10 +171,10 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
       end,
       object_monitor( Monitor );
     {unsubscribe, Owner}->
-      esubscribe:unsubscribe({log,OID},[node()], self()),
+      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID},[node()], self()),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     {'DOWN', _Ref, process, Owner, _Reason}->
-      esubscribe:unsubscribe({log,OID},[node()], self()),
+      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID},[node()], self()),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     _->
       object_monitor( Monitor )
@@ -268,7 +268,7 @@ get_subscriptions( Session )->
 %%------------------------------------------------------------
 build_index([#index{tag = Tag}=Index|Rest], Self)->
 
-  {ok,TagUnlock} = elock:lock('$subsLocks$',{tag,Tag}, _IsShared = false, _Timeout = infinity),
+  {ok,TagUnlock} = elock:lock(?LOCKS,{tag,Tag}, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX,{tag,Tag}) of
       [{_,Indexes}]->
@@ -290,7 +290,7 @@ build_index([], _Self)->
   ok.
 
 destroy_index([#index{tag = Tag}=Index|Rest], Self )->
-  {ok,TagUnlock} = elock:lock('$subsLocks$',{tag,Tag}, _IsShared = false, _Timeout = infinity),
+  {ok,TagUnlock} = elock:lock(?LOCKS,{tag,Tag}, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX,{tag,Tag}) of
       [{_,Indexes}]->
@@ -330,7 +330,7 @@ destroy_index([], _Self)->
   ok.
 
 global_set(Tag)->
-  {ok,Unlock} = elock:lock('$subsLocks$',global, _IsShared = false, _Timeout = infinity),
+  {ok,Unlock} = elock:lock(?LOCKS,global, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX,global) of
       [{_,Global}]->
@@ -342,7 +342,7 @@ global_set(Tag)->
     Unlock()
   end.
 global_reset(Tag)->
-  {ok,Unlock} = elock:lock('$subsLocks$',global, _IsShared = false, _Timeout = infinity),
+  {ok,Unlock} = elock:lock(?LOCKS,global, _IsShared = false, _Timeout = infinity),
   try
     case ets:lookup(?S_INDEX, global) of
       [{_,Global}]->
