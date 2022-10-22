@@ -201,13 +201,9 @@ merge(Map,Project,NewFields)->
           ok->ok;
           {error,Error}->?ERROR({Name,Error})
         end,
-        if
-          Value =/= none->
-            OutProject#{Name=>Value};
-          true->
-            OutProject
-        end;
-      _->?ERROR({undefined_field,Name})
+        OutProject#{Name=>Value};
+      _->
+        ?ERROR({undefined_field,Name})
     end
   end,Project,NewFields).
 
