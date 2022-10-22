@@ -796,7 +796,7 @@ prepare_create(Fields, #object{oid = OID, pattern = P, db = DB})->
 
   % Transaction write
   maps:map(fun(Type,Data)->
-    ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => Data }, _Lock = none),
+    ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => Data },  none),
     % Avoid looking up for rollback values
     ok = ecomet_transaction:on_abort( DB, ?DATA, Type, OID, delete )
   end, ByTypes).
@@ -806,15 +806,15 @@ prepare_edit(Fields, #object{oid = OID, pattern = P, db = DB})->
   maps:map(fun(Type,Data)->
     case ecomet_transaction:changes(DB, ?DATA, Type, OID ) of
       {_, #{fields := Data0}}->
-        ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => maps:merge(Data0,Data) }, _Lock = none);
+        ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => maps:merge(Data0,Data) },  none);
       _->
         % The storage type is not loaded yet
-        case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock = none) of
+        case ecomet_transaction:read(DB, ?DATA, Type, OID, none) of
           #{fields := Data0} = Storage->
-            ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => maps:merge(Data0,Data) }, _Lock = none),
+            ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => maps:merge(Data0,Data) }, none),
             ok = ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Storage);
           _->
-            ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => Data }, _Lock = none),
+            ok = ecomet_transaction:write( DB, ?DATA, Type, OID, #{ fields => Data }, none),
             ok = ecomet_transaction:on_abort(DB, ?DATA, Type, OID, delete)
         end
     end
@@ -822,7 +822,7 @@ prepare_edit(Fields, #object{oid = OID, pattern = P, db = DB})->
 
 prepare_delete(OID, #object{pattern = P, db = DB})->
   Map = ?map(P),
-  [ ok = ecomet_transaction:delete( DB, ?DATA, T, OID, _Lock = none ) || T <- ecomet_pattern:get_storage_types( Map ) ],
+  [ ok = ecomet_transaction:delete( DB, ?DATA, T, OID,  none ) || T <- ecomet_pattern:get_storage_types( Map ) ],
   ok.
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet
@@ -857,7 +857,7 @@ compile_changes( #object{oid = OID, pattern = P, db = DB} )->
         case maps:filter(fun(_F, V)-> V =/= none end, Fields1) of
           Fields0 ->
             % No real changes
-            ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data0, _Lock = none),
+            ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data0,  none),
             Acc;
           Fields when map_size(Fields) > 0->
             Acc#{ Type => { Data0, #{ fields=>Fields }}};
@@ -871,13 +871,13 @@ compile_changes( #object{oid = OID, pattern = P, db = DB} )->
             Acc#{ Type => { #{}, #{ fields=>Fields }}};
           _->
             % No real changes
-            ok = ecomet_transaction:delete(DB, ?DATA, Type, OID, _Lock = none),
+            ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none),
             Acc
         end;
       {Data0,delete}->
         Acc#{ Type => { Data0, #{}}};
       {delete}->
-        case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock = none) of
+        case ecomet_transaction:read(DB, ?DATA, Type, OID,  none) of
           #{fields := _ } = Data0->
             ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Data0),
             Acc#{ Type => { Data0, #{}}};
@@ -898,7 +898,7 @@ object_rollback(#object{oid = OID, pattern = P, db = DB}, Changes)->
       #{ Type := {Data0, _}} when is_map(Data0)->
         Acc#{ Type => Data0 };
       _->
-        case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock = none) of
+        case ecomet_transaction:read(DB, ?DATA, Type, OID,  none) of
           Data0 when is_map( Data0 )->
             Acc#{ Type => Data0 };
           _->
@@ -950,9 +950,9 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
           #{Type := TTags}-> TData#{tags => TTags};
           _-> TData
         end,
-      ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data, _Lock = none);
+      ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
     (Type, _)->
-      ok = ecomet_transaction:delete(DB, ?DATA, Type, OID, _Lock = none)
+      ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none)
   end, Changes),
 
   %--------------Prepare commit log-------------------
@@ -1010,9 +1010,9 @@ rebuild_index(OID, Fields)->
       end,#{},Fields)),
     Storages=
       lists:foldl(fun(Type,Acc)->
-        case ecomet_transaction:read(DB, ?DATA, Type, OID, _Lock = none) of
+        case ecomet_transaction:read(DB, ?DATA, Type, OID,  none) of
           Data when is_map(Data)->
-            ecomet_transaction:write(DB, ?DATA, Type, OID, Data, _Lock = none),
+            ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
             ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Data),
             Acc#{ Type => Data };
           _->
@@ -1046,9 +1046,9 @@ rebuild_index(OID, Fields)->
              #{Type := TTags}-> TData#{tags => TTags};
              _-> TData
            end,
-         ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data, _Lock = none);
+         ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
        (Type, _)->
-         ok = ecomet_transaction:delete(DB, ?DATA, Type, OID, _Lock = none)
+         ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none)
     end, Storages),
 
     ecomet_index:commit([ #{db => DB, object => #{ <<".oid">>=>OID, object => Object }} ]),
@@ -1081,4 +1081,4 @@ fill(Fields,C, Batch, Stop) when C < Stop ->
 fill(_F,_C,_B,_S)->
   ok.
 
-% ecomet_object:debug(<<"test2">>, 1000000, 10000).
+% ecomet_object:debug(<<"test1">>, 1000000, 100000).

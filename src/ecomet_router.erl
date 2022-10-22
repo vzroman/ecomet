@@ -57,7 +57,7 @@ on_commit( Log )->
 notify( Log )->
   case persistent_term:get({?MODULE,pool_size},none) of
     PoolSize when is_integer(PoolSize)->
-      I = erlang:phash(Log, PoolSize),
+      I = erlang:phash2(Log, PoolSize),
       Worker = persistent_term:get({?MODULE,I}),
       Worker ! {log,Log},
       ok;
