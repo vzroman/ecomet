@@ -143,7 +143,7 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read =
   stateless := Stateless
 })->
 
-  esubscribe:subscribe(?ESUBSCRIPTIONS,{log,OID}, self()),
+  esubscribe:subscribe(?ESUBSCRIPTIONS,{log,OID}, self(),[node()]),
 
   if
     Stateless -> ignore;
@@ -161,7 +161,7 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
       object_monitor( Monitor );
     {?ESUBSCRIPTIONS, {log,OID}, {[], _Object, _Changes, _Self}, _Node, _Actor}->
       Owner! ?SUBSCRIPTION(ID,delete,OID,#{}),
-      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID},[node()], self()),
+      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID}, self(),[node()]),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     {?ESUBSCRIPTIONS, {log,OID}, {_Tags, Object, Changes, _Self}, _Node, _Actor}->
       Updates = Read( Changes, Object ),
@@ -171,10 +171,10 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
       end,
       object_monitor( Monitor );
     {unsubscribe, Owner}->
-      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID},[node()], self()),
+      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID}, self(),[node()]),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     {'DOWN', _Ref, process, Owner, _Reason}->
-      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID},[node()], self()),
+      esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID}, self(), [node()]),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     _->
       object_monitor( Monitor )
