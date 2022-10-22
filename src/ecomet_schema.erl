@@ -109,7 +109,8 @@
 -define(DEFAULT_ROCKSDB_PARAMS(Sync),#{
   rocksdb => #{
     open_options=>#{
-      paranoid_checks => false
+      paranoid_checks => false,
+      compression => none
     },
     read => #{
       verify_checksums => false
@@ -123,17 +124,6 @@
 -define(rootModule,ecomet_db).
 -define(rootParams,
   #{
-    ?RAM => #{
-      module => zaya_ets,
-      params => #{}
-    },
-    ?RAMDISC => #{
-      module => zaya_ets_leveldb,
-      params => #{
-        ets => #{},
-        leveldb => ?DEFAULT_LEVELDB_PARAMS(false)
-      }
-    },
     ?DISC =>#{
       module => zaya_rocksdb,
       params => ?DEFAULT_ROCKSDB_PARAMS(false)
