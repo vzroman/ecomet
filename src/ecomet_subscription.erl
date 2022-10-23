@@ -405,7 +405,7 @@ on_commit(#ecomet_log{
 })->
   % Run object monitors
   NewTags = TAdd ++ TOld,
-  esubscribe:notify( {log,OID}, { NewTags, Object, Changes, Self } ),
+  esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, { NewTags, Object, Changes, Self } ),
 
   % Run the search on the other nodes
   search(OID, DB, NewTags ++ TDel, Object, Changes, Self).
