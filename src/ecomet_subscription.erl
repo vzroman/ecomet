@@ -400,7 +400,7 @@ on_commit(#{
   self := Self
 })->
   % Run object monitors
-  esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, { TAdd, Object, Changes, Self } ),
+  catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, { TAdd, Object, Changes, Self } ),
 
   % Run the search on the other nodes
   search(OID, DB, TAdd ++ TDel, Object, Changes, Self).
@@ -425,7 +425,7 @@ search( OID, DB, Tags, Object, Changes, Self )->
                           case lists:member(DB, DBs) of
                             true ->
                               ToNotify = ordsets:subtract( Subscribers, TagNotified ),
-                              [ S ! {log, OID, Object, Changes, Self} || S <- ToNotify ],
+                              [ catch S ! {log, OID, Object, Changes, Self} || S <- ToNotify ],
                               ordsets:union( TagNotified, ToNotify );
                             _->
                               TagNotified
