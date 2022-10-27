@@ -913,6 +913,8 @@ read_fun(FieldName,Formatter) when is_binary(FieldName)->
     fun(Fields)->
       case Fields of
         #{FieldName:=Value}->Value;
+        #{object:=Object} when FieldName=:=<<".path">>->
+          ecomet:to_path(Object);
         #{object:=Object}->
           case ecomet_object:field_type(Object,FieldName) of
             {ok,_}->none;
