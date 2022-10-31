@@ -8,14 +8,14 @@
     stdlib,
     cowboy,
     lager,
-    erlware_commons
+    erlware_commons,
+    elock,
+    esubscribe,
+    zaya_leveldb
    ]},
   {env,[]},
   {modules, []},
   {included_applications,[
-   elock,
-   esubscribe,
-   zaya_leveldb,
    zaya
   ]},
   {licenses, ["Apache 2.0"]},
