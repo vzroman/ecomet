@@ -131,7 +131,18 @@ direct({'ANDNOT',And,Not}, Fields)->
 	end;
 direct({Field,Oper,Value}, Fields)->
 	FieldValue = maps:get(Field,Fields,none),
-	direct_compare(Oper,Value,FieldValue).
+	if
+		not is_list(FieldValue)->
+			direct_compare(Oper,Value,FieldValue);
+		true->
+			Object = maps:get(object, Fields),
+			case ecomet_object:field_type(Object, Field) of
+				{ok,{list,_}}->
+					direct_or([{Field,Oper,V} || V <- FieldValue], Fields);
+				_->
+					direct_compare(Oper,Value,FieldValue)
+			end
+	end.
 
 direct_and([Cond|Rest],Fields)->
 	case direct(Cond, Fields) of
@@ -927,10 +938,20 @@ check_direct([Condition|Rest],'OR',Object,Result)->
 	end;
 check_direct([],_Oper,_Object,Result)->Result.
 
-check_condition({'DIRECT',{Oper,Field,Value},_},Object)->
+check_condition({'DIRECT',{Oper,Field,Value},Storage},Object)->
 	case ecomet_object:read_field(Object,Field) of
 		{ok,FieldValue}->
-			direct_compare(Oper,Value,FieldValue);
+			if
+				not is_list( FieldValue )->
+					direct_compare(Oper,Value,FieldValue);
+				true ->
+					case ecomet_object:field_type(Object,Field) of
+						{ok,{list,_}}->
+							check_direct([{'DIRECT',{Oper,Field,V},Storage} || V <- FieldValue],'OR',Object);
+						_->
+							direct_compare(Oper,Value,FieldValue)
+					end
+			end;
 		{error,_}->false
 	end.
 
