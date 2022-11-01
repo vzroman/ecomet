@@ -138,9 +138,9 @@ direct({Field,Oper,Value}, Fields)->
 			Object = maps:get(object, Fields),
 			case ecomet_object:field_type(Object, Field) of
 				{ok,{list,_}}->
-					direct_or([{Field,Oper,V} || V <- FieldValue], Fields);
+					direct_compare_list(Oper, Value, FieldValue);
 				_->
-					direct_compare(Oper,Value,FieldValue)
+					direct_compare(Oper, Value, FieldValue)
 			end
 	end.
 
@@ -938,7 +938,7 @@ check_direct([Condition|Rest],'OR',Object,Result)->
 	end;
 check_direct([],_Oper,_Object,Result)->Result.
 
-check_condition({'DIRECT',{Oper,Field,Value},Storage},Object)->
+check_condition({'DIRECT',{Oper,Field,Value},_},Object)->
 	case ecomet_object:read_field(Object,Field) of
 		{ok,FieldValue}->
 			if
@@ -947,7 +947,7 @@ check_condition({'DIRECT',{Oper,Field,Value},Storage},Object)->
 				true ->
 					case ecomet_object:field_type(Object,Field) of
 						{ok,{list,_}}->
-							check_direct([{'DIRECT',{Oper,Field,V},Storage} || V <- FieldValue],'OR',Object);
+							direct_compare_list(Oper,Value,FieldValue);
 						_->
 							direct_compare(Oper,Value,FieldValue)
 					end
@@ -982,6 +982,21 @@ direct_like(String,Pattern) when (is_binary(Pattern) and is_binary(String))->
 			 end
 	end;
 direct_like(_String,_Pattern)->
+	false.
+
+direct_compare_list(Oper, Value, ListValue)->
+	case direct_compare( Oper, Value, ListValue ) of
+		true -> true;
+		_->
+			compare_list_items(ListValue, Oper, Value)
+	end.
+
+compare_list_items([V|Rest], Oper, Value )->
+	case direct_compare(Oper, Value, V) of
+		true -> true;
+		_-> compare_list_items( Rest, Oper, Value )
+	end;
+compare_list_items([], _Oper, _Value )->
 	false.
 
 %%=====================================================================
