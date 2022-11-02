@@ -667,12 +667,12 @@ commit(OID,Dict)->
       [ ok = ecomet_backend:delete(DB,?DATA,Type,OID,none) || Type <- maps:keys(Storages) ],
       % The log record
       #ecomet_log{
-        object = ecomet_query:object_map(Object,Version),
+        object = ecomet_query:object_map(Object,#{}),
         db = DB,
         ts=ecomet_lib:log_ts(),
         tags={[],[],Tags},
         rights = {[],[],[ V || {<<".readgroups">>,V,_} <-Tags]},
-        changes = maps:map(fun(_,_)->none end,ecomet_pattern:get_fields(Map))
+        changes = Version
       };
     true->
       %----------Create/Edit procedure-----------------------
