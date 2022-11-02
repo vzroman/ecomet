@@ -667,7 +667,7 @@ commit(OID,Dict)->
       [ ok = ecomet_backend:delete(DB,?DATA,Type,OID,none) || Type <- maps:keys(Storages) ],
       % The log record
       #ecomet_log{
-        object = ecomet_query:object_map(Object,#{}),
+        object = ecomet_query:object_map(Object,Version),
         db = DB,
         ts=ecomet_lib:log_ts(),
         tags={[],[],Tags},
