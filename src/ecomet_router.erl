@@ -66,7 +66,7 @@ notify( Logs )->
   case persistent_term:get({?MODULE,pool_size},none) of
     PoolSize when is_integer(PoolSize)->
       [ begin
-          I = erlang:phash(Log, PoolSize),
+          I = erlang:phash2(Log, PoolSize),
           Worker = persistent_term:get({?MODULE,I}),
           Worker ! Log
         end || Log <- Logs ],
