@@ -139,7 +139,7 @@
 
 -define(TMODE,
   case ecomet_transaction:get_type() of
-    _T when _T=:=none;_T=:=dirty->?DIRTY;
+    _@T when _@T=:=none;_@T=:=dirty->?DIRTY;
     external ->
       ?EXTERNAL;
     _->
