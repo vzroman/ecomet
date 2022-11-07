@@ -11,12 +11,13 @@
     erlware_commons,
     elock,
     esubscribe,
-    zaya_leveldb
+    zaya_leveldb,
+    zaya
    ]},
   {env,[]},
   {modules, []},
   {included_applications,[
-   zaya
+
   ]},
   {licenses, ["Apache 2.0"]},
   {links, []}

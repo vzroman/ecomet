@@ -747,8 +747,8 @@ init_storage_objects()->
           fields=>#{
             <<".pattern">>=>?OID(<<"/root/.patterns/.database">>),
             <<"id">>=> get_db_id(?ROOT),
-            <<"types">>=>[?RAM,?RAMDISC,?DISC],
-            <<"modules">>=>#{ ?RAM => zaya_ets, ?RAMDISC => zaya_ets_leveldb, ?DISC => zaya_leveldb },
+            <<"types">>=>[?DISC],
+            <<"modules">>=>#{ ?DISC => zaya_rocksdb },
             <<"nodes">>=>[ node() ],
             <<"params">>=>#{ node() => ?rootParams }
           }
