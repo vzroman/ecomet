@@ -109,8 +109,9 @@
 %%	INIT
 %%=================================================================
 init()->
-  case application:ensure_started( zaya ) of
-    ok->ok;
+  case zaya:start() of
+    {ok,_}->ok;
+    ignore -> ok;
     {error,Error}->
       ?LOGERROR("backend init error ~p, close the application fix the error and try to start again",[Error]),
       timer:sleep(infinity)
