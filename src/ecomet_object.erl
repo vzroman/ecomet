@@ -398,7 +398,7 @@ field_changes(#object{oid=OID,pattern = P,db = DB},Field)->
 
 % Check changes for the field within the transaction
 object_changes(#object{pattern = P} = Object)->
-  Fields = ecomet_pattern:get_fields( ?map(P) ),
+  Fields = maps:keys(ecomet_pattern:get_fields( ?map(P) )),
   lists:foldl(fun(F,Acc)->
     case field_changes( Object, F ) of
       {_,_} = FieldChanges->
