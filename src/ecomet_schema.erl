@@ -124,6 +124,17 @@
 -define(rootModule,ecomet_db).
 -define(rootParams,
   #{
+    ?RAM => #{
+      module => zaya_ets,
+      params => #{}
+    },
+    ?RAMDISC => #{
+      module => zaya_ets_rocksdb,
+      params => #{
+        ets => #{},
+        rocksdb => ?DEFAULT_ROCKSDB_PARAMS(false)
+      }
+    },
     ?DISC =>#{
       module => zaya_rocksdb,
       params => ?DEFAULT_ROCKSDB_PARAMS(false)
@@ -747,8 +758,8 @@ init_storage_objects()->
           fields=>#{
             <<".pattern">>=>?OID(<<"/root/.patterns/.database">>),
             <<"id">>=> get_db_id(?ROOT),
-            <<"types">>=>[?DISC],
-            <<"modules">>=>#{ ?DISC => zaya_rocksdb },
+            <<"types">>=>[?RAM,?RAMDISC,?DISC],
+            <<"modules">>=>#{ ?RAM => zaya_ets, ?RAMDISC => zaya_ets_rocksdb, ?DISC => zaya_rocksdb },
             <<"nodes">>=>[ node() ],
             <<"params">>=>#{ node() => ?rootParams }
           }
