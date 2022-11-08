@@ -835,13 +835,13 @@ init_default_users()->
 
 new_db_id()->
   case zaya:prev( ?SCHEMA, #dbId{k='$end'} ) of
-    #dbId{k= MaxId}-> MaxId + 1;
+    {#dbId{k= MaxId},_}-> MaxId + 1;
     _-> 0
   end.
 
 new_node_id()->
   case zaya:prev( ?SCHEMA, #nodeId{k='$end'} ) of
-    #nodeId{k= MaxId}-> MaxId + 1;
+    {#nodeId{k= MaxId},_}-> MaxId + 1;
     _-> 0
   end.
 
