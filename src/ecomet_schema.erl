@@ -375,26 +375,16 @@ new_pattern_id()->
   end.
 
 get_pattern(ID)->
-  case persistent_term:get({?MODULE,pattern,ID}, undefined) of
-    undefined ->
-      case zaya:read(?SCHEMA,[#pattern{id=ID}]) of
-        [{_, Value}] ->
-          persistent_term:put({?MODULE,pattern,ID}, Value),
-          Value;
-        _->
-          none
-      end;
-    Value ->
-      Value
+  case zaya:read(?SCHEMA,[#pattern{id=ID}]) of
+    [{_, Value}] -> Value;
+    _->none
   end.
 
 set_pattern(ID,Value)->
   case zaya:transaction(fun()->
     ok = zaya:write(?SCHEMA,[{#pattern{id=ID},Value }],write)
   end) of
-    { ok, ok }->
-      persistent_term:put({?MODULE,pattern,ID}, Value),
-      ok;
+    { ok, ok }-> ok;
     { abort, Reason }->?ERROR(Reason)
   end.
 

@@ -97,7 +97,11 @@
 -define(PATTERN_IDL_LENGTH,16).
 
 -define(ObjectID(PatternID,ObjectID),{PatternID,ObjectID}).
--define(map(P), ecomet_pattern:get_map(P)).
+-define(map(P),
+  if
+    is_map(P) -> P;
+    true -> ecomet_pattern:get_map(P)
+ end).
 
 -define(TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
@@ -158,7 +162,7 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
 
       % Generate new ID for the object
       OID=new_id(FolderID,PatternID),
-      Object=#object{ oid=OID, edit=true, move=true, pattern=PatternID, db=get_db_name(OID) },
+      Object=#object{ oid=OID, edit=true, move=true, pattern= ecomet_pattern:get_map(PatternID), db=get_db_name(OID) },
 
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
@@ -172,7 +176,7 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
 % Delete an object
 delete(#object{edit=false})->?ERROR(access_denied);
 delete(#object{move=false})->?ERROR(access_denied);
-delete(#object{oid=OID}=Object)->
+delete(#object{oid=OID, pattern = P}=Object) when is_map(P)->
 
   % Check if the object is under on_create or on_edit procedure at the moment
   case ecomet_transaction:dict_get({OID,handler},none) of
@@ -186,7 +190,9 @@ delete(#object{oid=OID}=Object)->
     _->
       % Object can not be deleted? if it is under behaviour handlers
       ?ERROR(behaviours_run)
-  end.
+  end;
+delete(#object{pattern = P}=Object)->
+  delete(Object#object{ pattern = ecomet_pattern:get_map(P) }).
 
 % Open object
 open(OID)->open(OID, _Lock = none).
@@ -397,16 +403,13 @@ field_changes(#object{oid=OID,pattern = P,db = DB},Field)->
   end.
 
 % Check changes for the field within the transaction
-object_changes(#object{pattern = P} = Object)->
-  Fields = maps:keys(ecomet_pattern:get_fields( ?map(P) )),
-  lists:foldl(fun(F,Acc)->
-    case field_changes( Object, F ) of
-      {_,_} = FieldChanges->
-        Acc#{ F => FieldChanges };
-      _->
-        Acc
-    end
-  end,#{}, Fields).
+object_changes(Object)->
+  maps:fold(fun(_T,{ Data0, Data1 }, Acc)->
+    Fields0 = maps:get(fields, Data0, #{}),
+    maps:fold(fun(F,V1,TAcc)->
+      TAcc#{ F => {V1, maps:get(F, Fields0, none)} }
+    end, Acc, maps:get(fields, Data1, #{}))
+  end, #{}, compile_changes( Object )).
 
 field_type(#object{pattern = P},Field)->
   case ?SERVICE_FIELDS of
@@ -781,7 +784,7 @@ get_lock(Lock,#object{oid=OID,pattern = P})->
 construct(OID)->
   PatternID=get_pattern_oid(OID),
   DB = get_db_name(OID),
-  #object{oid=OID,edit=false,move=false,pattern = PatternID, db=DB}.
+  #object{oid=OID,edit=false,move=false,pattern = ecomet_pattern:get_map(PatternID), db=DB}.
 
 by_storage_types( Fields, Map )->
   maps:fold(fun(F,V,Acc)->
@@ -962,7 +965,7 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
       TFields1 = maps:get(fields,TChanges,#{}),
       TFields0 = maps:get(fields,maps:get(Type, Rollback, #{}),#{}),
       maps:merge( Acc, maps:merge(TFields0, TFields1))
-    end, #{}, lists:usort(maps:keys(Changes) ++ maps:keys(Changes))),
+    end, #{}, lists:usort(maps:keys(Changes) ++ maps:keys(Rollback))),
 
   NewTags = ecomet_index:object_tags( Tags1 ),
   DelTags = ecomet_index:object_tags( Tags0 ) -- NewTags,
