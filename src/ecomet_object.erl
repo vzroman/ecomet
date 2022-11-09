@@ -334,13 +334,15 @@ edit(#object{edit=false},_Fields,_Params)->
   throw(access_denied);
 edit(Object,Fields,Params) when is_list(Params)->
   edit(Object,Fields,maps:from_list(Params));
-edit(#object{pattern =P}=Object,Fields,#{format:=Format}=Params)->
-  ParsedFields= parse_fields(Format,?map(P),Fields),
+edit(#object{pattern =P}=Object,Fields,Params) when not is_map(P)->
+  edit(Object#object{pattern = ?map(P)}, Fields, Params);
+edit(#object{pattern =Map}=Object,Fields,#{format:=Format}=Params)->
+  ParsedFields= parse_fields(Format,Map,Fields),
   Params1 = maps:remove(format,Params),
   edit(Object,ParsedFields,Params1);
-edit(#object{oid = OID, pattern = P}=Object,InFields,_Params)->
+edit(#object{oid = OID, pattern = Map}=Object,InFields,_Params)->
 
-  Fields=ecomet_field:merge(?map(P),#{},InFields),
+  Fields=ecomet_field:merge(Map,#{},InFields),
   % Check user rights for moving object
   check_move( Object, Fields ),
 
@@ -784,7 +786,7 @@ get_lock(Lock,#object{oid=OID,pattern = P})->
 construct(OID)->
   PatternID=get_pattern_oid(OID),
   DB = get_db_name(OID),
-  #object{oid=OID,edit=false,move=false,pattern = ecomet_pattern:get_map(PatternID), db=DB}.
+  #object{oid=OID,edit=false,move=false,pattern = PatternID, db=DB}.
 
 by_storage_types( Fields, Map )->
   maps:fold(fun(F,V,Acc)->
