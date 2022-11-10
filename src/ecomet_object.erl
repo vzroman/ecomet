@@ -882,7 +882,7 @@ compile_changes( #object{oid = OID, pattern = P, db = DB} )->
       {Data0,delete}->
         Acc#{ Type => { Data0, #{}}};
       {delete}->
-        case ecomet_transaction:read(DB, ?DATA, Type, OID,  none) of
+        case ecomet_db:read(DB, ?DATA, Type, OID) of
           #{fields := _ } = Data0->
             ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Data0),
             Acc#{ Type => { Data0, #{}}};
