@@ -984,7 +984,7 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
     end,
 
   #{
-    object => ecomet_query:object_map(Object,ObjectMap),
+    object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID )}, ObjectMap),
     db => DB,
     ts => TS,
     tags => { NewTags, DelTags},
