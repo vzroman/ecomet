@@ -298,8 +298,10 @@ read_fields(#object{oid = OID,pattern = P}=Object,Fields,Params) when is_map(Fie
         Value=
           case ecomet_field:get_storage(Map,Name) of
             {ok,S}->
-              #{S:=Values} = Storage,
-              maps:get(Name,Values,Default);
+              case Storage of
+                #{ S := #{ Name := _Value } } when _Value =/= none-> _Value;
+                _-> Default
+              end;
             _->
               % undefined_field
               undefined_field
@@ -381,7 +383,10 @@ field_changes(#object{oid=OID,pattern = P,db = DB},Field)->
     none -> none;
 %-------Type storage is under create-------------------------------------
     {delete, #{fields := #{Field := NewValue}}}->
-      {NewValue, none};
+      if
+        NewValue =/= none-> {NewValue, none};
+        true -> none
+      end;
     {delete, _NewStorage}->
       none;
 %-------Type storage is under update-------------------------------------
