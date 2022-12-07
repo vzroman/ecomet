@@ -83,6 +83,7 @@
   get_databases/0,
   get_name/1,
   get_by_name/1,
+  find_by_tag/1,
   sync/0
 ]).
 
@@ -407,6 +408,13 @@ get_by_name(Name) when is_binary(Name)->
     [OID]->{ok,OID};
     _->{error,not_found}
   end.
+
+find_by_tag( Tag )->
+  {_, DBs} =  ecomet_query:system([?ROOT],[<<".name">>],{'AND',[
+    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.database">>)},
+    {<<"tags">>,'=',Tag }
+  ]}),
+  [ binary_to_atom( DB, utf8 ) || [DB] <- DBs ].
 
 sync()->
   % Run through all databases

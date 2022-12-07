@@ -342,13 +342,20 @@ compile(Type,Fields,Conditions,Params)->
 %%=====================================================================
 %%	EXECUTE
 %%=====================================================================
-execute(Handler,#compiled_query{conditions = Conditions,map = Map,reduce = Reduce},DBs,Union)->
-  DBs1=
-    case DBs of
-      '*'-> ecomet_db:get_databases();
-      _-> DBs
-    end,
-  ecomet_resultset:Handler(DBs1,Conditions,Map,Reduce,Union).
+execute(Handler,#compiled_query{conditions = Conditions,map = Map,reduce = Reduce}, DBs, Union)->
+  case prepare_dbs( DBs ) of
+    [] -> throw( {invalid_database, DBs} );
+    DBs1 -> ecomet_resultset:Handler(DBs1,Conditions,Map,Reduce,Union)
+  end.
+
+prepare_dbs( '*' )->
+  ecomet_db:get_databases();
+prepare_dbs([ Tag | Rest ]) when is_binary( Tag )->
+  ecomet_db:find_by_tag( Tag ) ++ prepare_dbs( Rest );
+prepare_dbs([ DB | Rest ]) when is_atom( DB )->
+  [DB| prepare_dbs( Rest )];
+prepare_dbs([])->
+  [].
 
 %%-------------GET------------------------------------------------
 %% Search params is a map:
