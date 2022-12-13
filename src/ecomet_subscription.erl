@@ -41,8 +41,7 @@
 %%=================================================================
 -export([
   object_monitor/1,
-  query_monitor/1,
-  search/6
+  query_monitor/1
 ]).
 
 -record(subscription,{id, pid, ts, owner }).
@@ -56,6 +55,7 @@
 -define(SET_BIT(BM,Tag), ecomet_bitmap:zip(ecomet_bitmap:set_bit(BM,Tag)) ).
 -define(RESET_BIT(BM,Tag), ecomet_bitmap:zip(ecomet_bitmap:reset_bit(BM,Tag)) ).
 -define(X_BIT(X1,X2), ecomet_bitmap:zip( ecomet_bitmap:bit_and(X1,X2)) ).
+-define(U_BIT(X1,X2), ecomet_bitmap:zip( ecomet_bitmap:bit_or(X1,X2)) ).
 
 %%=================================================================
 %%	Service API
@@ -408,14 +408,18 @@ on_commit(#ecomet_log{
   esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, { NewTags, Object, Changes, Self } ),
 
   % Run the search on the other nodes
-  search(OID, DB, NewTags ++ TDel, Object, Changes, Self).
+  TMask = tags_mask( TOld,[] ),
+  TNewMask = ?SET_BIT(TMask,[tag_hash(T)||T <- TAdd]), % == tags_mask(
+  TOldMask = ?SET_BIT(TMask,[tag_hash(T)||T <- TDel]), % == tags_mask(Tags -- TAdd,
 
-search( OID, DB, Tags, Object, Changes, Self )->
+  search(OID, DB, TNewMask, TOldMask, Object, Changes, Self).
+
+search( OID, DB, TNewMask, TOldMask, Object, Changes, Self )->
   case ets:lookup(?S_INDEX, global) of
     [{_,<<>>}]->
       ignore;
     [{_,Global}]->
-      Mask = tags_mask( Tags,[] ),
+      Mask = ?U_BIT( TNewMask, TOldMask ),
       case ?X_BIT(Mask,Global) of
         <<>> -> ignore;
         XTags->
@@ -423,25 +427,19 @@ search( OID, DB, Tags, Object, Changes, Self )->
             case ets:lookup(?S_INDEX,{tag,Tag}) of
               [{_,Indexes}]->
                 maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers, TagNotified)->
-                  case ?X_BIT( Mask, And ) of
-                    And->
-                      case ?X_BIT(Mask, Not) of
-                        <<>> ->
-                          case lists:member(DB, DBs) of
-                            true ->
-                              ToNotify = ordsets:subtract( Subscribers, TagNotified ),
-                              [ S ! {log, OID, Object, Changes, Self} || S <- ToNotify ],
-                              ordsets:union( TagNotified, ToNotify );
-                            _->
-                              TagNotified
-                          end;
+                  case bitmap_search(Mask, TOldMask, TNewMask, And, Not) of
+                    true ->
+                      case lists:member(DB, DBs) of
+                        true ->
+                          ToNotify = ordsets:subtract( Subscribers, TagNotified ),
+                          [ S ! {log, OID, Object, Changes, Self} || S <- ToNotify ],
+                          ordsets:union( TagNotified, ToNotify );
                         _->
                           TagNotified
                       end;
-                    _->
-                      TagNotified
+                    false -> TagNotified
                   end
-                end,Notified, Indexes );
+                          end,Notified, Indexes );
               []->
                 Notified
             end
@@ -449,6 +447,25 @@ search( OID, DB, Tags, Object, Changes, Self )->
       end;
     []->
       ignore
+  end.
+
+bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
+  case ?X_BIT( Mask, And ) of
+    And->
+      case ?X_BIT(Mask, Not) of
+        <<>> -> true;
+        _ when TOldMask =:= <<>> ; TNewMask =:= <<>> -> false;
+        _ ->
+          case ?X_BIT(TOldMask, Not) of
+            <<>> -> true;
+            _ ->
+              case ?X_BIT(TNewMask, Not) of
+                <<>> -> true;
+                _ -> false
+              end
+          end
+      end;
+    _-> false
   end.
 
 
