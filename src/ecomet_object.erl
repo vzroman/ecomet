@@ -974,8 +974,8 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
       maps:merge( Acc, maps:merge(TFields0, TFields1))
     end, #{}, lists:usort(maps:keys(Changes) ++ maps:keys(Rollback))),
 
-  NewTags = ecomet_index:object_tags( Tags1 ),
-  DelTags = ecomet_index:object_tags( Tags0 ) -- NewTags,
+  NewTags = ordsets:from_list(ecomet_index:object_tags( Tags1 )),
+  OldTags = ordsets:from_list(ecomet_index:object_tags( Tags0 )),
 
   % Actually changed fields with their previous values
   Changes0 = maps:map(fun(_F,{V0,_})-> V0 end,FieldsChanges),
@@ -992,7 +992,11 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
     object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID )}, ObjectMap),
     db => DB,
     ts => TS,
-    tags => { NewTags, DelTags},
+    tags => {
+      ordsets:subtract(NewTags, OldTags),
+      ordsets:intersection(NewTags, OldTags),
+      ordsets:subtract(OldTags, NewTags)
+    },
     changes => Changes0
   }.
 %%==============================================================================================
