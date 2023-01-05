@@ -43,8 +43,8 @@
 %% Module remote call API
 %%====================================================================
 -export([
-	single_node_transaction/5,
-	db_transaction_request/5
+	do_single_node_transaction/6,
+	db_transaction_request/6
 ]).
 %%====================================================================
 %% Subscriptions API
@@ -477,19 +477,21 @@ execute(DBs,Conditions,Map,Reduce,Union)->
 %%	NO TRANSACTION QUERY
 %%---------------------------------------------------------------------
 no_transaction([DB], Conditions, Map, Reduce, Union)->
-	case db_no_transaction(DB, Conditions, Map, Union) of
+	Context = ecomet_user:get_context(),
+	case db_no_transaction(DB, Conditions, Map, Union, Context) of
 		{error,_}->Reduce([]);
 		Result-> Reduce([Result])
 	end;
 no_transaction(DBs, Conditions, Map, Reduce, Union)->
 	Self = self(),
+	Context = ecomet_user:get_context(),
 	Master =
 		spawn(fun()->
 			MasterSelf = self(),
 			Workers =
 				[ begin
 						 {W,_} = spawn_monitor(fun()->
-							 MasterSelf ! {result, self(), db_no_transaction(DB, Conditions, Map, Union)}
+							 MasterSelf ! {result, self(), db_no_transaction(DB, Conditions, Map, Union, Context)}
 						 end),
 					 {W,DB}
 				 end || DB <- DBs],
@@ -518,19 +520,20 @@ no_transaction_wait( Workers ) when map_size(Workers) > 0->
 no_transaction_wait( _Workers )->
 	[].
 
-db_no_transaction(DB, Conditions, Map, Union)->
+db_no_transaction(DB, Conditions, Map, Union, Context)->
 	case ecomet_db:available_nodes( DB ) of
 		[]->
 			{error,not_available};
 		Nodes->
 			case lists:member(node(), Nodes) of
 				true->
+					ecomet_user:set_context( Context ),
 					try execute_local(DB,Conditions,Map,Union)
 					catch
 						_:E->{error, E}
 					end;
 				_->
-					case ecall:call_one(Nodes,?MODULE,?FUNCTION_NAME,[DB, Conditions, Map, Union]) of
+					case ecall:call_one(Nodes,?MODULE,?FUNCTION_NAME,[DB, Conditions, Map, Union, Context]) of
 						{ok,{_Node,Result}}->
 							Result;
 						Error->
@@ -577,13 +580,15 @@ local_transaction( DBs, Conditions, Map, Reduce, Union )->
 	Reduce( Results ).
 
 single_node_transaction(Nodes, DBs, Conditions, Map, Reduce, Union)->
-	case ecall:call_one(Nodes, ?MODULE, single_node_transaction,[DBs, Conditions, Map, Reduce, Union]) of
+	Context = ecomet_user:get_context(),
+	case ecall:call_one(Nodes, ?MODULE, do_single_node_transaction,[DBs, Conditions, Map, Reduce, Union, Context]) of
 		{error,Error}->
 			throw(Error);
 		{ok,{_Node,Result}}->
 			Result
 	end.
-single_node_transaction(DBs, Conditions, Map, Reduce, Union)->
+do_single_node_transaction(DBs, Conditions, Map, Reduce, Union, Context)->
+	ecomet_user:set_context( Context ),
 	case ecomet:transaction(fun()->local_transaction(DBs, Conditions, Map, Reduce, Union) end) of
 		{ok,Result}->
 			Result;
@@ -593,13 +598,14 @@ single_node_transaction(DBs, Conditions, Map, Reduce, Union)->
 
 cross_nodes_transaction( DBs, Conditions, Map, Reduce, Union )->
 	Self = self(),
+	Context = ecomet_user:get_context(),
 	Master =
 		spawn(fun()->
 			MasterSelf = self(),
 			Workers =
 				[ begin
 						{W,_} = spawn_monitor(fun()->
-							db_transaction(DB, Conditions, Map, Union, MasterSelf)
+							db_transaction(DB, Conditions, Map, Union, MasterSelf, Context)
 						end),
 						{W,DB}
 					end || DB <- DBs],
@@ -634,22 +640,22 @@ transaction_wait( Workers ) when map_size(Workers) > 0->
 transaction_wait( _Workers )->
 	[].
 
-db_transaction(DB, Conditions, Map, Union, Master)->
+db_transaction(DB, Conditions, Map, Union, Master, Context)->
 	erlang:monitor(process, Master),
 	Nodes = ecomet_db:available_nodes(DB),
 	case lists:member(node(), Nodes) of
 		true->
-			db_transaction_request(DB, Conditions, Map, Union, Master);
+			db_transaction_request(DB, Conditions, Map, Union, Master, Context);
 		_->
-			db_transaction(Nodes, DB, Conditions, Map, Union, Master)
+			db_transaction(Nodes, DB, Conditions, Map, Union, Master, Context)
 	end.
 
-db_transaction([], DB, _Conditions, _Map, _Union, _Master)->
+db_transaction([], DB, _Conditions, _Map, _Union, _Master, _Context)->
 	exit({DB, not_available});
-db_transaction(Nodes, DB, Conditions, Map, Union, Master)->
+db_transaction(Nodes, DB, Conditions, Map, Union, Master, Context)->
 	I = erlang:phash2(make_ref(),length(Nodes)),
 	Node = lists:nth(I+1, Nodes),
-	Worker = spawn(Node, ?MODULE, db_transaction_request, [DB, Conditions, Map, Union, _Master = self()]),
+	Worker = spawn(Node, ?MODULE, db_transaction_request, [DB, Conditions, Map, Union, _Master = self(), Context]),
 	erlang:monitor(process, Worker),
 	receive
 		{result, Worker, Result}->
@@ -661,12 +667,13 @@ db_transaction(Nodes, DB, Conditions, Map, Union, Master)->
 					exit(Reason)
 			end;
 		{'DOWN', _, process, Worker, _Reason}->
-			db_transaction( Nodes--[Node], DB, Conditions, Map, Union, Master );
+			db_transaction( Nodes--[Node], DB, Conditions, Map, Union, Master, Context );
 		{'DOWN', _, process, Master, Reason}->
 			exit(Reason)
 	end.
 
-db_transaction_request(DB, Conditions, Map, Union, Master)->
+db_transaction_request(DB, Conditions, Map, Union, Master, Context)->
+	ecomet_user:set_context( Context ),
 	case ecomet:transaction(fun()->
 		Result = execute_local(DB,Conditions,Map,Union),
 		catch Master ! {result, self(), Result},
