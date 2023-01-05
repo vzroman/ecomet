@@ -477,14 +477,14 @@ execute(DBs,Conditions,Map,Reduce,Union)->
 %%	NO TRANSACTION QUERY
 %%---------------------------------------------------------------------
 no_transaction([DB], Conditions, Map, Reduce, Union)->
-	Context = ecomet_user:get_context(),
+	Context = ecomet_user:query_context(),
 	case db_no_transaction(DB, Conditions, Map, Union, Context) of
 		{error,_}->Reduce([]);
 		Result-> Reduce([Result])
 	end;
 no_transaction(DBs, Conditions, Map, Reduce, Union)->
 	Self = self(),
-	Context = ecomet_user:get_context(),
+	Context = ecomet_user:query_context(),
 	Master =
 		spawn(fun()->
 			MasterSelf = self(),
@@ -527,7 +527,7 @@ db_no_transaction(DB, Conditions, Map, Union, Context)->
 		Nodes->
 			case lists:member(node(), Nodes) of
 				true->
-					ecomet_user:set_context( Context ),
+					ecomet_user:query_context( Context ),
 					try execute_local(DB,Conditions,Map,Union)
 					catch
 						_:E->{error, E}
@@ -580,7 +580,7 @@ local_transaction( DBs, Conditions, Map, Reduce, Union )->
 	Reduce( Results ).
 
 single_node_transaction(Nodes, DBs, Conditions, Map, Reduce, Union)->
-	Context = ecomet_user:get_context(),
+	Context = ecomet_user:query_context(),
 	case ecall:call_one(Nodes, ?MODULE, do_single_node_transaction,[DBs, Conditions, Map, Reduce, Union, Context]) of
 		{error,Error}->
 			throw(Error);
@@ -588,7 +588,7 @@ single_node_transaction(Nodes, DBs, Conditions, Map, Reduce, Union)->
 			Result
 	end.
 do_single_node_transaction(DBs, Conditions, Map, Reduce, Union, Context)->
-	ecomet_user:set_context( Context ),
+	ecomet_user:query_context( Context ),
 	case ecomet:transaction(fun()->local_transaction(DBs, Conditions, Map, Reduce, Union) end) of
 		{ok,Result}->
 			Result;
@@ -598,7 +598,7 @@ do_single_node_transaction(DBs, Conditions, Map, Reduce, Union, Context)->
 
 cross_nodes_transaction( DBs, Conditions, Map, Reduce, Union )->
 	Self = self(),
-	Context = ecomet_user:get_context(),
+	Context = ecomet_user:query_context(),
 	Master =
 		spawn(fun()->
 			MasterSelf = self(),
@@ -673,7 +673,7 @@ db_transaction(Nodes, DB, Conditions, Map, Union, Master, Context)->
 	end.
 
 db_transaction_request(DB, Conditions, Map, Union, Master, Context)->
-	ecomet_user:set_context( Context ),
+	ecomet_user:query_context( Context ),
 	case ecomet:transaction(fun()->
 		Result = execute_local(DB,Conditions,Map,Union),
 		catch Master ! {result, self(), Result},
