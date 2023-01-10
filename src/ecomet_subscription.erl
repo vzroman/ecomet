@@ -52,10 +52,11 @@
 -define(S_INDEX,ecomet_subscriptions_index).
 -define(HASH_BASE, 4294836225).
 
--define(SET_BIT(BM,Tag), ecomet_bitmap:zip(ecomet_bitmap:set_bit(BM,Tag)) ).
--define(RESET_BIT(BM,Tag), ecomet_bitmap:zip(ecomet_bitmap:reset_bit(BM,Tag)) ).
--define(X_BIT(X1,X2), ecomet_bitmap:zip( ecomet_bitmap:bit_and(X1,X2)) ).
--define(U_BIT(X1,X2), ecomet_bitmap:zip( ecomet_bitmap:bit_or(X1,X2)) ).
+-define(SET_BIT(BM,Tag), set_bit(BM,Tag) ).
+-define(RESET_BIT(BM,Tag), reset_bit(BM,Tag) ).
+-define(X_BIT(X1,X2), bit_and(X1,X2) ).
+-define(U_BIT(X1,X2), bit_or(X1,X2) ).
+
 
 %%=================================================================
 %%	Service API
@@ -258,7 +259,7 @@ tag_hash( Tag )->
 tags_mask([Tag|Rest],Mask)->
   tags_mask( Rest, [tag_hash(Tag)|Mask] );
 tags_mask([], Mask)->
-  ?SET_BIT(<<>>, lists:usort(Mask)).
+  ordsets:from_list( Mask ).
 
 get_subscriptions( Session )->
   [ #{id => Id, ts => TS, pid => PID} || [Id,TS,PID] <-ets:match(?SUBSCRIPTIONS, #subscription{id = {Session,'$1'}, ts ='$2', pid='$3', _ = '_'})].
@@ -334,9 +335,9 @@ global_set(Tag)->
   try
     case ets:lookup(?S_INDEX,global) of
       [{_,Global}]->
-        ets:insert(?S_INDEX,{global, ?SET_BIT(Global,Tag) });
+        ets:insert(?S_INDEX,{global, ?SET_BIT(Global,[Tag]) });
       []->
-        ets:insert(?S_INDEX,{global, ?SET_BIT(<<>>,Tag) })
+        ets:insert(?S_INDEX,{global, ?SET_BIT([],[Tag]) })
     end
   after
     Unlock()
@@ -418,14 +419,14 @@ on_commit(#{
 
 search( OID, DB, TNewMask, TOldMask, Object, Changes, Self )->
   case ets:lookup(?S_INDEX, global) of
-    [{_,<<>>}]->
+    [{_,[]}]->
       ignore;
     [{_,Global}]->
       Mask = ?U_BIT( TNewMask, TOldMask ),
       case ?X_BIT(Mask,Global) of
-        <<>> -> ignore;
+        [] -> ignore;
         XTags->
-          ecomet_bitmap:foldl(fun(Tag,Notified)->
+          ordsets:fold(fun(Tag,Notified)->
             case ets:lookup(?S_INDEX,{tag,Tag}) of
               [{_,Indexes}]->
                 maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers, TagNotified)->
@@ -446,7 +447,7 @@ search( OID, DB, TNewMask, TOldMask, Object, Changes, Self )->
               []->
                 Notified
             end
-          end,[], XTags,{none,none})
+          end,[], XTags)
       end;
     []->
       ignore
@@ -456,14 +457,14 @@ bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
   case ?X_BIT( Mask, And ) of
     And->
       case ?X_BIT(Mask, Not) of
-        <<>> -> true;
-        _ when TOldMask =:= <<>> ; TNewMask =:= <<>> -> false;
+        [] -> true;
+        _ when TOldMask =:= [] ; TNewMask =:= [] -> false;
         _ ->
           case ?X_BIT(TOldMask, Not) of
-            <<>> -> true;
+            [] -> true;
             _ ->
               case ?X_BIT(TNewMask, Not) of
-                <<>> -> true;
+                [] -> true;
                 _ -> false
               end
           end
@@ -471,6 +472,18 @@ bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
     _-> false
   end.
 
+
+set_bit(Set, Tags)->
+  ordsets:union(Set, ordsets:from_list( Tags ) ).
+
+reset_bit(Set,Tag)->
+  ordsets:del_element(Tag, Set).
+
+bit_and( Set1, Set2 )->
+  ordsets:intersection( Set1, Set2 ).
+
+bit_or( Set1, Set2 )->
+  ordsets:union( Set1, Set2 ).
 
 
 

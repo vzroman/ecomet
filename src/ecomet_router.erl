@@ -28,6 +28,11 @@
   notify/1
 ]).
 
+
+-export([ 
+  worker_loop/0
+]).
+
 on_init( PoolSize )->
 
   spawn_link(fun ready_nodes/0),
@@ -39,7 +44,7 @@ on_init( PoolSize )->
 
 worker_loop()->
   receive
-    {log,Log} ->
+    {log, Log} ->
       [try ecomet_subscription:on_commit( L )
       catch
         _:Error:Stack->
@@ -48,7 +53,7 @@ worker_loop()->
     Unexpected->
       ?LOGWARNING("unexpected message ~p", [Unexpected])
   end,
-  worker_loop().
+  erlang:hibernate(?MODULE, ?FUNCTION_NAME,[]).
 
 on_commit( Log )->
   [ rpc:cast( N, ?MODULE , notify,[ Log ]) || N <- persistent_term:get({?MODULE,ready_nodes}) ],
