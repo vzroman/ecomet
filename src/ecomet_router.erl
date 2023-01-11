@@ -55,7 +55,7 @@ worker_loop()->
       ?LOGWARNING("unexpected message ~p", [Unexpected]),
       worker_loop()
   after
-    5-> erlang:hibernate(?MODULE, ?FUNCTION_NAME,[])
+    100-> erlang:hibernate(?MODULE, ?FUNCTION_NAME,[])
   end.
 
 on_commit( Log )->
