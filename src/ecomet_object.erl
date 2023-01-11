@@ -939,6 +939,8 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
       Fields1 = maps:get(fields,Data1,#{}),
       lists:foldl(fun(F, Acc)->
         case {Fields0, Fields1} of
+          {#{F := V}, #{F := V}}->
+            Acc;
           {#{F := V0}, #{F := V1}}->
             Acc#{ F => {V0, V1}};
           {_, #{F := V1}} ->

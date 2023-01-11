@@ -49,11 +49,14 @@ worker_loop()->
       catch
         _:Error:Stack->
           ?LOGERROR("log error ~p, ~p, ~p",[ Log, Error, Stack ])
-      end || L <- Log];
+      end || L <- Log],
+      worker_loop();
     Unexpected->
-      ?LOGWARNING("unexpected message ~p", [Unexpected])
-  end,
-  erlang:hibernate(?MODULE, ?FUNCTION_NAME,[]).
+      ?LOGWARNING("unexpected message ~p", [Unexpected]),
+      worker_loop()
+  after
+    5-> erlang:hibernate(?MODULE, ?FUNCTION_NAME,[])
+  end.
 
 on_commit( Log )->
   [ rpc:cast( N, ?MODULE , notify,[ Log ]) || N <- persistent_term:get({?MODULE,ready_nodes}) ],
