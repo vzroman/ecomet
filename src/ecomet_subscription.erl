@@ -67,10 +67,23 @@ on_init()->
   ok = ecomet_router:on_init( ?ENV( router_pool_size, ?ROUTER_POOL_SIZE ) ),
 
   % Prepare the storage for sessions
-  ets:new(?SUBSCRIPTIONS,[named_table,public,set,{keypos, #subscription.id}]),
+  ets:new(?SUBSCRIPTIONS,[
+    named_table,
+    public,
+    set,
+    {keypos, #subscription.id},
+    {read_concurrency, true},
+    {write_concurrency,auto}
+  ]),
 
   % Prepare the storage for index
-  ets:new(?S_INDEX,[named_table,public,set]),
+  ets:new(?S_INDEX,[
+    named_table,
+    public,
+    set,
+    {read_concurrency, true},
+    {write_concurrency,auto}
+  ]),
 
   ok.
 
