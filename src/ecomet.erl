@@ -106,7 +106,8 @@
 -export([
   ts/0,
   stop/0,
-  rebuild_index/1, rebuild_index/2
+  rebuild_index/1, rebuild_index/2,
+  wait_dbs/1
 ]).
 
 % @edoc ecomet object denotes map where each key is field_key()
@@ -372,4 +373,6 @@ rebuild_index(OID)->
 rebuild_index(OID, Fields)->
   ecomet_object:rebuild_index(OID, Fields).
 
+wait_dbs( DBs )->
+  ecomet_db:wait_dbs( DBs ).
 

@@ -78,6 +78,7 @@
 -export([
   init/0,
   wait_local_dbs/0,
+  wait_dbs/1,
   is_local/1,
   available_nodes/1,
   get_databases/0,
@@ -120,7 +121,9 @@ init()->
   wait_local_dbs().
 
 wait_local_dbs()->
-  DBs = zaya:node_dbs( node() ),
+  wait_dbs( zaya:node_dbs( node() ) ).
+
+wait_dbs( DBs )->
   ReadyDBs =
     [DB || DB <- DBs, lists:member(node(), zaya:db_available_nodes(DB))],
   case DBs -- ReadyDBs of
@@ -128,7 +131,7 @@ wait_local_dbs()->
     NotReady->
       ?LOGINFO("~p databases are not ready yet, waiting...",[NotReady]),
       timer:sleep(5000),
-      wait_local_dbs()
+      wait_dbs( DBs )
   end.
 
 %%=================================================================
