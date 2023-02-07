@@ -864,14 +864,15 @@ compile_changes( #object{oid = OID, pattern = P, db = DB} )->
   lists:foldl(fun(Type, Acc)->
     case ecomet_transaction:changes(DB, ?DATA, Type, OID) of
       {#{fields := Fields0}=Data0, #{fields:=Fields1}}->
-        case maps:filter(fun(_F, V)-> V =/= none end, Fields1) of
-          Fields0 ->
+        Fields = maps:filter(fun(_F, V)-> V =/= none end, Fields1),
+        if
+          Fields =:= Fields0 ->
             % No real changes
             ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data0,  none),
             Acc;
-          Fields when map_size(Fields) > 0->
+          map_size( Fields ) > 0 ->
             Acc#{ Type => { Data0, #{ fields=>Fields }}};
-          _->
+          true ->
             % Storage type is to be deleted
             Acc#{ Type=> {Data0, #{}} }
         end;
@@ -991,7 +992,7 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
     end,
 
   #{
-    object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID )}, ObjectMap),
+    object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, ObjectMap),
     db => DB,
     ts => TS,
     tags => {
