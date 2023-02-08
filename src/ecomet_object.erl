@@ -392,10 +392,11 @@ field_changes(#object{oid=OID,pattern = P,db = DB},Field)->
 %-------Type storage is under update-------------------------------------
     {#{fields := OldFields}, #{fields := NewFields}}->
       case {OldFields, NewFields} of
-        {#{Field := Same}, #{Field := Same}}->
-          none;
         {#{Field := OldValue}, #{Field := NewValue}}->
-          {NewValue, OldValue};
+          if
+            OldValue =/= NewValue-> {NewValue, OldValue};
+            true -> none
+          end;
         {#{Field := none}, _}->
           none;
         {#{Field := OldValue}, _}->
@@ -940,10 +941,11 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
       Fields1 = maps:get(fields,Data1,#{}),
       lists:foldl(fun(F, Acc)->
         case {Fields0, Fields1} of
-          {#{F := V}, #{F := V}}->
-            Acc;
           {#{F := V0}, #{F := V1}}->
-            Acc#{ F => {V0, V1}};
+            if
+              V0 =/= V1 -> Acc#{ F => {V0, V1}};
+              true -> Acc
+            end;
           {_, #{F := V1}} ->
             Acc#{ F => {none, V1} };
           {#{F := V0}, _} ->
