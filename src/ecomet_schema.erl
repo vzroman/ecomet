@@ -95,10 +95,10 @@
 }).
 
 -define(SCHEMA,'ECOMET_SCHEMA').
--define(schemaModule,zaya_ets_leveldb).
+-define(schemaModule,zaya_pterm_leveldb).
 -define(schemaParams,
   #{
-    ets => #{},
+    pterm => #{},
     leveldb => ?DEFAULT_LEVELDB_PARAMS(true)
   }
 ).
