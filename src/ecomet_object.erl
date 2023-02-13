@@ -169,7 +169,7 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
         prepare_create(Fields2 ,Object),
         save(Object, on_create)
       end),
-      Object;
+      Object#object{ pattern = PatternID };
     _->?ERROR(access_denied)
   end.
 
@@ -792,7 +792,7 @@ get_lock(Lock,#object{oid=OID,pattern = P})->
 construct(OID)->
   PatternID=get_pattern_oid(OID),
   DB = get_db_name(OID),
-  #object{oid=OID,edit=false,move=false,pattern = ?map(PatternID), db=DB}.
+  #object{oid=OID,edit=false,move=false,pattern = PatternID, db=DB}.
 
 by_storage_types( Fields, Map )->
   maps:fold(fun(F,V,Acc)->
