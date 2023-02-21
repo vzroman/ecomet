@@ -71,30 +71,22 @@ build_index(Changes, BackTags, Map)->
   %   ...
   % }
   %
-  maps:fold(fun(Field,{_, Value},Acc)->
-    FieldTags =
-      if
-        Value =/= none->
-          field_tags( Field, Map, Value );
-        true->
-          []
-      end,
-    {ok,Type} = ecomet_field:get_storage(Map, Field),
+  maps:fold(fun(Field, {_, Value}, Acc) ->
+    FieldTags = case Value of
+      none -> [];
+      _ -> field_tags(Field, Map, Value)
+    end,
+    {ok, Type} = ecomet_field:get_storage(Map, Field),
     TAcc0 = maps:get(Type, Acc, #{}),
-    TAcc =
-      if
-        length(FieldTags) >0 ->
-          TAcc0#{ Field => FieldTags };
-        true->
-          maps:remove( Field, TAcc0 )
-      end,
-    if
-      map_size( TAcc ) > 0 ->
-        Acc#{ Type => TAcc};
-      true->
-        maps:remove(Type, Acc)
+    TAcc = case length(FieldTags) > 0 of
+      true -> TAcc0#{Field => FieldTags};
+      false -> maps:remove(Field, TAcc0)
+    end,
+    case map_size(TAcc) > 0 of
+      true -> Acc#{Type => TAcc};
+      false -> maps:remove(Type, Acc)
     end
-  end,BackTags, Changes).
+  end ,BackTags ,Changes). 
 
 object_tags(BackTags)->
   maps:keys(maps:fold(fun(_StorageType,Fields,Acc0)->

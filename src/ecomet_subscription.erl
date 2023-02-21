@@ -415,18 +415,22 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
 on_commit(#{
   object := #{<<".oid">> := OID} = Object,
   db := DB,
-  tags := {TAdd, TOld, TDel},
+  tags := {},
   changes := Changes,
   self := Self
 })->
   % Run object monitors
-  NewTags = TAdd ++ TOld,
-  catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, { NewTags, Object, Changes, Self } ),
+  % NewTags = TAdd ++ TOld,
+  % catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, {NewTags, Object, Changes, Self } ),
+  catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, {Object, Changes, Self } ),
 
   % Run the search on the other nodes
-  TMask = tags_mask( TOld,[] ),
-  TNewMask = ?SET_BIT(TMask,[tag_hash(T)||T <- TAdd]),
-  TOldMask = ?SET_BIT(TMask,[tag_hash(T)||T <- TDel]),
+  % TMask = tags_mask( TOld,[] ),
+  % TNewMask = ?SET_BIT(TMask,[tag_hash(T)||T <- TAdd]),
+  % TOldMask = ?SET_BIT(TMask,[tag_hash(T)||T <- TDel]),
+
+  TNewMask = undefined,
+  TOldMask = undefined,
 
   search(OID, DB, TNewMask, TOldMask, Object, Changes, Self).
 
