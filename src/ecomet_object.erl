@@ -957,7 +957,29 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
   Tags0 = maps:map(fun(_Type,TypeData)-> maps:get(tags,TypeData,#{}) end, Rollback),
   Tags1 = ecomet_index:build_index(FieldsChanges, Tags0, ?map(P)),
 
+  % TODO. We should get tags in this form:
+  % #{
+  %   ram => { Add, Del },
+  %   ramdisc => { Add, Del },
+  %   disc => { Add, Del }
+  % }
+
+  %   then we group index by storage type
+  % [ramdisc, disc] -> ecomet_pattern:get_storage( ?map(P) )
+  % [ram] -> ram
+  %
+  % Now we have this form:
+  % #{
+  %   ramdisc => { Add, Del },
+  %   ram => { Add, Del }
+  % }
+  %
+  % If Changes don't have some of types that Indexes have we need to add them.
+  % Fields should be taken from Rollback
+
   %-----Commit changes---------------------------
+  % TODO. The result should has form:
+  % { Add, NotChanged, Del }
   maps:map(fun
     (Type,{_, #{fields := TFields}=TData}) when map_size(TFields)>0->
       Data=
@@ -969,6 +991,7 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
     (Type, _)->
       ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none)
   end, Changes),
+
 
   %--------------Prepare commit log-------------------
   ObjectMap =
@@ -997,7 +1020,9 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
     object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, ObjectMap),
     db => DB,
     ts => TS,
-    tags => {
+    % index_log => Result of ecomet_index:build_index TODO
+    tags => % The result of commit TODO
+    {
       ordsets:subtract(NewTags, OldTags),
       ordsets:intersection(NewTags, OldTags),
       ordsets:subtract(OldTags, NewTags)

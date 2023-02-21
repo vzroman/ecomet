@@ -197,6 +197,7 @@ commit(LogList)->
 
 
 group_by_dbs_types_tags( LogList )->
+  % TODO. Optimize the grouping as Log now has index_log #{ ram => {Add, Del}, disc => {Add, Del}, ramdisc => {Add, Del} }
   % #{
   %   DB => #{
   %     Type => #{
