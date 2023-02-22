@@ -44,7 +44,8 @@
 %%====================================================================
 -export([
 	do_single_node_transaction/6,
-	db_transaction_request/6
+	db_transaction_request/6,
+	db_no_transaction/5
 ]).
 %%====================================================================
 %% Subscriptions API
