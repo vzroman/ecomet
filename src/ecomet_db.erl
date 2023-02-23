@@ -270,11 +270,33 @@ delete(Ref, Keys)->
   ok.
 
 %%	ITERATOR
-first( _Ref )->
-  throw(not_supported).
+first( Ref )->
+  Types = lists:usort(maps:keys( Ref )),
+  first(Types, Ref).
+first([T|Rest], Ref)->
+  #{T := {Module, TRef}} = Ref,
+  try
+    {{S,[Key]}, V} = Module:first(TRef),
+    {#key{type = T, storage = S, key = Key }, V}
+  catch
+    _:_->first( Rest, Ref )
+  end;
+first([], _Ref)->
+  throw( undefined ).
 
-last( _Ref )->
-  throw(not_supported).
+last( Ref )->
+  Types = lists:usort(maps:keys( Ref )),
+  last(lists:reverse(Types), Ref).
+last([T|Rest], Ref)->
+  #{T := {Module, TRef}} = Ref,
+  try
+    {{S,[Key]}, V} = Module:last(TRef),
+    {#key{type = T, storage = S, key = Key }, V}
+  catch
+    _:_->last( Rest, Ref )
+  end;
+last([], _Ref)->
+  throw( undefined ).
 
 next( Ref, #key{type = T, storage = S, key = K}=Key)->
   case Ref of
@@ -283,7 +305,7 @@ next( Ref, #key{type = T, storage = S, key = K}=Key)->
         {{S,[Next]}, V}->
           {Key#key{ key = Next }, V};
         _->
-          throw(undefined)
+          first( maps:filter(fun(Type,_)-> Type > T end, Ref) )
       end;
     _->
       throw(invalid_type)
@@ -296,7 +318,7 @@ prev( Ref, #key{type = T, storage = S, key = K}=Key)->
         {{S,[Prev]}, V}->
           {Key#key{ key = Prev }, V};
         _->
-          throw(undefined)
+          last( maps:filter(fun(Type,_)-> Type < T end, Ref) )
       end;
     _->
       throw(invalid_type)
@@ -304,19 +326,53 @@ prev( Ref, #key{type = T, storage = S, key = K}=Key)->
 
 %%	HIGH-LEVEL
 %----------------------FIND------------------------------------------
-find(_Ref, _Query)->
-  % TODO
-  [].
+find( Ref, InQuery )->
+  {Types, Query} = query_types( InQuery, Ref),
+  find( Types, Ref, Query, [] ).
+find([T|Rest], Ref, Query, Acc)->
+  #{T := {Module, TRef}} = Ref,
+  TypeResult = [{ #key{type = T, storage = S, key = K}, V } || {{S,[K]}, V} <- Module:find( TRef, Query )],
+  find(Rest, Ref, Query, [TypeResult|Acc]);
+find([], _Ref, _Query, Acc)->
+  lists:append( lists:reverse(Acc) ).
 
 %----------------------FOLD LEFT------------------------------------------
-foldl( _Ref, _Query, _Fun, InAcc )->
-  % TODO
-  InAcc.
+foldl( Ref, InQuery, Fun, InAcc )->
+  {Types, Query} = query_types( InQuery, Ref),
+  foldl(Types, Ref, Query, Fun, InAcc).
+foldl([T|Rest], Ref, Query, InFun, InAcc )->
+  #{T := {Module, TRef}} = Ref,
+  Fun =
+    fun({{S,[K]},V}, Acc)->
+      InFun({#key{type = T, storage = S, key = K}, V}, Acc)
+    end,
+  Acc = Module:foldl(TRef, Query, Fun, InAcc),
+  foldl(Rest, Ref, Query, Fun, Acc);
+foldl([], _Ref, _Query, _Fun, Acc )->
+  Acc.
+
 
 %----------------------FOLD RIGHT------------------------------------------
-foldr( _Ref, _Query, _Fun, InAcc )->
-  % TODO
-  InAcc.
+foldr( Ref, InQuery, Fun, InAcc )->
+  {Types, Query} = query_types( InQuery, Ref),
+  foldr(lists:reverse(Types), Ref, Query, Fun, InAcc).
+foldr([T|Rest], Ref, Query, InFun, InAcc )->
+  #{T := {Module, TRef}} = Ref,
+  Fun =
+    fun({{S,[K]},V}, Acc)->
+      InFun({#key{type = T, storage = S, key = K}, V}, Acc)
+    end,
+  Acc = Module:foldr(TRef, Query, Fun, InAcc),
+  foldr(Rest, Ref, Query, Fun, Acc);
+foldr([], _Ref, _Query, _Fun, Acc )->
+  Acc.
+
+query_types( #{types := QueryTypes} = Query, Ref)->
+  Types = lists:usort([T || T <- QueryTypes, maps:is_key(T, Ref)]),
+  {Types, maps:remove(types, Query)};
+query_types(Query, Ref)->
+  Types = lists:usort(maps:keys( Ref )),
+  {Types, Query}.
 
 %%=================================================================
 %%	INFO
