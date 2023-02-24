@@ -206,7 +206,7 @@ remove( Params )->
     catch
       _:E->[E|Errs]
     end
-  end,[], Params ) of
+  end,[], maps:with(?STORAGE_TYPES, Params) ) of
     []->ok;
     Errors->
       throw(Errors)
