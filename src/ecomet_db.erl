@@ -199,14 +199,16 @@ close( Ref )->
   end.
 
 remove( Params )->
-  case maps:fold(fun(_Type,#{ module := Module, params := TypeParams }, Errs)->
+  TypesParams = maps:with( ?STORAGE_TYPES, Params ),
+  OtherParams = maps:without(?STORAGE_TYPES, Params),
+  case maps:fold(fun(T,#{ module := M, params := Ps }, Errs)->
     try
-      Module:remove( TypeParams ),
+      M:remove( type_params(T, Ps, OtherParams) ),
       Errs
     catch
       _:E->[E|Errs]
     end
-  end,[], maps:with(?STORAGE_TYPES, Params) ) of
+  end,[], TypesParams ) of
     []->ok;
     Errors->
       throw(Errors)
