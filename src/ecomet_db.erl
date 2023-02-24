@@ -347,7 +347,7 @@ foldl([T|Rest], Ref, Query, InFun, InAcc )->
       InFun({#key{type = T, storage = S, key = K}, V}, Acc)
     end,
   Acc = Module:foldl(TRef, Query, Fun, InAcc),
-  foldl(Rest, Ref, Query, Fun, Acc);
+  foldl(Rest, Ref, Query, InFun, Acc);
 foldl([], _Ref, _Query, _Fun, Acc )->
   Acc.
 
@@ -363,7 +363,7 @@ foldr([T|Rest], Ref, Query, InFun, InAcc )->
       InFun({#key{type = T, storage = S, key = K}, V}, Acc)
     end,
   Acc = Module:foldr(TRef, Query, Fun, InAcc),
-  foldr(Rest, Ref, Query, Fun, Acc);
+  foldr(Rest, Ref, Query, InFun, Acc);
 foldr([], _Ref, _Query, _Fun, Acc )->
   Acc.
 
