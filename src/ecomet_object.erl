@@ -1019,7 +1019,7 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
   % TODO. The result should has form:
   { Add, NotChanged, Del }=
     maps:fold(fun(Type,{_, #{fields := TFields}=TData},{AddAcc,NotChangedAcc,DelAcc}=Acc) ->
-      TypeTags0 = maps:get(fields, maps:get(StorageType, Rollback,#{}), []),
+      TypeTags0 = maps:get(tags, maps:get(StorageType, Rollback,#{}), []),
       case Tags of
         #{ Type:= {TAddTags0,TDelTags0} }->
           TAddTags = ordsets:from_list([ ecomet_subscription:tag_hash( T ) || T<-TAddTags0 ]),
