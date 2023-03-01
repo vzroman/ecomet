@@ -33,7 +33,8 @@
 %%=================================================================
 -export([
   subscribe/5,
-  unsubscribe/1
+  unsubscribe/1,
+  tag_hash/1
 ]).
 
 %%=================================================================
@@ -171,13 +172,13 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read =
 
 object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedback = NoFeedback } = Monitor )->
   receive
-    {?ESUBSCRIPTIONS, {log,OID}, {_Tags, _Object, _Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
+    {?ESUBSCRIPTIONS, {log,OID}, {_IsDelete, _Object, _Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
       object_monitor( Monitor );
-    {?ESUBSCRIPTIONS, {log,OID}, {[], _Object, _Changes, _Self}, _Node, _Actor}->
+    {?ESUBSCRIPTIONS, {log,OID}, {_IsDelete = true, _Object, _Changes, _Self}, _Node, _Actor}->
       Owner! ?SUBSCRIPTION(ID,delete,OID,#{}),
       esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID}, self(),[node()]),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
-    {?ESUBSCRIPTIONS, {log,OID}, {_Tags, Object, Changes, _Self}, _Node, _Actor}->
+    {?ESUBSCRIPTIONS, {log,OID}, {_IsDelete, Object, Changes, _Self}, _Node, _Actor}->
       Updates = Read( Changes, Object ),
       case maps:size(Updates) of
         0-> ignore;
@@ -415,23 +416,17 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
 on_commit(#{
   object := #{<<".oid">> := OID} = Object,
   db := DB,
-  tags := {},
+  tags := {TAdd, TOld, TDel},
   changes := Changes,
   self := Self
 })->
   % Run object monitors
-  % NewTags = TAdd ++ TOld,
-  % catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, {NewTags, Object, Changes, Self } ),
-  catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, {Object, Changes, Self } ),
+  IsDelete = length(TAdd) =:=0 andalso length( TOld ) =:= 0,
+  catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, {IsDelete, Object, Changes, Self } ),
 
   % Run the search on the other nodes
-  % TMask = tags_mask( TOld,[] ),
-  % TNewMask = ?SET_BIT(TMask,[tag_hash(T)||T <- TAdd]),
-  % TOldMask = ?SET_BIT(TMask,[tag_hash(T)||T <- TDel]),
-
-  TNewMask = undefined,
-  TOldMask = undefined,
-
+  TNewMask = ?U_BIT( TAdd, TOld ),
+  TOldMask = ?U_BIT( TDel, TOld ),
   search(OID, DB, TNewMask, TOldMask, Object, Changes, Self).
 
 search( OID, DB, TNewMask, TOldMask, Object, Changes, Self )->

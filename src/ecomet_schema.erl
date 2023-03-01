@@ -738,6 +738,7 @@ init_storage_objects()->
     }}
   ],
   init_tree({?FOLDER_PATTERN,?ROOT_FOLDER}, PatternsTree),
+  ?LOGINFO("DEBUG: STEP1"),
 
   % Step 2. Create storage objects
   StorageTree = [
@@ -770,14 +771,17 @@ init_storage_objects()->
   ],
   init_tree({?FOLDER_PATTERN,?ROOT_FOLDER}, StorageTree),
 
+  ?LOGINFO("DEBUG: STEP2"),
+
   % Step 3. Attach behaviours
   ok = ecomet:edit_object(ecomet:open(<<"/root/.patterns/.node">>),#{
     <<"behaviour_module">>=>ecomet_node
   }),
+  ?LOGINFO("DEBUG: STEP3"),
   ok = ecomet:edit_object(ecomet:open(<<"/root/.patterns/.database">>),#{
     <<"behaviour_module">>=>ecomet_db
   }),
-
+  ?LOGINFO("DEBUG: STEP4"),
   ok.
 
 init_default_users()->

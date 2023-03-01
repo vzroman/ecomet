@@ -169,7 +169,7 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
         prepare_create(Fields2 ,Object),
         save(Object, on_create)
       end),
-      Object;
+      Object#object{ pattern = PatternID };
     _->?ERROR(access_denied)
   end.
 
@@ -392,10 +392,11 @@ field_changes(#object{oid=OID,pattern = P,db = DB},Field)->
 %-------Type storage is under update-------------------------------------
     {#{fields := OldFields}, #{fields := NewFields}}->
       case {OldFields, NewFields} of
-        {#{Field := Same}, #{Field := Same}}->
-          none;
         {#{Field := OldValue}, #{Field := NewValue}}->
-          {NewValue, OldValue};
+          if
+            OldValue =/= NewValue-> {NewValue, OldValue};
+            true -> none
+          end;
         {#{Field := none}, _}->
           none;
         {#{Field := OldValue}, _}->
@@ -791,7 +792,7 @@ get_lock(Lock,#object{oid=OID,pattern = P})->
 construct(OID)->
   PatternID=get_pattern_oid(OID),
   DB = get_db_name(OID),
-  #object{oid=OID,edit=false,move=false,pattern = ?map(PatternID), db=DB}.
+  #object{oid=OID,edit=false,move=false,pattern = PatternID, db=DB}.
 
 by_storage_types( Fields, Map )->
   maps:fold(fun(F,V,Acc)->
@@ -940,10 +941,11 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
       Fields1 = maps:get(fields,Data1,#{}),
       lists:foldl(fun(F, Acc)->
         case {Fields0, Fields1} of
-          {#{F := V}, #{F := V}}->
-            Acc;
           {#{F := V0}, #{F := V1}}->
-            Acc#{ F => {V0, V1}};
+            if
+              V0 =/= V1 -> Acc#{ F => {V0, V1}};
+              true -> Acc
+            end;
           {_, #{F := V1}} ->
             Acc#{ F => {none, V1} };
           {#{F := V0}, _} ->
@@ -952,21 +954,104 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
       end, Acc0, lists:usort( maps:keys(Fields0) ++ maps:keys(Fields1)))
    end, #{}, Changes),
 
-  Tags0 = maps:map(fun(_Type,TypeData)-> maps:get(tags,TypeData,#{}) end, Rollback),
-  Tags1 = ecomet_index:build_index(FieldsChanges, Tags0, ?map(P)),
+  Tags1 = ecomet_index:build_index(FieldsChanges, ?map(P)),
+%%  ?LOGINFO("Tags1 ----- ~p",[Tags1]),
+
+  % TODO. We should get tags in this form:
+  % #{
+  %   ram => { Add, Del },
+  %   ramdisc => { Add, Del },
+  %   disc => { Add, Del }
+  % }
+  StorageType = ecomet_pattern:get_storage(?map(P)),
+  Tags =
+    if
+      StorageType =:= ram -> Tags1;
+      StorageType =:= ramdisc ->
+        case Tags1 of
+          #{ disc := {DiscAdd, DiscDel}, ramdisc := {RamDiscAdd, RamDiscDel} }->
+            maps:remove(disc, Tags1#{ ramdisc => {DiscAdd ++ RamDiscAdd, DiscDel ++ RamDiscDel} });
+          #{ disc := DiscTags } ->
+            maps:remove(disc, Tags1#{ ramdisc => DiscTags });
+          _->
+            Tags1
+        end;
+      StorageType=:=disc->
+        case Tags1 of
+          #{ disc := {DiscAdd, DiscDel}, ramdisc := {RamDiscAdd, RamDiscDel} }->
+            maps:remove(ramdisc, Tags1#{ disc => {DiscAdd ++ RamDiscAdd, DiscDel ++ RamDiscDel} });
+          #{ ramdisc := RamDiscTags } ->
+            maps:remove(ramdisc, Tags1#{ disc => RamDiscTags });
+          _->
+            Tags1
+        end
+    end,
+
+
+
+  %   then we group index by storage type
+  % [ramdisc, disc] -> ecomet_pattern:get_storage( ?map(P) )
+  % [ram] -> ram
+  %
+  % Now we have this form:
+  % #{
+  %   ramdisc => { Add, Del },
+  %   ram => { Add, Del }
+  % }
+  %
+  % If Changes don't have some of types that Indexes have we need to add them.
+  % Fields should be taken from Rollback
+  Changes1 =
+    case Tags  of
+      #{StorageType:=_}->
+        case Changes of
+          #{StorageType:=_} -> Changes;
+          _->
+            Changes#{ StorageType=>#{
+              fields => maps:get(fields, maps:get(StorageType, Rollback,#{}),#{}) }
+            }
+        end;
+      _->
+        Changes
+    end,
 
   %-----Commit changes---------------------------
-  maps:map(fun
-    (Type,{_, #{fields := TFields}=TData}) when map_size(TFields)>0->
-      Data=
-        case Tags1 of
-          #{Type := TTags}-> TData#{tags => TTags};
-          _-> TData
-        end,
-      ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
-    (Type, _)->
-      ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none)
-  end, Changes),
+  % TODO. The result should has form:
+  { Add, NotChanged, Del }=
+    maps:fold(fun(Type,{_, #{fields := TFields}=TData},{AddAcc,NotChangedAcc,DelAcc}=Acc) ->
+      TypeTags0 = maps:get(fields, maps:get(StorageType, Rollback,#{}), []),
+      case Tags of
+        #{ Type:= {TAddTags0,TDelTags0} }->
+          TAddTags = ordsets:from_list([ ecomet_subscription:tag_hash( T ) || T<-TAddTags0 ]),
+          TDelTags = ordsets:from_list([ ecomet_subscription:tag_hash( T ) || T<-TDelTags0 ]),
+          if
+            length( TypeTags0 )=:=0->
+              Data = TData#{ tags => TAddTags },
+              ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
+              { ordsets:union(TAddTags, AddAcc), NotChangedAcc, DelAcc};
+            true->
+              Data = TData#{ tags => ordsets:union( ordsets:subtract(TypeTags0,TDelTags), TAddTags) },
+              ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
+              {
+                ordsets:union(TAddTags, AddAcc),
+                ordsets:union(NotChangedAcc, ordsets:subtract(TAddTags0, TDelTags )),
+                ordsets:union(TDelTags, DelAcc)
+              }
+          end;
+        _ when length( TypeTags0 )=:=0, map_size( TFields )=:=0->
+          ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none),
+          Acc;
+        _ when length( TypeTags0 )=:=0->
+          Data = maps:remove( tags, TData ),
+          ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
+          Acc;
+        _->
+          Data = TData#{ tags => TypeTags0 },
+          ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
+          Acc
+      end
+  end,{ [], [], [] }, Changes1),
+
 
   %--------------Prepare commit log-------------------
   ObjectMap =
@@ -976,9 +1061,6 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
       TFields0 = maps:get(fields,maps:get(Type, Rollback, #{}),#{}),
       maps:merge( Acc, maps:merge(TFields0, TFields1))
     end, #{}, lists:usort(maps:keys(Changes) ++ maps:keys(Rollback))),
-
-  % NewTags = ordsets:from_list(ecomet_index:object_tags( Tags1 )),
-  % OldTags = ordsets:from_list(ecomet_index:object_tags( Tags0 )),
 
   % Actually changed fields with their previous values
   Changes0 = maps:map(fun(_F,{V0,_})-> V0 end,FieldsChanges),
@@ -995,11 +1077,8 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
     object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, ObjectMap),
     db => DB,
     ts => TS,
-    tags => {
-      % ordsets:subtract(NewTags, OldTags),
-      % ordsets:intersection(NewTags, OldTags),
-      % ordsets:subtract(OldTags, NewTags)
-    },
+    index_log => Tags1,
+    tags => { Add,NotChanged,Del},
     changes => Changes0
   }.
 %%==============================================================================================

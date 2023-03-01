@@ -23,8 +23,7 @@
 %% Indexing API
 %% ====================================================================
 -export([
-  build_index/3,
-  object_tags/1,
+  build_index/2,
   commit/1,
   write/3
 ]).
@@ -61,7 +60,7 @@
 %------------------PHASE 1---------------------------------------------
 %               Prepare object tags
 %----------------------------------------------------------------------
-build_index(Changes, BackTags, Map)->
+build_index(Changes, Map)->
   % Build index tags for changed fields.
   % BackIndex structure:
   %	#{storage1:=
@@ -71,31 +70,29 @@ build_index(Changes, BackTags, Map)->
   %   ...
   % }
   %
-  maps:fold(fun(Field, {_, Value}, Acc) ->
-    FieldTags = case Value of
-      none -> [];
-      _ -> field_tags(Field, Map, Value)
-    end,
-    {ok, Type} = ecomet_field:get_storage(Map, Field),
-    TAcc0 = maps:get(Type, Acc, #{}),
-    TAcc = case length(FieldTags) > 0 of
-      true -> TAcc0#{Field => FieldTags};
-      false -> maps:remove(Field, TAcc0)
-    end,
-    case map_size(TAcc) > 0 of
-      true -> Acc#{Type => TAcc};
-      false -> maps:remove(Type, Acc)
+  maps:fold(fun(Field,{PrevValue, NewValue},Acc)->
+    PrevTags =
+      if
+        PrevValue =/= none->
+          field_tags( Field, Map, PrevValue );
+        true->
+          []
+      end,
+    NewTags =
+      if
+        NewValue =/= none->
+          field_tags( Field, Map, NewValue );
+        true->
+          []
+      end,
+    case { NewTags -- PrevTags, PrevTags -- NewTags } of
+      {[],[]}-> Acc;
+      {AddTags,DelTags}->
+        {ok,Type} = ecomet_field:get_storage(Map, Field),
+        {TypeAddAcc, TypeDelAcc} = maps:get(Type, Acc, {[],[]}),
+        Acc#{ Type => { AddTags ++ TypeAddAcc, DelTags, TypeDelAcc } }
     end
-  end ,BackTags ,Changes). 
-
-object_tags(BackTags)->
-  maps:keys(maps:fold(fun(_StorageType,Fields,Acc0)->
-    maps:fold(fun(Field, Tags, Acc1)->
-      lists:foldl(fun({Value,IndexType}, Acc)->
-        Acc#{ {Field, Value, IndexType}=>1 }
-      end,Acc1,Tags)
-    end, Acc0, Fields)
-  end,#{}, BackTags)).
+  end, #{}, Changes).
 
 field_tags( Field, Map, Value )->
   case ecomet_field:get_index(Map, Field) of
@@ -108,7 +105,7 @@ field_tags( Field, Map, Value )->
           _-> [Value]
         end,
       lists:usort(lists:append(lists:foldl(fun(Type,Acc)->
-        [[{TagValue,Type}||TagValue<-build_values(Type,ListValue)]|Acc]
+        [[{Field,TagValue,Type}||TagValue<-build_values(Type,ListValue)]|Acc]
       end,[],IndexTypes)))
   end.
 
@@ -189,6 +186,7 @@ commit(LogList)->
 
 
 group_by_dbs_types_tags( LogList )->
+  % TODO. Optimize the grouping as Log now has index_log #{ ram => {Add, Del}, disc => {Add, Del}, ramdisc => {Add, Del} }
   % #{
   %   DB => #{
   %     Type => #{
