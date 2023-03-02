@@ -61,15 +61,6 @@
 %               Prepare object tags
 %----------------------------------------------------------------------
 build_index(Changes, Map)->
-  % Build index tags for changed fields.
-  % BackIndex structure:
-  %	#{storage1:=
-  %   #{field1:=[{value,type}|...],
-  %     field1:=[{value,type}|...]
-  %   }
-  %   ...
-  % }
-  %
   maps:fold(fun(Field,{PrevValue, NewValue},Acc)->
     PrevTags =
       if
@@ -187,7 +178,6 @@ commit(LogList)->
 
 
 group_by_dbs_types_tags( LogList )->
-  % TODO. Optimize the grouping as Log now has index_log #{ ram => {Add, Del}, disc => {Add, Del}, ramdisc => {Add, Del} }
   % #{
   %   DB => #{
   %     Type => #{

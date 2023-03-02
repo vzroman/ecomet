@@ -955,9 +955,6 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
    end, #{}, Changes),
 
   Tags1 = ecomet_index:build_index(FieldsChanges, ?map(P)),
-%%  ?LOGINFO("Tags1 ----- ~p",[Tags1]),
-
-  % TODO. We should get tags in this form:
   % #{
   %   ram => { Add, Del },
   %   ramdisc => { Add, Del },
@@ -986,10 +983,6 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
             Tags1
         end
     end,
-
-
-
-  %   then we group index by storage type
   % [ramdisc, disc] -> ecomet_pattern:get_storage( ?map(P) )
   % [ram] -> ram
   %
@@ -1007,41 +1000,50 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
         case Changes of
           #{StorageType:=_} -> Changes;
           _->
-            Changes#{ StorageType=>#{
-              fields => maps:get(fields, maps:get(StorageType, Rollback,#{}),#{}) }
-            }
+            TRollBack = maps:get(StorageType, Rollback,#{}),
+            Changes#{ StorageType=>{ TRollBack, maps:remove(tags,TRollBack) }}
         end;
       _->
         Changes
     end,
-
   %-----Commit changes---------------------------
-  % TODO. The result should has form:
+  EmptySet = ecomet_subscription:new_bit_set(),
   { Add, NotChanged, Del }=
-    maps:fold(fun(Type,{_, #{fields := TFields}=TData},{AddAcc,NotChangedAcc,DelAcc}=Acc) ->
-      TypeTags0 = maps:get(tags, maps:get(StorageType, Rollback,#{}), []),
+    maps:fold(fun(Type,{_, TData},{AddAcc,NotChangedAcc,DelAcc}=Acc) ->
+      TFields = maps:get(fields, TData, #{}),
+      TypeTags0 = maps:get(tags, maps:get(StorageType, Rollback,#{}), EmptySet),
       case Tags of
         #{ Type:= {TAddTags0,TDelTags0} }->
-          TAddTags = ordsets:from_list([ ecomet_subscription:tag_hash( T ) || T<-TAddTags0 ]),
-          TDelTags = ordsets:from_list([ ecomet_subscription:tag_hash( T ) || T<-TDelTags0 ]),
+          TAddTags = ecomet_subscription:build_tag_hash( TAddTags0 ),
+          TDelTags = ecomet_subscription:build_tag_hash( TDelTags0 ),
           if
-            length( TypeTags0 )=:=0->
+            TypeTags0=:=EmptySet->
               Data = TData#{ tags => TAddTags },
               ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
-              { ordsets:union(TAddTags, AddAcc), NotChangedAcc, DelAcc};
+              { ecomet_subscription:bit_or(TAddTags, AddAcc), NotChangedAcc, DelAcc};
             true->
-              Data = TData#{ tags => ordsets:union( ordsets:subtract(TypeTags0,TDelTags), TAddTags) },
-              ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
-              {
-                ordsets:union(TAddTags, AddAcc),
-                ordsets:union(NotChangedAcc, ordsets:subtract(TAddTags0, TDelTags )),
-                ordsets:union(TDelTags, DelAcc)
-              }
+              ObjectTags = ecomet_subscription:bit_or( ecomet_subscription:bit_subtract(TypeTags0,TDelTags), TAddTags),
+              if
+                ObjectTags =:= EmptySet, map_size(TFields) =:= 0->
+                  ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none),
+                  {AddAcc, NotChangedAcc, ecomet_subscription:bit_or(TDelTags, DelAcc)};
+                ObjectTags =:= EmptySet->
+                  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, TData,  none),
+                  {AddAcc, NotChangedAcc, ecomet_subscription:bit_or(TDelTags, DelAcc)};
+                true->
+                  Data = TData#{ tags => ObjectTags },
+                  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
+                  {
+                    ecomet_subscription:bit_or(TAddTags, AddAcc),
+                    ecomet_subscription:bit_or(NotChangedAcc, ecomet_subscription:bit_subtract(TypeTags0, TDelTags )),
+                    ecomet_subscription:bit_or(TDelTags, DelAcc)
+                  }
+              end
           end;
-        _ when length( TypeTags0 )=:=0, map_size( TFields )=:=0->
+        _ when TypeTags0 =:=EmptySet, map_size( TFields )=:=0->
           ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none),
           Acc;
-        _ when length( TypeTags0 )=:=0->
+        _ when TypeTags0 =:=EmptySet->
           Data = maps:remove( tags, TData ),
           ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
           Acc;
@@ -1050,17 +1052,18 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
           ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
           Acc
       end
-  end,{ [], [], [] }, Changes1),
+  end,{ EmptySet, EmptySet, EmptySet }, Changes1),
 
 
   %--------------Prepare commit log-------------------
+  ObjectMap0 =
+    maps:fold(fun(_Type, {_,TData}, Acc)->
+      maps:merge( maps:get(fields,TData,#{}), Acc )
+    end,#{}, Changes),
   ObjectMap =
-    lists:foldl(fun(Type,Acc)->
-      {_,TChanges} = maps:get(Type, Changes, {#{},#{}}),
-      TFields1 = maps:get(fields,TChanges,#{}),
-      TFields0 = maps:get(fields,maps:get(Type, Rollback, #{}),#{}),
-      maps:merge( Acc, maps:merge(TFields0, TFields1))
-    end, #{}, lists:usort(maps:keys(Changes) ++ maps:keys(Rollback))),
+    maps:fold(fun(_Type,TData, Acc)->
+      maps:merge( maps:get(fields,TData,#{}), Acc )
+    end, ObjectMap0, maps:without(maps:keys(Changes), Rollback)),
 
   % Actually changed fields with their previous values
   Changes0 = maps:map(fun(_F,{V0,_})-> V0 end,FieldsChanges),
@@ -1131,24 +1134,66 @@ rebuild_index(OID, Fields)->
         end
       end, #{}, Fields),
 
-    Tags0 =
-      maps:map(fun(_Type,TypeData)-> maps:get(tags,TypeData,#{}) end, Storages),
-    Tags1 = ecomet_index:build_index(FieldsChanges, Tags0, Map),
+    Tags1 = ecomet_index:build_index(FieldsChanges, Map),
+    Tags =
+      if
+        StorageTypes =:= ram -> Tags1;
+        StorageTypes =:= ramdisc ->
+          case Tags1 of
+            #{ disc := {DiscAdd, DiscDel}, ramdisc := {RamDiscAdd, RamDiscDel} }->
+              maps:remove(disc, Tags1#{ ramdisc => {DiscAdd ++ RamDiscAdd, DiscDel ++ RamDiscDel} });
+            #{ disc := DiscTags } ->
+              maps:remove(disc, Tags1#{ ramdisc => DiscTags });
+            _->
+              Tags1
+          end;
+        StorageTypes=:=disc->
+          case Tags1 of
+            #{ disc := {DiscAdd, DiscDel}, ramdisc := {RamDiscAdd, RamDiscDel} }->
+              maps:remove(ramdisc, Tags1#{ disc => {DiscAdd ++ RamDiscAdd, DiscDel ++ RamDiscDel} });
+            #{ ramdisc := RamDiscTags } ->
+              maps:remove(ramdisc, Tags1#{ disc => RamDiscTags });
+            _->
+              Tags1
+          end
+      end,
 
-    maps:map(fun
-       (Type,#{fields := TFields}=TData) when map_size(TFields)>0->
-         Data=
-           case Tags1 of
-             #{Type := TTags}-> TData#{tags => TTags};
-             _-> TData
-           end,
-         ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
-       (Type, _)->
-         ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none)
+    EmptySet = ecomet_subscription:new_bit_set(),
+    maps:foreach(fun(Type, TData) ->
+      TFields = maps:get(fields, TData, #{}),
+      TypeTags0 = maps:get(tags, maps:get(StorageTypes, Storages,#{}), EmptySet),
+      case Tags of
+        #{ Type:= {TAddTags0,TDelTags0} }->
+          TAddTags = ecomet_subscription:build_tag_hash( TAddTags0 ),
+          TDelTags = ecomet_subscription:build_tag_hash( TDelTags0 ),
+          if
+            TypeTags0=:=EmptySet->
+              Data = TData#{ tags => TAddTags },
+              ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
+            true->
+              ObjectTags = ecomet_subscription:bit_or( ecomet_subscription:bit_subtract(TypeTags0,TDelTags), TAddTags),
+              if
+                ObjectTags =:= EmptySet, map_size(TFields) =:= 0->
+                  ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none);
+                ObjectTags =:= EmptySet->
+                  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, TData,  none);
+                true->
+                  Data = TData#{ tags => ObjectTags },
+                  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none)
+              end
+          end;
+        _ when TypeTags0 =:=EmptySet, map_size( TFields )=:=0->
+          ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none);
+        _ when TypeTags0 =:=EmptySet->
+          Data = maps:remove( tags, TData ),
+          ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
+        _->
+          Data = TData#{ tags => TypeTags0 },
+          ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none)
+      end
     end, Storages),
 
-    ecomet_index:commit([ #{db => DB, object => #{ <<".oid">>=>OID, object => Object }} ]),
-
+    ecomet_index:commit([ #{db => DB, object => #{ <<".oid">>=>OID, object => Object }, index_log => Tags1} ]),
     ok
 
   end).
