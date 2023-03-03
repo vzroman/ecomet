@@ -1134,11 +1134,12 @@ rebuild_index(OID, Fields)->
         end
       end, #{}, Fields),
 
+    StorageType = ecomet_pattern:get_storage(?map(P)),
     Tags1 = ecomet_index:build_index(FieldsChanges, Map),
     Tags =
       if
-        StorageTypes =:= ram -> Tags1;
-        StorageTypes =:= ramdisc ->
+        StorageType =:= ram -> Tags1;
+        StorageType =:= ramdisc ->
           case Tags1 of
             #{ disc := {DiscAdd, DiscDel}, ramdisc := {RamDiscAdd, RamDiscDel} }->
               maps:remove(disc, Tags1#{ ramdisc => {DiscAdd ++ RamDiscAdd, DiscDel ++ RamDiscDel} });
@@ -1147,7 +1148,7 @@ rebuild_index(OID, Fields)->
             _->
               Tags1
           end;
-        StorageTypes=:=disc->
+        StorageType=:=disc->
           case Tags1 of
             #{ disc := {DiscAdd, DiscDel}, ramdisc := {RamDiscAdd, RamDiscDel} }->
               maps:remove(ramdisc, Tags1#{ disc => {DiscAdd ++ RamDiscAdd, DiscDel ++ RamDiscDel} });
@@ -1161,7 +1162,7 @@ rebuild_index(OID, Fields)->
     EmptySet = ecomet_subscription:new_bit_set(),
     maps:foreach(fun(Type, TData) ->
       TFields = maps:get(fields, TData, #{}),
-      TypeTags0 = maps:get(tags, maps:get(StorageTypes, Storages,#{}), EmptySet),
+      TypeTags0 = maps:get(tags, maps:get(StorageType, Storages,#{}), EmptySet),
       case Tags of
         #{ Type:= {TAddTags0,TDelTags0} }->
           TAddTags = ecomet_subscription:build_tag_hash( TAddTags0 ),
@@ -1192,10 +1193,8 @@ rebuild_index(OID, Fields)->
           ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none)
       end
     end, Storages),
-
     ecomet_index:commit([ #{db => DB, object => #{ <<".oid">>=>OID, object => Object }, index_log => Tags1} ]),
     ok
-
   end).
 
 debug(Folder, Count, Batch)->
