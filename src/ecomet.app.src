@@ -1,6 +1,6 @@
 {application, ecomet,
  [{description, "A distributed reactive database"},
-  {vsn, "0.1.20"},
+  {vsn, git},
   {registered, []},
   {mod, {ecomet_app, []}},
   {applications,
@@ -11,6 +11,7 @@
     erlware_commons,
     elock,
     esubscribe,
+    eroaring,
     zaya_leveldb,
     zaya
    ]},
