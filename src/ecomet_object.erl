@@ -934,6 +934,7 @@ commit([])->
   [].
 
 do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )->
+  Map = ?map( P ),
   %----------Define fields changes-------------------
   FieldsChanges =
     maps:fold(fun(_Type,{ Data0, Data1 },Acc0)->
@@ -954,13 +955,13 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
       end, Acc0, lists:usort( maps:keys(Fields0) ++ maps:keys(Fields1)))
    end, #{}, Changes),
 
-  Tags1 = ecomet_index:build_index(FieldsChanges, ?map(P)),
+  Tags1 = ecomet_index:build_index(FieldsChanges, Map),
   % #{
   %   ram => { Add, Del },
   %   ramdisc => { Add, Del },
   %   disc => { Add, Del }
   % }
-  StorageType = ecomet_pattern:get_storage(?map(P)),
+  StorageType = ecomet_pattern:get_storage( Map ),
   Tags =
     if
       StorageType =:= ram -> Tags1;
@@ -983,7 +984,7 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
             Tags1
         end
     end,
-  % [ramdisc, disc] -> ecomet_pattern:get_storage( ?map(P) )
+  % [ramdisc, disc] -> ecomet_pattern:get_storage( Map )
   % [ram] -> ram
   %
   % Now we have this form:
@@ -1008,8 +1009,8 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
     end,
   %-----Commit changes---------------------------
   EmptySet = ecomet_subscription:new_bit_set(),
-  { Add, NotChanged, Del }=
-    maps:fold(fun(Type,{_, TData},{AddAcc,NotChangedAcc,DelAcc}=Acc) ->
+  { Add, Del }=
+    maps:fold(fun(Type,{_, TData},{AddAcc,DelAcc}=Acc) ->
       TFields = maps:get(fields, TData, #{}),
       TypeTags0 = maps:get(tags, maps:get(StorageType, Rollback,#{}), EmptySet),
       case Tags of
@@ -1020,22 +1021,21 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
             TypeTags0=:=EmptySet->
               Data = TData#{ tags => TAddTags },
               ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
-              { ecomet_subscription:bit_or(TAddTags, AddAcc), NotChangedAcc, DelAcc};
+              { ecomet_subscription:bit_or(TAddTags, AddAcc), DelAcc};
             true->
               ObjectTags = ecomet_subscription:bit_or( ecomet_subscription:bit_subtract(TypeTags0,TDelTags), TAddTags),
               if
                 ObjectTags =:= EmptySet, map_size(TFields) =:= 0->
                   ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none),
-                  {AddAcc, NotChangedAcc, ecomet_subscription:bit_or(TDelTags, DelAcc)};
+                  {AddAcc, ecomet_subscription:bit_or(TDelTags, DelAcc)};
                 ObjectTags =:= EmptySet->
                   ok = ecomet_transaction:write(DB, ?DATA, Type, OID, TData,  none),
-                  {AddAcc, NotChangedAcc, ecomet_subscription:bit_or(TDelTags, DelAcc)};
+                  {AddAcc, ecomet_subscription:bit_or(TDelTags, DelAcc)};
                 true->
                   Data = TData#{ tags => ObjectTags },
                   ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
                   {
                     ecomet_subscription:bit_or(TAddTags, AddAcc),
-                    ecomet_subscription:bit_or(NotChangedAcc, ecomet_subscription:bit_subtract(TypeTags0, TDelTags )),
                     ecomet_subscription:bit_or(TDelTags, DelAcc)
                   }
               end
@@ -1052,8 +1052,24 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
           ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
           Acc
       end
-  end,{ EmptySet, EmptySet, EmptySet }, Changes1),
+  end,{ EmptySet, EmptySet }, Changes1),
 
+  NotChanged0 =
+    lists:foldl(fun(T, Acc)->
+      case Rollback of
+        #{ T := #{ tags:= TypeTags } }-> ecomet_subscription:bit_or( Acc, TypeTags );
+        _-> Acc
+      end
+    end, EmptySet, ecomet_pattern:get_storage_types( Map )),
+
+  NotChanged =
+    if
+      Add =:= EmptySet, Del =:= EmptySet -> NotChanged0;
+      Add =:= EmptySet -> ecomet_subscription:bit_subtract( NotChanged0, Del );
+      Del =:= EmptySet -> ecomet_subscription:bit_or( NotChanged0, Add );
+      true ->
+        ecomet_subscription:bit_or( ecomet_subscription:bit_subtract( NotChanged0, Del ), Add )
+    end,
 
   %--------------Prepare commit log-------------------
   ObjectMap0 =
