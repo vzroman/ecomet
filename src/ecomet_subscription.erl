@@ -349,27 +349,22 @@ destroy_index([], _Self)->
 global_set(Tag)->
   {ok,Unlock} = elock:lock(?LOCKS,global, _IsShared = false, _Timeout = infinity),
   try
-    case ets:lookup(?S_INDEX,global) of
-      [{_,Global}]->
-        ets:insert(?S_INDEX,{global, ?SET_BIT(Global,Tag) });
-      []->
-        ets:insert(?S_INDEX,{global, ?SET_BIT(undefined,Tag) })
-    end
+    Global = global_get(),
+    persistent_term:put({?MODULE, global}, ?SET_BIT(Global, Tag))
   after
     Unlock()
   end.
 global_reset(Tag)->
   {ok,Unlock} = elock:lock(?LOCKS,global, _IsShared = false, _Timeout = infinity),
   try
-    case ets:lookup(?S_INDEX, global) of
-      [{_,Global}]->
-        ets:insert(?S_INDEX,{ global, ?RESET_BIT( Global, Tag ) });
-      []->
-        ignore
-    end
+    Global = global_get(),
+    persistent_term:put({?MODULE, global}, ?RESET_BIT(Global, Tag))
   after
     Unlock()
   end.
+
+global_get()->
+  persistent_term:get( {?MODULE,global}, ?EMPTY_SET ).
 
 drop_updates( StartTS )->
   receive
@@ -427,10 +422,10 @@ on_commit(#{
   catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, {IsDelete, Object, Changes, Self } ),
 
   % Run the search of query subscriptions
-  case ets:lookup(?S_INDEX, global) of
-    [{_,?EMPTY_SET}]->
+  case global_get() of
+    ?EMPTY_SET->
       ignore;
-    [{_,Global}]->
+    Global->
       if
         TAdd =:=?EMPTY_SET, TDel=:=?EMPTY_SET->
           % No index changes
@@ -444,11 +439,9 @@ on_commit(#{
         true ->
           TNewMask = ?U_BIT( TAdd, TOld ),
           TOldMask = ?U_BIT( TDel, TOld ),
-          TMask = ?U_BIT( TNewMask, TOld ),
+          TMask = ?U_BIT( TNewMask, TDel ),
           search(Global, OID, DB, TMask, TNewMask, TOldMask, Object, Changes, Self)
-      end;
-    []->
-      ignore
+      end
   end.
 
 light_search(Global, OID, DB, Mask, Object, Changes, Self )->
@@ -539,8 +532,6 @@ bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
 new_bit_set()->
   gb_sets:new().
 
-set_bit(undefined, Tag)->
-  gb_sets:from_list([Tag]);
 set_bit(Set, Tag)->
   gb_sets:add_element(Tag, Set).
 

@@ -276,18 +276,19 @@ update_tag( Module, Ref, Tag, Patterns )->
 build_bitmap(_Module, _Ref, _Tag, Update) when map_size(Update) =:= 0->
   stop;
 build_bitmap(Module, Ref, Tag, Update)->
+  Empty = ecomet_bitmap:create(),
   {Add, Del}=
     maps:fold(fun(ID,Value,{AddAcc,DelAcc})->
       if
         Value -> { ecomet_bitmap:set_bit(AddAcc,ID), DelAcc };
         true-> { AddAcc, ecomet_bitmap:set_bit(DelAcc,ID) }
       end
-    end,{<<>>,<<>>}, Update),
+    end,{Empty,Empty}, Update),
 
   case Module:read(Ref,[{?INDEX,[Tag]}]) of
     []->
-      case ecomet_bitmap:zip( ecomet_bitmap:bit_andnot(Add,Del)) of
-        <<>>->
+      case ecomet_bitmap:bit_andnot(Add,Del) of
+        Empty->
           stop;
         LevelValue->
           ok = Module:write( Ref, [{{?INDEX,[Tag]}, LevelValue}]),
@@ -295,8 +296,8 @@ build_bitmap(Module, Ref, Tag, Update)->
       end;
     [{_,LevelValue0}]->
       LevelValue1 = ecomet_bitmap:bit_or(LevelValue0, Add ),
-      case ecomet_bitmap:zip( ecomet_bitmap:bit_andnot(LevelValue1,Del)) of
-        <<>>->
+      case ecomet_bitmap:bit_andnot(LevelValue1,Del) of
+        Empty->
           ok = Module:delete( Ref, [{?INDEX,[Tag]}]),
           false;
         LevelValue->

@@ -309,9 +309,8 @@ bitmap_oper('ANDNOT',X1,X2)->
 		_->bitmap_result(ecomet_bitmap:oper('ANDNOT',X1,X2))
 	end.
 bitmap_result(Bitmap)->
-	Zip = ecomet_bitmap:zip(Bitmap),
-	case ecomet_bitmap:is_empty(Zip) of
-		false->Zip;
+	case ecomet_bitmap:is_empty(Bitmap) of
+		false->Bitmap;
 		true->none
 	end.
 
