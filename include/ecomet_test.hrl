@@ -30,7 +30,7 @@
   syntax_tools,
   goldrush,
   lager,
-  dlss
+  ecomet
 ]).
 
 -define(START_DEPENDENCIES,[
@@ -43,7 +43,8 @@
 -define(STOP_DEPENDENCIES,[
   begin
     ct:pal("stopping ~p",[D]),
-    application:stop(D)
+    application:stop(D),
+    zaya:stop()
   end|| D <- lists:reverse(?DEPENDENCIES) ]).
 
 -define(SUITE_PROCESS_START(),spawn(fun()->
@@ -82,31 +83,18 @@
 
     ?STOP_DEPENDENCIES,
 
-    mnesia:delete_schema([node()]),
-    application:set_env(mnesia, dir,?config(priv_dir,Config)++"/DB_"++atom_to_list(?MODULE)),
+    % mnesia:delete_schema([node()]),
+    % application:set_env(mnesia, dir,?config(priv_dir,Config)++"/DB_"++atom_to_list(?MODULE)),
 
-    ?START_DEPENDENCIES,
+    ?START_DEPENDENCIES
 
-    {ok,_}=ecomet_schema:init([])
+    % {ok,_}=ecomet_schema:init([])
   end).
 
--define(BACKEND_STOP(Timeout),(fun()->
+-define(BACKEND_STOP(),(fun()->
 
-  ?STOP_DEPENDENCIES,
-  Wait=fun(R,T)->
-    case mnesia:system_info(is_running) of
-      no->ok;
-      Other->
-        ct:pal("is running ~p",[Other]),
-        if
-          T=<0->error;
-          true->
-            timer:sleep(1000),
-            R(R,T-1000)
-        end
-    end
-  end,
-  Wait(Wait,Timeout)
+  ?STOP_DEPENDENCIES
+
 end)()).
 
 -endif.

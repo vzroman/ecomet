@@ -33,7 +33,12 @@
 %%=================================================================
 -export([
   subscribe/5,
-  unsubscribe/1
+  unsubscribe/1,
+  build_tag_hash/1,
+  new_bit_set/0,
+  bit_and/2,
+  bit_or/2,
+  bit_subtract/2
 ]).
 
 %%=================================================================
@@ -56,6 +61,7 @@
 -define(RESET_BIT(BM,Tag), reset_bit(BM,Tag) ).
 -define(X_BIT(X1,X2), bit_and(X1,X2) ).
 -define(U_BIT(X1,X2), bit_or(X1,X2) ).
+-define(EMPTY_SET,{0,nil}).
 
 
 %%=================================================================
@@ -171,13 +177,13 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner,object = Object, read =
 
 object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedback = NoFeedback } = Monitor )->
   receive
-    {?ESUBSCRIPTIONS, {log,OID}, {_Tags, _Object, _Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
+    {?ESUBSCRIPTIONS, {log,OID}, {_IsDelete, _Object, _Changes, Self}, _Node, _Actor} when NoFeedback, Self=:=Owner->
       object_monitor( Monitor );
-    {?ESUBSCRIPTIONS, {log,OID}, {[], _Object, _Changes, _Self}, _Node, _Actor}->
+    {?ESUBSCRIPTIONS, {log,OID}, {_IsDelete = true, _Object, _Changes, _Self}, _Node, _Actor}->
       Owner! ?SUBSCRIPTION(ID,delete,OID,#{}),
       esubscribe:unsubscribe(?ESUBSCRIPTIONS,{log,OID}, self(),[node()]),
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
-    {?ESUBSCRIPTIONS, {log,OID}, {_Tags, Object, Changes, _Self}, _Node, _Actor}->
+    {?ESUBSCRIPTIONS, {log,OID}, {_IsDelete, Object, Changes, _Self}, _Node, _Actor}->
       Updates = Read( Changes, Object ),
       case maps:size(Updates) of
         0-> ignore;
@@ -260,19 +266,16 @@ compile_conditions(Condition)->
 compile_index([{[Tag|_]=And,Not}|Rest], DBs)->
   [#index{
     tag = tag_hash(Tag),
-    '&' = tags_mask(And,[]),
-    '!'= tags_mask(Not,[]),
+    '&' = build_tag_hash(And),
+    '!'= build_tag_hash(Not),
     db = DBs } | compile_index( Rest, DBs ) ];
 compile_index([], _DBs)->
   [].
 
+build_tag_hash( Tags )->
+  gb_sets:from_list([ tag_hash(T) || T <- Tags ] ).
 tag_hash( Tag )->
   erlang:phash2(Tag,?HASH_BASE).
-
-tags_mask([Tag|Rest],Mask)->
-  tags_mask( Rest, [tag_hash(Tag)|Mask] );
-tags_mask([], Mask)->
-  ordsets:from_list( Mask ).
 
 get_subscriptions( Session )->
   [ #{id => Id, ts => TS, pid => PID} || [Id,TS,PID] <-ets:match(?SUBSCRIPTIONS, #subscription{id = {Session,'$1'}, ts ='$2', pid='$3', _ = '_'})].
@@ -348,9 +351,9 @@ global_set(Tag)->
   try
     case ets:lookup(?S_INDEX,global) of
       [{_,Global}]->
-        ets:insert(?S_INDEX,{global, ?SET_BIT(Global,[Tag]) });
+        ets:insert(?S_INDEX,{global, ?SET_BIT(Global,Tag) });
       []->
-        ets:insert(?S_INDEX,{global, ?SET_BIT([],[Tag]) })
+        ets:insert(?S_INDEX,{global, ?SET_BIT(undefined,Tag) })
     end
   after
     Unlock()
@@ -420,64 +423,112 @@ on_commit(#{
   self := Self
 })->
   % Run object monitors
-  NewTags = TAdd ++ TOld,
-  catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, { NewTags, Object, Changes, Self } ),
+  IsDelete = TAdd =:=?EMPTY_SET andalso TOld =:= ?EMPTY_SET,
+  catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, {IsDelete, Object, Changes, Self } ),
 
-  % Run the search on the other nodes
-  TMask = tags_mask( TOld,[] ),
-  TNewMask = ?SET_BIT(TMask,[tag_hash(T)||T <- TAdd]),
-  TOldMask = ?SET_BIT(TMask,[tag_hash(T)||T <- TDel]),
-
-  search(OID, DB, TNewMask, TOldMask, Object, Changes, Self).
-
-search( OID, DB, TNewMask, TOldMask, Object, Changes, Self )->
+  % Run the search of query subscriptions
   case ets:lookup(?S_INDEX, global) of
-    [{_,[]}]->
+    [{_,?EMPTY_SET}]->
       ignore;
     [{_,Global}]->
-      Mask = ?U_BIT( TNewMask, TOldMask ),
-      case ?X_BIT(Mask,Global) of
-        [] -> ignore;
-        XTags->
-          ordsets:fold(fun(Tag,Notified)->
-            case ets:lookup(?S_INDEX,{tag,Tag}) of
-              [{_,Indexes}]->
-                maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers, TagNotified)->
-                  case bitmap_search(Mask, TOldMask, TNewMask, And, Not) of
-                    true ->
-                      case lists:member(DB, DBs) of
-                        true ->
-                          ToNotify = ordsets:subtract( Subscribers, TagNotified ),
-                          [ S ! {log, OID, Object, Changes, Self} || S <- ToNotify ],
-                          ordsets:union( TagNotified, ToNotify );
-                        _->
-                          TagNotified
-                      end;
-                    false ->
-                      TagNotified
-                  end
-                end,Notified, Indexes );
-              []->
-                Notified
-            end
-          end,[], XTags)
+      if
+        TAdd =:=?EMPTY_SET, TDel=:=?EMPTY_SET->
+          % No index changes
+          light_search(Global, OID, DB, TOld, Object, Changes, Self);
+        TOld=:=?EMPTY_SET, TDel=:=?EMPTY_SET->
+          % Create
+          light_search(Global, OID, DB, TAdd, Object, Changes, Self);
+        TAdd=:=?EMPTY_SET, TOld=:=?EMPTY_SET->
+          % Delete
+          light_search(Global, OID, DB, TDel, Object, Changes, Self);
+        true ->
+          TNewMask = ?U_BIT( TAdd, TOld ),
+          TOldMask = ?U_BIT( TDel, TOld ),
+          TMask = ?U_BIT( TNewMask, TOld ),
+          search(Global, OID, DB, TMask, TNewMask, TOldMask, Object, Changes, Self)
       end;
     []->
       ignore
+  end.
+
+light_search(Global, OID, DB, Mask, Object, Changes, Self )->
+  case ?X_BIT(Mask,Global) of
+    ?EMPTY_SET -> ignore;
+    XTags->
+      bit_fold(fun(Tag,Notified)->
+        case ets:lookup(?S_INDEX,{tag,Tag}) of
+          [{_,Indexes}]->
+            maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers, TagNotified)->
+              case bitmap_search(Mask, And, Not) of
+                true ->
+                  case lists:member(DB, DBs) of
+                    true ->
+                      ToNotify = ordsets:subtract( Subscribers, TagNotified ),
+                      [ S ! {log, OID, Object, Changes, Self} || S <- ToNotify ],
+                      ordsets:union( TagNotified, ToNotify );
+                    _->
+                      TagNotified
+                  end;
+                false ->
+                  TagNotified
+              end
+            end,Notified, Indexes );
+          []->
+            Notified
+        end
+      end,[], XTags)
+  end.
+
+search(Global, OID, DB, TMask, TNewMask, TOldMask, Object, Changes, Self )->
+  case ?X_BIT(TMask,Global) of
+    ?EMPTY_SET -> ignore;
+    XTags->
+      bit_fold(fun(Tag,Notified)->
+        case ets:lookup(?S_INDEX,{tag,Tag}) of
+          [{_,Indexes}]->
+            maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers, TagNotified)->
+              case bitmap_search(TMask, TOldMask, TNewMask, And, Not) of
+                true ->
+                  case lists:member(DB, DBs) of
+                    true ->
+                      ToNotify = ordsets:subtract( Subscribers, TagNotified ),
+                      [ S ! {log, OID, Object, Changes, Self} || S <- ToNotify ],
+                      ordsets:union( TagNotified, ToNotify );
+                    _->
+                      TagNotified
+                  end;
+                false ->
+                  TagNotified
+              end
+            end,Notified, Indexes );
+          []->
+            Notified
+        end
+      end,[], XTags)
+  end.
+
+bitmap_search(Mask, And, Not) ->
+  case ?X_BIT( Mask, And ) of
+    And->
+      case ?X_BIT(Mask, Not) of
+        ?EMPTY_SET -> true;
+        _ -> false
+      end;
+    _-> false
   end.
 
 bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
   case ?X_BIT( Mask, And ) of
     And->
       case ?X_BIT(Mask, Not) of
-        [] -> true;
-        _ when TOldMask =:= [] ; TNewMask =:= [] -> false;
+        ?EMPTY_SET -> true;
+        _ when TOldMask =:= ?EMPTY_SET ; TNewMask =:= ?EMPTY_SET -> false;
         _ ->
           case ?X_BIT(TOldMask, Not) of
-            [] -> true;
+            ?EMPTY_SET -> true;
             _ ->
               case ?X_BIT(TNewMask, Not) of
-                [] -> true;
+                ?EMPTY_SET -> true;
                 _ -> false
               end
           end
@@ -485,18 +536,28 @@ bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
     _-> false
   end.
 
+new_bit_set()->
+  gb_sets:new().
 
-set_bit(Set, Tags)->
-  ordsets:union(Set, ordsets:from_list( Tags ) ).
+set_bit(undefined, Tag)->
+  gb_sets:from_list([Tag]);
+set_bit(Set, Tag)->
+  gb_sets:add_element(Tag, Set).
 
 reset_bit(Set,Tag)->
-  ordsets:del_element(Tag, Set).
+  gb_sets:del_element(Tag, Set).
 
 bit_and( Set1, Set2 )->
-  ordsets:intersection( Set1, Set2 ).
+  gb_sets:intersection( Set1, Set2 ).
 
 bit_or( Set1, Set2 )->
-  ordsets:union( Set1, Set2 ).
+  gb_sets:union( Set1, Set2 ).
+
+bit_subtract( Set1, Set2 )->
+  gb_sets:subtract( Set1, Set2 ).
+
+bit_fold(Fun, Acc, Set )->
+  gb_sets:fold( Fun, Acc, Set ).
 
 
 

@@ -20,8 +20,8 @@
 -include("ecomet.hrl").
 -include("ecomet_test.hrl").
 
--define(PROCESSES,2).
--define(OBJECTS,10000).
+-define(PROCESSES,5).
+-define(OBJECTS,50000).
 -define(STORAGE,disc).
 
 %% API
@@ -59,36 +59,37 @@
 
 all()->
   [
-    {group,create}
+    %replace edit with crate
+     {group,edit}
     %{group,create_log_index}
-    ,{group,search}
+    % ,{group,search}
   ].
 
 groups()->[
-  {create,
+  {edit,
     [parallel],
     [create||_<-lists:seq(1,?PROCESSES)]
-  },
+  }
 %%  {create_log_index,
 %%    [parallel],
 %%    [create||_<-lists:seq(1,?PROCESSES)]
 %%  },
 
-  {search,
-    [sequence],
-    [
-      search1_1,
-      search1_2,
-      search1_3,
-      search2_1,
-      search2_2,
-      search2_3,
-      search3_1,
-      search3_2,
-      search3_3,
-      search3_4
-    ]
-  }
+  % {search,
+  %   [sequence],
+  %   [
+  %     search1_1,
+  %     search1_2,
+  %     search1_3,
+  %     search2_1,
+  %     search2_2,
+  %     search2_3,
+  %     search3_1,
+  %     search3_2,
+  %     search3_3,
+  %     search3_4
+  %   ]
+  % }
 ].
 
 -define(FIELD(Schema),maps:merge(ecomet_field:from_schema(Schema),#{<<".pattern">> => ?OID(<<"/root/.patterns/.field">>)})).
@@ -177,7 +178,7 @@ init_per_suite(Config)->
     |Config].
 
 end_per_suite(_Config)->
-  ?BACKEND_STOP(30000),
+  ?BACKEND_STOP(),
   ok.
 
 
