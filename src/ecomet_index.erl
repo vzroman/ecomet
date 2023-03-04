@@ -23,8 +23,7 @@
 %% Indexing API
 %% ====================================================================
 -export([
-  build_index/3,
-  object_tags/1,
+  build_index/2,
   commit/1,
   write/3
 ]).
@@ -61,49 +60,30 @@
 %------------------PHASE 1---------------------------------------------
 %               Prepare object tags
 %----------------------------------------------------------------------
-build_index(Changes, BackTags, Map)->
-  % Build index tags for changed fields.
-  % BackIndex structure:
-  %	#{storage1:=
-  %   #{field1:=[{value,type}|...],
-  %     field1:=[{value,type}|...]
-  %   }
-  %   ...
-  % }
-  %
-  maps:fold(fun(Field,{_, Value},Acc)->
-    FieldTags =
+build_index(Changes, Map)->
+  maps:fold(fun(Field,{PrevValue, NewValue},Acc)->
+    PrevTags =
       if
-        Value =/= none->
-          field_tags( Field, Map, Value );
+        PrevValue =/= none->
+          field_tags( Field, Map, PrevValue );
         true->
           []
       end,
-    {ok,Type} = ecomet_field:get_storage(Map, Field),
-    TAcc0 = maps:get(Type, Acc, #{}),
-    TAcc =
+    NewTags =
       if
-        length(FieldTags) >0 ->
-          TAcc0#{ Field => FieldTags };
+        NewValue =/= none->
+          field_tags( Field, Map, NewValue );
         true->
-          maps:remove( Field, TAcc0 )
+          []
       end,
-    if
-      map_size( TAcc ) > 0 ->
-        Acc#{ Type => TAcc};
-      true->
-        maps:remove(Type, Acc)
+    case { NewTags -- PrevTags, PrevTags -- NewTags } of
+      {[],[]}-> Acc;
+      {AddTags,DelTags}->
+        {ok,Type} = ecomet_field:get_storage(Map, Field),
+        {TypeAddAcc, TypeDelAcc} = maps:get(Type, Acc, {[],[]}),
+        Acc#{ Type => { AddTags ++ TypeAddAcc, DelTags ++ TypeDelAcc } }
     end
-  end,BackTags, Changes).
-
-object_tags(BackTags)->
-  maps:keys(maps:fold(fun(_StorageType,Fields,Acc0)->
-    maps:fold(fun(Field, Tags, Acc1)->
-      lists:foldl(fun({Value,IndexType}, Acc)->
-        Acc#{ {Field, Value, IndexType}=>1 }
-      end,Acc1,Tags)
-    end, Acc0, Fields)
-  end,#{}, BackTags)).
+  end, #{}, Changes).
 
 field_tags( Field, Map, Value )->
   case ecomet_field:get_index(Map, Field) of
@@ -116,7 +96,7 @@ field_tags( Field, Map, Value )->
           _-> [Value]
         end,
       lists:usort(lists:append(lists:foldl(fun(Type,Acc)->
-        [[{TagValue,Type}||TagValue<-build_values(Type,ListValue)]|Acc]
+        [[{Field,TagValue,Type}||TagValue<-build_values(Type,ListValue)]|Acc]
       end,[],IndexTypes)))
   end.
 
@@ -183,7 +163,7 @@ dt_index(DT)->
 %               Prepare changes for each tag
 %----------------------------------------------------------------------
 commit(LogList)->
-  ByDBsTypes = group_by_dbs_types_tags( LogList ),
+  {ByDBsTypes, LogList1 } = group_by_dbs_types_tags( LogList ),
   maps:fold(fun(DB,Types,_)->
     maps:fold(fun(Type,Tags,_)->
       maps:fold(fun(Tag,OIDs,_)->
@@ -193,11 +173,11 @@ commit(LogList)->
         ok = ecomet_db:bulk_on_abort(DB,?INDEX,Type,Rollback)
       end, undefined, Tags)
     end, undefined, Types)
-  end, undefined, ByDBsTypes).
+  end, undefined, ByDBsTypes),
+  lists:reverse(LogList1).
 
 
 group_by_dbs_types_tags( LogList )->
-  % TODO. Optimize the grouping as Log now has index_log #{ ram => {Add, Del}, disc => {Add, Del}, ramdisc => {Add, Del} }
   % #{
   %   DB => #{
   %     Type => #{
@@ -207,55 +187,22 @@ group_by_dbs_types_tags( LogList )->
   %     }
   %   }
   % }
-  lists:foldl(fun(#{db := DB, object:=#{ <<".oid">>:=OID, object := Object }},Acc)->
-    DBAcc1 =lists:foldl(fun(Type, DBAcc)->
-      case ecomet_db:changes( DB, ?DATA, Type, OID ) of
-        { Data0, Data1 }->
-          Tags0 =
-            if
-              is_map( Data0 )-> maps:get(tags,Data0,#{});
-              true -> #{}
-            end,
-          Tags1 =
-            if
-              is_map( Data1 )-> maps:get(tags,Data1,#{});
-              true -> #{}
-            end,
-          case Tags0 of
-            Tags1->
-              DBAcc;
-            _->
-              Fields = lists:usort(maps:keys(Tags0) ++ maps:keys(Tags1)),
-              TypeAcc1 = lists:foldl(fun(Field, TypeAcc)->
-                case {maps:get(Field,Tags0,[]), maps:get(Field,Tags1,[])} of
-                  {SameFieldTags, SameFieldTags}->
-                    % No field tags changes
-                    TypeAcc;
-                  { FieldTags0, FieldTags1 }->
-                    %-----Add tags-------------------------
-                    TypeAcc1 =
-                      lists:foldl(fun({Value,IndexType}, TAcc)->
-                        Tag = {Field,Value,IndexType},
-                        TagAcc = maps:get(Tag,TAcc,#{}),
-                        TAcc#{ Tag => TagAcc#{ OID => true}}
-                      end,TypeAcc, FieldTags1 -- FieldTags0 ),
-                    %-----Delete tags-------------------------
-                    lists:foldl(fun({Value,IndexType}, TAcc)->
-                      Tag = {Field,Value,IndexType},
-                      TagAcc = maps:get(Tag,TAcc,#{}),
-                      TAcc#{ Tag => TagAcc#{ OID => false}}
-                    end, TypeAcc1, FieldTags0 -- FieldTags1 )
-                end
-              end, maps:get(Type, DBAcc,#{}), Fields),
-              DBAcc#{ Type => TypeAcc1 }
-          end;
-        _->
-          % No DB storage type changes
-          DBAcc
-      end
-    end, maps:get( DB, Acc, #{}), ecomet_object:get_storage_types( Object )),
-    Acc#{ DB => DBAcc1 }
-  end,#{}, LogList).
+  lists:foldl(fun(#{db := DB, object:=#{ <<".oid">>:=OID }, index_log := IndexLog}=Log, {Acc,LogAcc})->
+    DBAcc0 = maps:get(DB, Acc, #{}),
+    DBAcc = maps:fold(fun(Type,{Add, Del}, InDBAcc ) ->
+        TypeAcc0 = maps:get(Type, InDBAcc, #{}),
+        TypeAcc1 = lists:foldl(fun(Tag,InTagAcc) ->
+          TagAcc = maps:get(Tag, InTagAcc, #{}),
+          InTagAcc#{Tag => TagAcc#{OID => true}}
+        end, TypeAcc0, Add),
+        TypeAcc = lists:foldl(fun(Tag,InTagAcc) ->
+          TagAcc = maps:get(Tag, InTagAcc, #{}),
+          InTagAcc#{Tag => TagAcc#{OID => false}}
+         end, TypeAcc1, Del),
+        InDBAcc#{Type => TypeAcc }
+        end, DBAcc0,IndexLog),
+      {Acc#{ DB => DBAcc }, [maps:remove(index_log, Log)|LogAcc]}
+  end,{#{},[]}, LogList).
 
 prepare_commit(Tag, OIDs)->
   maps:to_list(maps:fold(fun(OID,Value,Acc)->
