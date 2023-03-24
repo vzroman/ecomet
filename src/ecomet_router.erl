@@ -37,7 +37,7 @@ on_init( PoolSize )->
 
   spawn_link(fun ready_nodes/0),
 
-  [ persistent_term:put({?MODULE, I }, spawn_link( fun worker_loop/0 ) ) || I <- lists:seq(0, PoolSize) ],
+  [ persistent_term:put({?MODULE, I }, spawn_link( fun worker_loop/0 ) ) || I <- lists:seq(0, PoolSize-1) ],
 
   % Register the ServiceID for the subscriptions
   persistent_term:put({?MODULE,pool_size}, PoolSize).
