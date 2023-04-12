@@ -212,6 +212,13 @@ open(OID, Lock, _IsTransaction = false)->
     not_exists->throw(not_exists)
   end;
 open(OID,Lock,_IsTransaction = true)->
+
+  % Check if the object is under delete
+  case ecomet_transaction:dict_get( {OID, handler}, undefined ) of
+    on_delete -> throw( object_deleted );
+    _ -> ok
+  end,
+
   Object = construct(OID),
   case get_lock(Lock, Object) of
     none-> throw(not_exists);
