@@ -515,14 +515,23 @@ bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
     And->
       case ?X_BIT(Mask, Not) of
         ?EMPTY_SET -> true;
-        _ when TOldMask =:= ?EMPTY_SET ; TNewMask =:= ?EMPTY_SET -> false;
+        _ when TOldMask =:= ?EMPTY_SET ; TNewMask =:= ?EMPTY_SET ->
+          % The object is either created or deleted
+          false;
         _ ->
           case ?X_BIT(TOldMask, Not) of
-            ?EMPTY_SET -> true;
+            ?EMPTY_SET ->
+              % The previous object satisfied to the NOT
+              true;
             _ ->
+              % The previous object didn't satisfy to the NOT
               case ?X_BIT(TNewMask, Not) of
-                ?EMPTY_SET -> true;
-                _ -> false
+                ?EMPTY_SET ->
+                  % The actual object satisfies
+                  true;
+                _ ->
+                  % The actual object don't satisfy also
+                  false
               end
           end
       end;

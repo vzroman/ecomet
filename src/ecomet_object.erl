@@ -1019,7 +1019,7 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
   { Add, Del }=
     maps:fold(fun(Type,{_, TData},{AddAcc,DelAcc}=Acc) ->
       TFields = maps:get(fields, TData, #{}),
-      TypeTags0 = maps:get(tags, maps:get(StorageType, Rollback,#{}), EmptySet),
+      TypeTags0 = maps:get(tags, maps:get(Type, Rollback,#{}), EmptySet),
       case Tags of
         #{ Type:= {TAddTags0,TDelTags0} }->
           TAddTags = ecomet_subscription:build_tag_hash( TAddTags0 ),
@@ -1030,6 +1030,8 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
               ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
               { ecomet_subscription:bit_or(TAddTags, AddAcc), DelAcc};
             true->
+              % TODO. We subtract tag hashes (not tags themselves), so there can be hash clashes and so we
+              % can remove tags (hashes) that object actually still has if actual tag and deleted tag have the same hash
               ObjectTags = ecomet_subscription:bit_or( ecomet_subscription:bit_subtract(TypeTags0,TDelTags), TAddTags),
               if
                 ObjectTags =:= EmptySet, map_size(TFields) =:= 0->
@@ -1071,11 +1073,8 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
 
   NotChanged =
     if
-      Add =:= EmptySet, Del =:= EmptySet -> NotChanged0;
-      Add =:= EmptySet -> ecomet_subscription:bit_subtract( NotChanged0, Del );
-      Del =:= EmptySet -> ecomet_subscription:bit_or( NotChanged0, Add );
-      true ->
-        ecomet_subscription:bit_or( ecomet_subscription:bit_subtract( NotChanged0, Del ), Add )
+      Del =:= EmptySet -> NotChanged0;
+      true -> ecomet_subscription:bit_subtract( NotChanged0, Del )
     end,
 
   %--------------Prepare commit log-------------------
@@ -1195,6 +1194,8 @@ rebuild_index(OID, Fields)->
               Data = TData#{ tags => TAddTags },
               ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
             true->
+              % TODO. We subtract tag hashes (not tags themselves), so there can be hash clashes and so we
+              % can remove tags (hashes) that object actually still has if actual tag and deleted tag have the same hash
               ObjectTags = ecomet_subscription:bit_or( ecomet_subscription:bit_subtract(TypeTags0,TDelTags), TAddTags),
               if
                 ObjectTags =:= EmptySet, map_size(TFields) =:= 0->
