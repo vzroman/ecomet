@@ -113,6 +113,7 @@
 init()->
   case zaya:start() of
     {ok,_}->ok;
+    {error,{already_started,_}}->ok;
     ignore -> ok;
     {error,Error}->
       ?LOGERROR("backend init error ~p, close the application fix the error and try to start again",[Error]),
