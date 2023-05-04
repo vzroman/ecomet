@@ -501,32 +501,30 @@ search(Global, OID, DB, TMask, TNewMask, TOldMask, Object, Changes, Self )->
   end.
 
 bitmap_search(Mask, And, Not) ->
-  case ?X_BIT( Mask, And ) of
-    And->
-      case ?X_BIT(Mask, Not) of
-        ?EMPTY_SET -> true;
-        _ -> false
-      end;
-    _-> false
+  case is_subset( And, Mask ) of
+    true->
+      is_disjoint(Mask, Not);
+    _->
+      false
   end.
 
 bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
-  case ?X_BIT( Mask, And ) of
-    And->
-      case ?X_BIT(Mask, Not) of
-        ?EMPTY_SET -> true;
+  case is_subset( And, Mask ) of
+    true->
+      case is_disjoint(Mask, Not) of
+        true -> true;
         _ when TOldMask =:= ?EMPTY_SET ; TNewMask =:= ?EMPTY_SET ->
           % The object is either created or deleted
           false;
         _ ->
-          case ?X_BIT(TOldMask, Not) of
-            ?EMPTY_SET ->
+          case is_disjoint(TOldMask, Not) of
+            true ->
               % The previous object satisfied to the NOT
               true;
             _ ->
               % The previous object didn't satisfy to the NOT
-              case ?X_BIT(TNewMask, Not) of
-                ?EMPTY_SET ->
+              case is_disjoint(TNewMask, Not) of
+                true ->
                   % The actual object satisfies
                   true;
                 _ ->
@@ -555,6 +553,12 @@ bit_or( Set1, Set2 )->
 
 bit_subtract( Set1, Set2 )->
   gb_sets:subtract( Set1, Set2 ).
+
+is_subset( Set1, Set2 )->
+  gb_sets:is_subset( Set1, Set2 ).
+
+is_disjoint( Set1, Set2 )->
+  gb_sets:is_disjoint( Set1, Set2 ).
 
 bit_fold(Fun, Acc, Set )->
   gb_sets:fold( Fun, Acc, Set ).

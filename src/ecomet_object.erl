@@ -1103,7 +1103,7 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
     db => DB,
     ts => TS,
     index_log => Tags1,
-    tags => { Add,NotChanged,Del},
+    tags => { Add, NotChanged, Del},
     changes => Changes0
   }.
 %%==============================================================================================
