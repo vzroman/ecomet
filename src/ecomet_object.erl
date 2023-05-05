@@ -422,7 +422,13 @@ object_changes(Object)->
   maps:fold(fun(_T,{ Data0, Data1 }, Acc)->
     Fields0 = maps:get(fields, Data0, #{}),
     maps:fold(fun(F,V1,TAcc)->
-      TAcc#{ F => {V1, maps:get(F, Fields0, none)} }
+      V0 = maps:get(F, Fields0, none),
+      if
+        V0 =/= V1 ->
+          TAcc#{ F => {V1, V0} };
+        true ->
+          TAcc
+      end
     end, Acc, maps:get(fields, Data1, #{}))
   end, #{}, compile_changes( Object )).
 
