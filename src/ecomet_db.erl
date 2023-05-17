@@ -54,6 +54,12 @@
   foldr/4
 ]).
 
+%%	COPY API
+-export([
+  copy/3,
+  dump_batch/2
+]).
+
 %%	INFO API
 -export([
   get_size/1
@@ -376,6 +382,14 @@ query_types( #{types := QueryTypes} = Query, Ref)->
 query_types(Query, Ref)->
   Types = lists:usort(maps:keys( Ref )),
   {Types, Query}.
+
+%%	COPY
+copy(Ref, Fun, InAcc)->
+  foldl(Ref, #{}, Fun, InAcc).
+
+dump_batch(Ref, KVs)->
+  write(Ref, KVs).
+
 
 %%=================================================================
 %%	INFO
