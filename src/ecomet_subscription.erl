@@ -205,7 +205,7 @@ object_monitor(#monitor{id = ID,oid = OID, owner = Owner, read = Read, no_feedba
 %%=================================================================
 %%	Query subscription
 %%=================================================================
--record(query,{id, conditions, read,owner, no_feedback, index}).
+-record(query,{id, conditions, read,owner, no_feedback, index, start_ts}).
 subscribe_query(ID, InConditions, Owner, DBs, Read, #{
   stateless := Stateless,     % No initial query, only updates
   no_feedback := NoFeedback    % Do not send updates back to the author process
@@ -226,11 +226,11 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
   Index = compile_index( Tags, DBs ),
   build_index(Index, self()),
 
-  if
-    Stateless -> ignore;
-    true ->
-      RS = ecomet_query:get(DBs,rs,InConditions),
-      StartTS =
+  StartTS =
+    if
+      Stateless -> -1;
+      true ->
+        RS = ecomet_query:get(DBs,rs,InConditions),
         ecomet_resultset:foldl(fun(OID,TS)->
           Object = ecomet_object:construct( OID ),
 
@@ -242,12 +242,10 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
             ObjectTS > TS-> ObjectTS;
             true -> TS
           end
-        end,-1, RS ),
+        end,-1, RS )
+    end,
 
-      drop_updates( StartTS)
-  end,
-
-  query_monitor(#query{id = ID, conditions = Conditions, read = Read, owner = Owner, no_feedback = NoFeedback, index = Index}).
+  query_monitor(#query{id = ID, conditions = Conditions, read = Read, owner = Owner, no_feedback = NoFeedback, index = Index, start_ts = StartTS}).
 
 compile_conditions({<<".pattern">>,'=',PatternID})->
   Patterns = [PatternID|ecomet_pattern:get_children_recursive(PatternID)],
@@ -366,16 +364,9 @@ global_reset(Tag)->
 global_get()->
   persistent_term:get( {?MODULE,global}, ?EMPTY_SET ).
 
-drop_updates( StartTS )->
-  receive
-    {log, _OID, #{<<".ts">>:=TS}, _Changes, _Self} when TS =< StartTS->
-      drop_updates( StartTS )
-  after
-    0->ok
-  end.
 
 % SUBSCRIBE CID=test GET .name, f1 from * where and(.folder=$oid('/root/f1'), .name='o12')
-query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, conditions = Conditions, read = Read, index = Index } = Query )->
+query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, conditions = Conditions, read = Read, index = Index, start_ts = StartTS } = Query )->
   receive
     {log, _OID, _Object, _Changes, Self} when NoFeedback, Self=:=Owner->
       query_monitor( Query );
@@ -388,7 +379,12 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
             _-> Owner ! ?SUBSCRIPTION(ID,update,OID,Updates)
           end;
         { true, false }->
-          Owner ! ?SUBSCRIPTION(ID,create,OID, Read( Object, Object ));
+          case Object of
+            #{ <<".ts">> := ObjectTS } when ObjectTS =< StartTS ->
+              ignore;
+            _ ->
+              Owner ! ?SUBSCRIPTION(ID,create,OID, Read( Object, Object ))
+          end;
         {false, true}->
           Owner ! ?SUBSCRIPTION(ID,delete,OID,#{});
         _->
