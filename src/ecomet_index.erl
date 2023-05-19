@@ -212,9 +212,9 @@ prepare_commit(Tag, OIDs)->
     IDLN=ObjectID rem ?BITSTRING_LENGTH,
     Acc#{
       {Tag,patterns} => false,
-      {Tag,{idh,PatternID}} => false,
-      {Tag,{idl,PatternID,IDHN}} => false,
-      {Tag,PatternID,IDHN,IDLN} => Value
+      {Tag,[idh,PatternID]} => false,
+      {Tag,[idl,PatternID,IDHN]} => false,
+      {Tag,[idl,PatternID,IDHN,IDLN]} => Value
     }
   end,#{},OIDs)).
 
@@ -249,7 +249,7 @@ group_by_tags( Updates )->
   %   }
   % }
   lists:foldl(fun
-    ({{Tag,PatternID,IDH,IDL}, Value},Acc)->
+    ({{Tag,[idl,PatternID,IDH,IDL]}, Value},Acc)->
       TAcc = maps:get(Tag,Acc,#{}),
       PAcc = maps:get(PatternID,TAcc,#{}),
       IDHAcc = maps:get(IDH,PAcc,#{}),
@@ -262,12 +262,12 @@ update_tag( Module, Ref, Tag, Patterns )->
   Ps =
     maps:fold(fun(P,IDHs,PAcc)->
       Hs = maps:fold(fun(H,Ls,HAcc)->
-        case build_bitmap(Module, Ref, {Tag,{idl,P,H}},Ls) of
+        case build_bitmap(Module, Ref, {Tag,[idl,P,H]},Ls) of
           stop-> HAcc;
           Value -> HAcc#{ H => Value }
         end
       end,#{},IDHs),
-      case build_bitmap(Module, Ref, {Tag,{idh,P}}, Hs) of
+      case build_bitmap(Module, Ref, {Tag,[idh,P]}, Hs) of
         stop-> PAcc;
         Value -> PAcc#{ P => Value }
       end
@@ -315,8 +315,8 @@ build_bitmap(Module, Ref, Tag, Update)->
 read_tag(DB,Storage,Vector,Tag)->
   Key=
     case Vector of
-      [PatternID,IDH]->{Tag,{idl,PatternID,IDH}};
-      [PatternID]->{Tag,{idh,PatternID}};
+      [PatternID,IDH]->{Tag,[idl,PatternID,IDH]};
+      [PatternID]->{Tag,[idh,PatternID]};
       []->{Tag,patterns}
     end,
   case ecomet_db:read(DB,?INDEX,Storage,Key) of
