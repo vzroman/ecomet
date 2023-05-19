@@ -250,9 +250,9 @@ write(Ref, KVs)->
     {Data, Indexes}=
       lists:foldl(fun({S,K,V},{DAcc,IAcc})->
         if
-          S =:= ?INDEX, is_map(V)->
+          S =:= ?INDEX, is_boolean(V)->
             % The trick.
-            % If the value of the index is a map it's an index update as a result of commit
+            % If the value of the index is a boolean it's an index update as a result of commit
             % but not real value. This write must be done by ecomet_index module
             {DAcc,[{K,V}|IAcc]};
           true->

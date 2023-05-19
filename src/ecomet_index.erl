@@ -210,16 +210,16 @@ prepare_commit(Tag, OIDs)->
     ObjectID=ecomet_object:get_id(OID),
     IDHN=ObjectID div ?BITSTRING_LENGTH,
     IDLN=ObjectID rem ?BITSTRING_LENGTH,
-    IDLAcc =  maps:get({Tag,{idl,PatternID,IDHN}},Acc,#{}),
     Acc#{
-      {Tag,patterns} =>#{},
-      {Tag,{idh,PatternID}} => #{},
-      {Tag,{idl,PatternID,IDHN}} => IDLAcc#{ IDLN => Value }
+      {Tag,patterns} => false,
+      {Tag,{idh,PatternID}} => false,
+      {Tag,{idl,PatternID,IDHN}} => false,
+      {Tag,PatternID,IDHN,IDLN} => Value
     }
   end,#{},OIDs)).
 
-prepare_rollback([{Tag, Commit}| Rest])->
-  [{Tag, maps:map(fun(_ID,Value)-> not Value end, Commit )} | prepare_rollback(Rest)];
+prepare_rollback([{Tag, Value}| Rest])->
+  [{Tag, not Value} | prepare_rollback(Rest)];
 prepare_rollback([])->
   [].
 
@@ -249,10 +249,11 @@ group_by_tags( Updates )->
   %   }
   % }
   lists:foldl(fun
-    ({{Tag,{idl,PatternID,IDH}}, IDLs},Acc)->
+    ({{Tag,PatternID,IDH,IDL}, Value},Acc)->
       TAcc = maps:get(Tag,Acc,#{}),
       PAcc = maps:get(PatternID,TAcc,#{}),
-      Acc#{ Tag => TAcc#{ PatternID=> PAcc#{ IDH =>IDLs } } };
+      IDHAcc = maps:get(IDH,PAcc,#{}),
+      Acc#{ Tag => TAcc#{ PatternID=> PAcc#{ IDH =>IDHAcc#{ IDL => Value }}}};
     (_,Acc)->
       Acc
   end, #{} ,Updates).
