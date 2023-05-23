@@ -368,9 +368,9 @@ global_get()->
 % SUBSCRIBE CID=test GET .name, f1 from * where and(.folder=$oid('/root/f1'), .name='o12')
 query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, conditions = Conditions, read = Read, index = Index, start_ts = StartTS } = Query )->
   receive
-    {log, _OID, _Object, _Changes, Self} when NoFeedback, Self=:=Owner->
+    {log, _OID, _Object, _Changes, Self, _TS} when NoFeedback, Self=:=Owner->
       query_monitor( Query );
-    {log, OID, Object, Changes, _Self}->
+    {log, OID, Object, Changes, _Self, TS}->
       case { ecomet_resultset:direct(Conditions, Object), ecomet_resultset:direct(Conditions, maps:merge(Object,Changes)) } of
         {true,true}->
           Updates = Read( Changes, Object ),
@@ -379,10 +379,10 @@ query_monitor( #query{id = ID, no_feedback = NoFeedback,owner = Owner, condition
             _-> Owner ! ?SUBSCRIPTION(ID,update,OID,Updates)
           end;
         { true, false }->
-          case Object of
-            #{ <<".ts">> := ObjectTS } when ObjectTS =< StartTS ->
+          if
+            TS =< StartTS ->
               ignore;
-            _ ->
+            true ->
               Owner ! ?SUBSCRIPTION(ID,create,OID, Read( Object, Object ))
           end;
         {false, true}->
@@ -411,7 +411,8 @@ on_commit(#{
   db := DB,
   tags := {TAdd, TOld, TDel},
   changes := Changes,
-  self := Self
+  self := Self,
+  ts:=TS
 })->
   % Run object monitors
   IsDelete = TAdd =:=?EMPTY_SET andalso TOld =:= ?EMPTY_SET,
@@ -425,22 +426,22 @@ on_commit(#{
       if
         TAdd =:=?EMPTY_SET, TDel=:=?EMPTY_SET->
           % No index changes
-          light_search(Global, OID, DB, TOld, Object, Changes, Self);
+          light_search(Global, OID, DB, TOld, Object, Changes, Self, TS);
         TOld=:=?EMPTY_SET, TDel=:=?EMPTY_SET->
           % Create
-          light_search(Global, OID, DB, TAdd, Object, Changes, Self);
+          light_search(Global, OID, DB, TAdd, Object, Changes, Self, TS);
         TAdd=:=?EMPTY_SET, TOld=:=?EMPTY_SET->
           % Delete
-          light_search(Global, OID, DB, TDel, Object, Changes, Self);
+          light_search(Global, OID, DB, TDel, Object, Changes, Self, TS);
         true ->
           TNewMask = ?U_BIT( TAdd, TOld ),
           TOldMask = ?U_BIT( TDel, TOld ),
           TMask = ?U_BIT( TNewMask, TDel ),
-          search(Global, OID, DB, TMask, TNewMask, TOldMask, Object, Changes, Self)
+          search(Global, OID, DB, TMask, TNewMask, TOldMask, Object, Changes, Self, TS)
       end
   end.
 
-light_search(Global, OID, DB, Mask, Object, Changes, Self )->
+light_search(Global, OID, DB, Mask, Object, Changes, Self, TS )->
   case ?X_BIT(Mask,Global) of
     ?EMPTY_SET -> ignore;
     XTags->
@@ -453,7 +454,7 @@ light_search(Global, OID, DB, Mask, Object, Changes, Self )->
                   case lists:member(DB, DBs) of
                     true ->
                       ToNotify = ordsets:subtract( Subscribers, TagNotified ),
-                      [ S ! {log, OID, Object, Changes, Self} || S <- ToNotify ],
+                      [ S ! {log, OID, Object, Changes, Self, TS} || S <- ToNotify ],
                       ordsets:union( TagNotified, ToNotify );
                     _->
                       TagNotified
@@ -468,7 +469,7 @@ light_search(Global, OID, DB, Mask, Object, Changes, Self )->
       end,[], XTags)
   end.
 
-search(Global, OID, DB, TMask, TNewMask, TOldMask, Object, Changes, Self )->
+search(Global, OID, DB, TMask, TNewMask, TOldMask, Object, Changes, Self, TS )->
   case ?X_BIT(TMask,Global) of
     ?EMPTY_SET -> ignore;
     XTags->
@@ -481,7 +482,7 @@ search(Global, OID, DB, TMask, TNewMask, TOldMask, Object, Changes, Self )->
                   case lists:member(DB, DBs) of
                     true ->
                       ToNotify = ordsets:subtract( Subscribers, TagNotified ),
-                      [ S ! {log, OID, Object, Changes, Self} || S <- ToNotify ],
+                      [ S ! {log, OID, Object, Changes, Self, TS} || S <- ToNotify ],
                       ordsets:union( TagNotified, ToNotify );
                     _->
                       TagNotified
