@@ -210,16 +210,16 @@ prepare_commit(Tag, OIDs)->
     ObjectID=ecomet_object:get_id(OID),
     IDHN=ObjectID div ?BITSTRING_LENGTH,
     IDLN=ObjectID rem ?BITSTRING_LENGTH,
-    IDLAcc =  maps:get({Tag,{idl,PatternID,IDHN}},Acc,#{}),
     Acc#{
-      {Tag,patterns} =>#{},
-      {Tag,{idh,PatternID}} => #{},
-      {Tag,{idl,PatternID,IDHN}} => IDLAcc#{ IDLN => Value }
+      {Tag,patterns} => false,
+      {Tag,[idh,PatternID]} => false,
+      {Tag,[idl,PatternID,IDHN]} => false,
+      {Tag,[idl,PatternID,IDHN,IDLN]} => Value
     }
   end,#{},OIDs)).
 
-prepare_rollback([{Tag, Commit}| Rest])->
-  [{Tag, maps:map(fun(_ID,Value)-> not Value end, Commit )} | prepare_rollback(Rest)];
+prepare_rollback([{Tag, Value}| Rest])->
+  [{Tag, not Value} | prepare_rollback(Rest)];
 prepare_rollback([])->
   [].
 
@@ -249,10 +249,11 @@ group_by_tags( Updates )->
   %   }
   % }
   lists:foldl(fun
-    ({{Tag,{idl,PatternID,IDH}}, IDLs},Acc)->
+    ({{Tag,[idl,PatternID,IDH,IDL]}, Value},Acc)->
       TAcc = maps:get(Tag,Acc,#{}),
       PAcc = maps:get(PatternID,TAcc,#{}),
-      Acc#{ Tag => TAcc#{ PatternID=> PAcc#{ IDH =>IDLs } } };
+      IDHAcc = maps:get(IDH,PAcc,#{}),
+      Acc#{ Tag => TAcc#{ PatternID=> PAcc#{ IDH =>IDHAcc#{ IDL => Value }}}};
     (_,Acc)->
       Acc
   end, #{} ,Updates).
@@ -261,12 +262,12 @@ update_tag( Module, Ref, Tag, Patterns )->
   Ps =
     maps:fold(fun(P,IDHs,PAcc)->
       Hs = maps:fold(fun(H,Ls,HAcc)->
-        case build_bitmap(Module, Ref, {Tag,{idl,P,H}},Ls) of
+        case build_bitmap(Module, Ref, {Tag,[idl,P,H]},Ls) of
           stop-> HAcc;
           Value -> HAcc#{ H => Value }
         end
       end,#{},IDHs),
-      case build_bitmap(Module, Ref, {Tag,{idh,P}}, Hs) of
+      case build_bitmap(Module, Ref, {Tag,[idh,P]}, Hs) of
         stop-> PAcc;
         Value -> PAcc#{ P => Value }
       end
@@ -314,8 +315,8 @@ build_bitmap(Module, Ref, Tag, Update)->
 read_tag(DB,Storage,Vector,Tag)->
   Key=
     case Vector of
-      [PatternID,IDH]->{Tag,{idl,PatternID,IDH}};
-      [PatternID]->{Tag,{idh,PatternID}};
+      [PatternID,IDH]->{Tag,[idl,PatternID,IDH]};
+      [PatternID]->{Tag,[idh,PatternID]};
       []->{Tag,patterns}
     end,
   case ecomet_db:read(DB,?INDEX,Storage,Key) of
