@@ -3,7 +3,7 @@
 ######################################################################
 
 ## Name of the node
-##-name ecomet@host.domain
+-name ecomet@host.domain
 
 ## Cookie for distributed erlang
 -setcookie ecomet

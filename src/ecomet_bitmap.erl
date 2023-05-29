@@ -144,9 +144,20 @@ foldl(_Fun,Acc,none,_Page)->
 foldl(_Fun,Acc,[],_Page)->
   {0,Acc};
 foldl(Fun,InAcc,Set,{From,To})->
-  Iterator = get_iterator(From,To,Fun),
   Bits= eroaring:to_list( Set ),
-  lists:foldl(Iterator, { _Count=0, InAcc }, Bits).
+  lists:foldl(fun(Bit,{Count,Acc})->
+    Count1 = Count+1,
+    Acc1=
+      if
+        is_integer(From), Count1 =< From->
+          Acc;
+        is_integer(To), Count1 > To->
+          Acc;
+        true ->
+          Fun(Bit, Acc)
+      end,
+    {Count1, Acc1}
+  end, { _Count=0, InAcc }, Bits).
 
 %%------------------------------------------------------------------------------------
 %%  From the less significant to the most significant iterator
@@ -156,26 +167,21 @@ foldr(_F,Acc,none,_Page)->
 foldr(_F,Acc,[],_Page)->
   {0,Acc};
 foldr(Fun,InAcc,Set,{From,To})->
-  Iterator = get_iterator(From,To,Fun),
   Bits= eroaring:to_list( Set ),
-  lists:foldr(Iterator, { _Count=0, InAcc }, Bits).
-
-get_iterator(From,To,Fun)->
-  Start=if is_integer(From)->From; true->0 end,
-  Stop=if is_integer(To)->To; true->-1 end,
-  fun(Bit,{Count,Acc})->
+  lists:foldr(fun(Bit,{Count,Acc})->
     Count1 = Count+1,
     Acc1=
       if
-        Count1 =< Start->
+        is_integer(From), Count1 =< From->
           Acc;
-        Count1 > Stop, Stop=/=-1->
+        is_integer(To), Count1 > To->
           Acc;
         true ->
           Fun(Bit, Acc)
       end,
     {Count1, Acc1}
-  end.
+  end, { _Count=0, InAcc }, Bits).
+
 
 
 
