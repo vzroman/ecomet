@@ -59,7 +59,7 @@ worker_loop()->
   end.
 
 on_commit( Log )->
-  [ rpc:cast( N, ?MODULE , notify,[ Log ]) || N <- persistent_term:get({?MODULE,ready_nodes}) ],
+  ecall:cast_all(persistent_term:get({?MODULE,ready_nodes}), ?MODULE , notify,[ Log ] ),
   notify( Log ).
 
 notify( Log )->
