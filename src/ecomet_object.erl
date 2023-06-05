@@ -780,7 +780,6 @@ get_fields(Storage)->
 %% Behaviour handlers
 %%=====================================================================
 on_create(Object)->
-  check_name(Object),
   check_storage_type(Object),
   check_path(Object),
   edit_rights(Object),
@@ -789,8 +788,6 @@ on_create(Object)->
   }).
 
 on_edit(Object)->
-  % Check object name for whitespaces
-  check_name(Object),
   % Check domain change
   check_db(Object),
   % Check for unique name in folder
@@ -848,12 +845,6 @@ check_storage_type(Object)->
       % Persistent folders can contain any types of objects
       ok
   end.
-
-% Removing whitespaces from the object beginning and the end
-check_name(Object) ->
-  {ok, FolderName} = fp_db:read_field(Object, <<".name">>),
-  NonwhiteSpaceFolderName = string:strip(binary:bin_to_list(FolderName)),
-  fp_db:edit_object(Object, #{<<".name">> => binary:list_to_bin(NonwhiteSpaceFolderName)}).
 
 % Path is always unique
 check_path(Object)->
