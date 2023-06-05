@@ -567,6 +567,7 @@ load_storage(_IsTransaction = true, OID, Type)->
 %% Behaviour handlers
 %%=====================================================================
 on_create(Object)->
+  check_name(Object),
   check_storage_type(Object),
   check_path(Object),
   edit_rights(Object),
@@ -575,6 +576,8 @@ on_create(Object)->
   }).
 
 on_edit(Object)->
+  % Check object name
+  check_name(Object),
   % Check domain change
   check_db(Object),
   % Check for unique name in folder
@@ -616,6 +619,12 @@ on_delete(Object)->
       ok
   end,
   ok.
+
+% Removing whitespaces from the object name
+check_name(Object) ->
+  {ok, Name} = fp_db:read_field(Object, <<".name">>),
+  StrippedName = string:strip(binary:bin_to_list(Name)),
+  fp_db:edit_object(Object, #{<<".name">> => binary:list_to_bin(StrippedName)}).
 
 check_storage_type(Object)->
   {ok,FolderID}=ecomet:read_field(Object,<<".folder">>),
