@@ -118,6 +118,15 @@
   <<".path">>=>fun ecomet_lib:to_path/1,
   <<".object">>=>fun ecomet_lib:dummy/1
 }).
+
+-define(SPACE_CHARACTER, 32).
+-define(SLASH_CHARACTER, 47).
+-define(DELETE_CHARACTER, 127).
+-define(CONTROL_CHARACTERS, lists:seq(0, 31)).
+
+-define(EXCLUDED_CHARS, ?CONTROL_CHARACTERS ++ [?SLASH_CHARACTER, ?DELETE_CHARACTER]).
+-define(EXCLUDED_CHARS_HASHMAP, dict:from_list([{Character, true} || Character <- ?EXCLUDED_CHARS])).
+
 %%=================================================================
 %%	Data API
 %%=================================================================
@@ -576,8 +585,6 @@ on_create(Object)->
   }).
 
 on_edit(Object)->
-  % Check object name
-  check_name(Object),
   % Check domain change
   check_db(Object),
   % Check for unique name in folder
@@ -596,6 +603,8 @@ on_edit(Object)->
     none->ok;
     {_,none}->ok;
     {_New, Old}->
+      % Check object name
+      check_name(Object),
       case is_system(Old) of
         true->?ERROR(system_object);
         _->ok
@@ -621,10 +630,25 @@ on_delete(Object)->
   ok.
 
 % Removing whitespaces from the object name
-check_name(Object) ->
-  {ok, Name} = fp_db:read_field(Object, <<".name">>),
-  StrippedName = string:strip(binary:bin_to_list(Name)),
-  fp_db:edit_object(Object, #{<<".name">> => binary:list_to_bin(StrippedName)}).
+check_name(BinaryString) ->
+  [Head | Tail] = binary:bin_to_list(BinaryString),
+  check_whitespace(Head),
+  check_bad_characters([Head | Tail]),
+  check_whitespace(lists:last(Tail)),
+  ok.
+
+check_whitespace(Character) ->
+  case ?SPACE_CHARACTER =:= Character of
+    true  -> throw({error, bad_name});
+    false -> ok
+  end.
+
+check_bad_characters([]) -> ok;
+check_bad_characters([Head | Tail]) ->
+  case dict:is_key(Head, ?EXCLUDED_CHARS_HASHMAP) of
+    true  -> throw({error, bad_name});
+    false -> check_bad_characters(Tail)
+  end.
 
 check_storage_type(Object)->
   {ok,FolderID}=ecomet:read_field(Object,<<".folder">>),
