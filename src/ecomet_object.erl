@@ -682,7 +682,7 @@ check_path(Object)->
       {ok,FolderID}=read_field(Object,<<".folder">>),
       {ok,Name}=read_field(Object,<<".name">>),
       if
-        Name =:= <<>> -> ?ERROR("name can not be empty");
+        Name =:= <<>> -> ?ERROR(<<"Name can not be empty">>);
         true -> ok
       end,
       OID = get_oid(Object),
@@ -694,7 +694,7 @@ check_path(Object)->
             {ok,OID}->ok;
             _->?ERROR({not_unique,Name})
           end;
-        _->?ERROR("the '/' symbol is not allowed in names")
+        _->?ERROR(<<"The '/' symbol is not allowed in names">>)
       end;
     true->ok
   end.
