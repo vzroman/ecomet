@@ -630,7 +630,8 @@ on_delete(Object)->
   ok.
 
 % Removing whitespaces from the object name
-check_name(BinaryString) ->
+check_name(Object) ->
+  {ok, BinaryString} = ecomet:read_field(Object, <<".name">>),
   [Head | Tail] = binary:bin_to_list(BinaryString),
   check_whitespace(Head),
   check_bad_characters([Head | Tail]),
