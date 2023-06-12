@@ -640,14 +640,14 @@ check_name(Object) ->
 
 check_whitespace(Character) ->
   case ?SPACE_CHARACTER =:= Character of
-    true  -> throw({error, bad_name});
+    true  -> throw(name_has_whitespaces);
     false -> ok
   end.
 
 check_bad_characters([]) -> ok;
 check_bad_characters([Head | Tail]) ->
   case dict:is_key(Head, ?EXCLUDED_CHARS_HASHMAP) of
-    true  -> throw({error, bad_name});
+    true  -> throw(name_has_bad_characters);
     false -> check_bad_characters(Tail)
   end.
 
