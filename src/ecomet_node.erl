@@ -216,16 +216,13 @@ unregister_node(Object)->
   {ok,Name}=ecomet:read_field(Object,<<".name">>),
   Node = binary_to_atom(Name,utf8),
 
-  % Remove the copies of segments from the node
-  ecomet:set([?ROOT],#{ <<"nodes">> => {fun([SegmentNodes])->
+  % Remove the copies of DB from the node
+  ecomet:set([?ROOT],#{ <<"params">> => {fun([ Params ])->
     if
-      is_list(SegmentNodes) -> SegmentNodes -- [Node];
-      true -> SegmentNodes
+      is_map( Params ) -> maps:remove( Node, Params );
+      true -> Params
     end
-  end,[<<"nodes">>]}}, {'AND',[
-    {<<".pattern">> ,'=', ?OID(<<"/root/.patterns/.segment">>)},
-    {<<"nodes">>,'=',Node}
-  ]},#{ lock => write }),
+  end,[<<"params">>]}}, {<<".pattern">> ,'=', ?OID(<<"/root/.patterns/.database">>)},#{ lock => write }),
 
   % Remove the node from the schema
   ok = ecomet_schema:remove_node(Node).
