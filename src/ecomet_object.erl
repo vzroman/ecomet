@@ -635,7 +635,7 @@ check_name(Object) ->
   [Head | Tail] = binary:bin_to_list(BinaryString),
   check_whitespace(Head),
   check_bad_characters([Head | Tail]),
-  check_whitespace(lists:last(Tail)),
+  check_whitespace(get_last_element(Tail)),
   ok.
 
 check_whitespace(Character) ->
@@ -650,6 +650,11 @@ check_bad_characters([Head | Tail]) ->
     true  -> throw(name_has_bad_characters);
     false -> check_bad_characters(Tail)
   end.
+
+get_last_element([]) -> [];
+get_last_element([Head | []]) -> Head;
+get_last_element([_ | Tail]) ->
+  get_last_element(Tail).
 
 check_storage_type(Object)->
   {ok,FolderID}=ecomet:read_field(Object,<<".folder">>),
