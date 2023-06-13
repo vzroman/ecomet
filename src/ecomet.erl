@@ -86,7 +86,8 @@
   is_oid/1,
   get_pattern_oid/1,
   object_behaviours/1,
-  pattern_behaviours/1
+  pattern_behaviours/1,
+  pattern_fields/1
 ]).
 
 %%=================================================================
@@ -343,6 +344,9 @@ object_behaviours(ID)->
 
 pattern_behaviours(ID)->
   ecomet_pattern:get_behaviours(ID).
+
+pattern_fields(ID)->
+  ecomet_pattern:get_fields(ID).
 
 %%=================================================================
 %%	Formatters
