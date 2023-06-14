@@ -25,7 +25,7 @@
   parse_dt/1,
   dt_to_string/1,dt_to_string/2,
   ts/0,log_ts/0,
-  to_object/1,to_object/2,to_object/3,to_object_system/1,
+  to_object/1,to_object/2,to_object_system/1,
   to_oid/1,
   to_path/1,
   pipe/2,
@@ -72,19 +72,17 @@ log_ts()->
   erlang:system_time(nano_seconds).
 
 to_object(ID)->
-  to_object(ID,none,none).
-to_object(ID,Lock)->
-  to_object(ID,Lock,none).
-to_object(<<"/root",_/binary>> =Path,Lock,Timeout)->
+  to_object(ID,none).
+to_object(<<"/root",_/binary>> =Path,Lock)->
   {ok,OID}=ecomet_folder:path2oid(Path),
-  ecomet_object:open(OID,Lock,Timeout);
-to_object(ID, Lock,Timeout)->
+  ecomet_object:open(OID,Lock);
+to_object(ID, Lock)->
   case ecomet_object:is_object(ID) of
     true when Lock=:=none->
       ID;
     _->
       % The object is already opened, but we still may need to upgrade the lock
-      ecomet_object:open(?OID(ID),Lock,Timeout)
+      ecomet_object:open(?OID(ID),Lock)
   end.
 to_object_system(<<"/root",_/binary>> =Path)->
   {ok,OID}=ecomet_folder:path2oid(Path),

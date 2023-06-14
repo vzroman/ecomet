@@ -30,8 +30,7 @@
 	new/0,
 	new_branch/0,
 	execute/5,
-	execute_local/4,
-	remote_call/6,
+	no_transaction/5,
 	count/1,
 	foldr/3,
 	foldr/4,
@@ -40,6 +39,14 @@
 	fold/5
 ]).
 
+%%====================================================================
+%% Module remote call API
+%%====================================================================
+-export([
+	do_single_node_transaction/6,
+	db_transaction_request/6,
+	db_no_transaction/5
+]).
 %%====================================================================
 %% Subscriptions API
 %%====================================================================
@@ -59,9 +66,7 @@
 	has_direct/1,
 	optimize/1,
 	search_patterns/3,
-	seacrh_idhs/3,
-	execute_remote/4,
-	wait_remote/2
+	seacrh_idhs/3
 ]).
 
 -endif.
@@ -304,9 +309,8 @@ bitmap_oper('ANDNOT',X1,X2)->
 		_->bitmap_result(ecomet_bitmap:oper('ANDNOT',X1,X2))
 	end.
 bitmap_result(Bitmap)->
-	Zip = ecomet_bitmap:zip(Bitmap),
-	case ecomet_bitmap:is_empty(Zip) of
-		false->Zip;
+	case ecomet_bitmap:is_empty(Bitmap) of
+		false->Bitmap;
 		true->none
 	end.
 
@@ -462,128 +466,233 @@ new_branch()->{none,maps:new()}.
 %%	QUERY EXECUTION
 %%=====================================================================
 execute(DBs,Conditions,Map,Reduce,Union)->
-	% Search steps:
-	% 1. start remote databases search
-	% 2. execute local databases search
-	% 3. reduce remote search results
-	% 4. Construct query result
-	{LocalDBs,RemoteDBs}=lists:foldl(fun(DB,{Local,Remote})->
-		case ecomet_db:is_local(DB) of
-			true->{[DB|Local],Remote};
-			false->{Local,[DB|Remote]}
-		end
-	end,{[],[]},DBs),
-	% Step 1. Start remote search
-	PID=execute_remote(RemoteDBs,Conditions,Map,Union),
-	% Step 2. Local search
-	LocalResult=lists:foldl(fun(DB,Result)->
-		[{DB,execute_local(DB,Conditions,Map,Union)}|Result]
-	end,[],LocalDBs),
-	% Step 3. Reduce remote, order by database
-	SearchResult=order_DBs(DBs,wait_remote(PID,LocalResult)),
-	% Step 4. Return result
-	Reduce(SearchResult).
+	case ecomet:is_transaction() of
+		true->
+			transaction(DBs, Conditions, Map, Reduce, Union);
+		_->
+			no_transaction(DBs, Conditions, Map, Reduce, Union)
+	end.
 
-order_DBs(DBs,Results)->
-	order_DBs(DBs,Results,[]).
-order_DBs([DB|Rest],Results,Acc)->
-	case lists:keytake(DB,1,Results) of
-		false->order_DBs(Rest,Results,Acc);
-		{value,{_,DBResult},RestResults}->order_DBs(Rest,RestResults,[DBResult|Acc])
+%%---------------------------------------------------------------------
+%%	NO TRANSACTION QUERY
+%%---------------------------------------------------------------------
+no_transaction([DB], Conditions, Map, Reduce, Union)->
+	Context = ecomet_user:query_context(),
+	case db_no_transaction(DB, Conditions, Map, Union, Context) of
+		{error,_}->Reduce([]);
+		Result-> Reduce([Result])
 	end;
-order_DBs([],_Results,Acc)->Acc.
-
-% 1. Map search to remote nodes
-% 2. Reduce results, reply
-execute_remote([],_Conditions,_Map,_Union)->none;
-execute_remote(DBs,Conditions,Map,Union)->
-	ReplyPID=self(),
-	IsTransaction=ecomet:is_transaction(),
-	spawn_link(fun()->
-		process_flag(trap_exit,true),
-		StartedList=start_remote(DBs,Conditions,Map,Union,IsTransaction),
-		ReplyPID!{remote_result,self(),reduce_remote(StartedList,[])}
-	end).
-
-% Wait for results from remote databases
-wait_remote(none,RS)->RS;
-wait_remote(PID,RS)->
+no_transaction(DBs, Conditions, Map, Reduce, Union)->
+	Self = self(),
+	Context = ecomet_user:query_context(),
+	Master =
+		spawn(fun()->
+			MasterSelf = self(),
+			Workers =
+				[ begin
+						 {W,_} = spawn_monitor(fun()->
+							 MasterSelf ! {result, self(), db_no_transaction(DB, Conditions, Map, Union, Context)}
+						 end),
+					 {W,DB}
+				 end || DB <- DBs],
+			Results = no_transaction_wait( maps:from_list( Workers )),
+			Self ! { results, self(), Results}
+		end),
 	receive
-		{remote_result,PID,RemoteRS}->RS++RemoteRS
-	after
-		?TIMEOUT->
-			PID!query_timeout,
-			receive
-				{remote_result,PID,RemoteRS}->RS++RemoteRS
-			after
-				2000->?LOGWARNING(remote_request_timeout)
+		{ results, Master, Results}->
+			Reduce( order_DBs(DBs,Results) )
+	end.
+
+no_transaction_wait( Workers ) when map_size(Workers) > 0->
+	receive
+		{result, W, {error, _}}->
+			no_transaction_wait(maps:remove(W, Workers));
+		{result, W, Result}->
+			case maps:take( W, Workers ) of
+				{DB, RestWorkers}->
+					[{DB, Result}| no_transaction_wait(RestWorkers)];
+				_->
+					no_transaction_wait( Workers )
+			end;
+		{'DOWN', _, process, W, _}->
+			no_transaction_wait(maps:remove(W, Workers))
+	end;
+no_transaction_wait( _Workers )->
+	[].
+
+db_no_transaction(DB, Conditions, Map, Union, Context)->
+	case ecomet_db:available_nodes( DB ) of
+		[]->
+			{error,not_available};
+		Nodes->
+			case lists:member(node(), Nodes) of
+				true->
+					ecomet_user:query_context( Context ),
+					try execute_local(DB,Conditions,Map,Union)
+					catch
+						_:E->{error, E}
+					end;
+				_->
+					case ecall:call_one(Nodes,?MODULE,?FUNCTION_NAME,[DB, Conditions, Map, Union, Context]) of
+						{ok,{_Node,Result}}->
+							Result;
+						Error->
+							Error
+					end
 			end
 	end.
 
-%% Starting remote search
-start_remote(DBs,Conditions,Map,Union,IsTransaction)->
-	lists:foldl(fun(DB,Result)->
-		case ecomet_db:get_search_node(DB,[]) of
-			none->Result;
-			Node->
-				SearchParams=[DB,Conditions,Union,Map,IsTransaction],
-				[{spawn_link(Node,?MODULE,remote_call,[self()|SearchParams]),SearchParams,[Node]}|Result]
-		end
-	end,[],DBs).
+order_DBs([DB|Rest],Results)->
+	case lists:keytake(DB, 1, Results) of
+		{value,{_,DBResult},RestResults}->
+			[DBResult | order_DBs(Rest, RestResults)];
+		_->
+			order_DBs(Rest, Results)
+	end;
+order_DBs([],_Results)->
+	[].
 
-%% Search for remote process
-remote_call(PID,DB,Conditions,Union,Map,IsTransaction)->
-	LocalResult=
-		if
-			IsTransaction ->
-				case ecomet:transaction(fun()->
-					execute_local(DB,Conditions,Map,Union)
-				end) of
-					{ok,Result}->Result;
-					{error,Error}->exit(Error)
-				end;
-			true ->execute_local(DB,Conditions,Map,Union)
-		end,
-	PID!{ecomet_resultset,self(),{DB,LocalResult}}.
-
-%% Reducing remote results
-reduce_remote([],ReadyResult)->ReadyResult;
-% Wait remote results
-reduce_remote(WaitList,ReadyResult)->
-	receive
-		% Result received
-		{ecomet_resultset,PID,DBResult}->
-			case lists:keyfind(PID,1,WaitList) of
-				% We are waiting for this result
-				{PID,_,_}->reduce_remote(lists:keydelete(PID,1,WaitList),[DBResult|ReadyResult]);
-				% Unexpected result
-				false->reduce_remote(WaitList,ReadyResult)
-			end;
-		% Remote process is down
-		{'EXIT',PID,Reason}->
-			case lists:keyfind(PID,1,WaitList) of
-				% It's process that we are waiting result from. Node is node available now,
-				% let's try another one form the cluster
-				{PID,Params,TriedNodes} when Reason==noconnection->
-					case ecomet_db:get_search_node(lists:nth(1,Params),TriedNodes) of
-						% No other nodes can search this domain
-						none->
-							?LOGWARNING({no_search_nodes_available,lists:nth(1,Params)}),
-							reduce_remote(lists:keydelete(PID,1,WaitList),ReadyResult);
-						% Let's try another node
-						NextNode->
-							% Start task
-							NewPID=spawn_link(NextNode,?MODULE,remote_call,[self()|Params]),
-							reduce_remote(lists:keyreplace(PID,1,WaitList,{NewPID,Params,[NextNode|TriedNodes]}),ReadyResult)
-					end;
-				% We caught exit from some linked process.
-				% Variant 1. Parent process get exit, stop the task
-				% Variant 2. Process we are waiting is crashed due to error in the user fun
-				_->exit(Reason)
-			end;
-		query_timeout->ReadyResult
+%%---------------------------------------------------------------------
+%%	TRANSACTIONAL QUERY
+%%---------------------------------------------------------------------
+transaction([DB|Rest] = DBs, Conditions, Map, Reduce, Union)->
+	case x_nodes(Rest, ecomet_db:available_nodes(DB)) of
+		[]->
+			cross_nodes_transaction( DBs, Conditions, Map, Reduce, Union );
+		Nodes->
+			case lists:member(node(), Nodes) of
+				true->
+					local_transaction( DBs, Conditions, Map, Reduce, Union );
+				_->
+					single_node_transaction(Nodes, DBs, Conditions, Map, Reduce, Union)
+			end
 	end.
 
+x_nodes(_DBs, [])->
+	[];
+x_nodes([DB|Rest],Nodes)->
+	x_nodes(Rest, Nodes -- (Nodes -- ecomet_db:available_nodes(DB)));
+x_nodes([], Nodes)->
+	Nodes.
+
+local_transaction( DBs, Conditions, Map, Reduce, Union )->
+	Results = [ execute_local(DB,Conditions,Map,Union) || DB <- DBs ],
+	Reduce( Results ).
+
+single_node_transaction(Nodes, DBs, Conditions, Map, Reduce, Union)->
+	Context = ecomet_user:query_context(),
+	case ecall:call_one(Nodes, ?MODULE, do_single_node_transaction,[DBs, Conditions, Map, Reduce, Union, Context]) of
+		{error,Error}->
+			throw(Error);
+		{ok,{_Node,Result}}->
+			Result
+	end.
+do_single_node_transaction(DBs, Conditions, Map, Reduce, Union, Context)->
+	ecomet_user:query_context( Context ),
+	case ecomet:transaction(fun()->local_transaction(DBs, Conditions, Map, Reduce, Union) end) of
+		{ok,Result}->
+			Result;
+		Error->
+			Error
+	end.
+
+cross_nodes_transaction( DBs, Conditions, Map, Reduce, Union )->
+	Self = self(),
+	Context = ecomet_user:query_context(),
+	Master =
+		spawn(fun()->
+			MasterSelf = self(),
+			Workers =
+				[ begin
+						{W,_} = spawn_monitor(fun()->
+							db_transaction(DB, Conditions, Map, Union, MasterSelf, Context)
+						end),
+						{W,DB}
+					end || DB <- DBs],
+			case transaction_wait( maps:from_list( Workers )) of
+				{abort, Reason}->
+					catch Self ! { abort, self(), Reason},
+					exit(Reason);
+				Results->
+					catch Self ! { results, self(), Results}
+			end
+		end),
+
+	receive
+		{results, Master, Results}->
+			Reduce( order_DBs( DBs, Results) );
+		{abort, Master, Reason}->
+			throw( Reason )
+	end.
+
+transaction_wait( Workers ) when map_size(Workers) > 0->
+	receive
+		{result, W, Result}->
+			case maps:take( W, Workers ) of
+				{DB, RestWorkers}->
+					[{DB, Result}| transaction_wait(RestWorkers)];
+				_->
+					transaction_wait( Workers )
+			end;
+		{'DOWN', _, process, _, Reason}->
+			{abort, Reason}
+	end;
+transaction_wait( _Workers )->
+	[].
+
+db_transaction(DB, Conditions, Map, Union, Master, Context)->
+	erlang:monitor(process, Master),
+	Nodes = ecomet_db:available_nodes(DB),
+	case lists:member(node(), Nodes) of
+		true->
+			db_transaction_request(DB, Conditions, Map, Union, Master, Context);
+		_->
+			db_transaction(Nodes, DB, Conditions, Map, Union, Master, Context)
+	end.
+
+db_transaction([], DB, _Conditions, _Map, _Union, _Master, _Context)->
+	exit({DB, not_available});
+db_transaction(Nodes, DB, Conditions, Map, Union, Master, Context)->
+	I = erlang:phash2(make_ref(),length(Nodes)),
+	Node = lists:nth(I+1, Nodes),
+	Worker = spawn(Node, ?MODULE, db_transaction_request, [DB, Conditions, Map, Union, _Master = self(), Context]),
+	erlang:monitor(process, Worker),
+	receive
+		{result, Worker, Result}->
+			catch Master ! {result, self(), Result},
+			receive
+				{'DOWN', _, process, Master, normal}->
+					ok;
+				{'DOWN', _, process, _, Reason}->
+					exit(Reason)
+			end;
+		{'DOWN', _, process, Worker, _Reason}->
+			db_transaction( Nodes--[Node], DB, Conditions, Map, Union, Master, Context );
+		{'DOWN', _, process, Master, Reason}->
+			exit(Reason)
+	end.
+
+db_transaction_request(DB, Conditions, Map, Union, Master, Context)->
+	ecomet_user:query_context( Context ),
+	case ecomet:transaction(fun()->
+		Result = execute_local(DB,Conditions,Map,Union),
+		catch Master ! {result, self(), Result},
+		receive
+			{'DOWN', _, process, Master, normal}->
+				ok;
+			{'DOWN', _, process, Master, Reason}->
+				throw(Reason)
+		end
+	end) of
+		{error,Reason}->
+			exit( Reason );
+		_->
+			ok
+	end.
+
+%%=====================================================================
+%%	SEARCH ENGINE
+%%=====================================================================
 %% Local search:
 %% 1. Search patterns. Match all conditions against Pattern level index. This is optional step, we need it
 %% 		only if patterns not explicitly defined in conditions.
@@ -638,7 +747,7 @@ search_patterns({'TAG',Tag,'UNDEFINED'},DB,ExtBits)->
 							{error,{undefined_field,_}}->AccStorages
 						end
 					end,[],ExtBits,{none,none})),
-				% Order is [ramlocal,ram,ramdisc,disc]
+				% Order is [ram,ramdisc,disc]
 				lists:subtract(?STORAGE_TYPES,lists:subtract(?STORAGE_TYPES,FoundStorages))
 		end,
 	Config=

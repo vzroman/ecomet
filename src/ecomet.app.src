@@ -1,20 +1,24 @@
 {application, ecomet,
  [{description, "A distributed reactive database"},
-  {vsn, "0.1.22"},
+  {vsn, git},
   {registered, []},
   {mod, {ecomet_app, []}},
   {applications,
    [kernel,
     stdlib,
-    dlss,
     cowboy,
-    erlware_commons
+    lager,
+    erlware_commons,
+    elock,
+    esubscribe,
+    eroaring,
+    zaya_leveldb,
+    zaya
    ]},
   {env,[]},
   {modules, []},
   {included_applications,[
-   elock,
-   esubscribe
+
   ]},
   {licenses, ["Apache 2.0"]},
   {links, []}

@@ -27,6 +27,7 @@
 -export([
   login/2,login/3,dirty_login/1,dirty_login/2,
   spawn_session/1,
+  query_context/0, query_context/1,
   logout/0,
   get_user/0,
   get_usergroups/0,
@@ -111,6 +112,13 @@ spawn_session(Fun)->
     Context->
       spawn(fun()->put(?CONTEXT, Context), Fun()  end)
   end.
+
+query_context()->
+  get(?CONTEXT).
+query_context( Context )->
+  put(?CONTEXT, Context),
+  ok.
+
 
 logout()->
   case erase(?CONTEXT) of

@@ -26,28 +26,21 @@
 -define(INDEX,index).
 
 %-------Supported storage types------------------
--define(RAMLOCAL,ramlocal).
 -define(RAM,ram).
 -define(RAMDISC,ramdisc).
 -define(DISC,disc).
--define(STORAGE_TYPES,[?DISC,?RAMDISC,?RAM,?RAMLOCAL]).
+-define(STORAGE_TYPES,[?DISC,?RAMDISC,?RAM]).
 
-
+%-------CONSTANTS------------------
 -define(BITSTRING_LENGTH,65536).
 -define(MAX_NODES,65535).
 -define(ROUTER_POOL_SIZE, 128).
 -define(PROCESS_MEMORY_LIMIT, 100). %MB
 
--record(kv,{key,value}).
--record(ecomet_log,{
-  object,
-  db,
-  ts,
-  tags,
-  rights,
-  changes,
-  self
-}).
+-define(LOCKS,'$ecomet_locks$').
+-define(INDEX_LOCKS,'$ecomet_index_locks$').
+
+-define(ESUBSCRIPTIONS,'$ecomet_esubscriptions$').
 
 -define(LOCKS,'$ecomet_locks$').
 -define(INDEX_LOCKS,'$ecomet_index_locks$').

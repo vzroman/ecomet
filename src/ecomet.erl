@@ -34,7 +34,7 @@
 %%=================================================================
 -export([
   create_object/1,create_object/2,
-  open/1,open/2,open/3,open_nolock/1,open_rlock/1,open_wlock/1,
+  open/1,open/2,open_nolock/1,open_rlock/1,open_wlock/1,
   exists/1,
   read_field/2,read_field/3,read_fields/2,read_fields/3,
   read_all/1,read_all/2,
@@ -42,7 +42,6 @@
   object_changes/1,
   field_type/2,
   edit_object/2,edit_object/3,
-  dirty_edit_object/2,dirty_edit_object/3,
   delete_object/1,
   copy_object/2, copy_object/3
 ]).
@@ -70,7 +69,6 @@
 -export([
   is_transaction/0,
   transaction/1,
-  transaction_sync/1,
   start_transaction/0,
   commit_transaction/0,
   rollback_transaction/0,
@@ -88,7 +86,8 @@
   is_oid/1,
   get_pattern_oid/1,
   object_behaviours/1,
-  pattern_behaviours/1
+  pattern_behaviours/1,
+  pattern_fields/1
 ]).
 
 %%=================================================================
@@ -108,8 +107,8 @@
 -export([
   ts/0,
   stop/0,
-  get_storage_name/3,
-  rebuild_index/1, rebuild_index/2
+  rebuild_index/1, rebuild_index/2,
+  wait_dbs/1
 ]).
 
 % @edoc ecomet object denotes map where each key is field_key()
@@ -181,9 +180,6 @@ open(ID)->
 open(ID, Lock)->
   ecomet_lib:to_object(ID, Lock).
 
-open(ID,Lock,Timeout)->
-  ecomet_lib:to_object(ID, Lock, Timeout).
-
 exists(OID)->
   ecomet_object:exists(OID).
 
@@ -243,12 +239,6 @@ edit_object(Object, Fields)->
 edit_object(Object, Fields, Params)->
   ecomet_object:edit(Object, Fields, Params).
 
-dirty_edit_object(Object, Fields)->
-  ecomet_object:dirty_edit(Object, Fields).
-
-dirty_edit_object(Object, Fields, Params)->
-  ecomet_object:dirty_edit(Object, Fields, Params).
-
 % @edoc Deletes existing ecomet object
 -spec delete_object(Object :: object_handler()) -> ok.
 
@@ -306,15 +296,14 @@ run_query(ParsedQuery)->
 is_transaction()->
   case ecomet_transaction:get_type() of
     none->false;
-    dirty->false;
     _->true
   end.
 
 transaction(Fun)->
-  ecomet_transaction:internal(Fun).
-
-transaction_sync(Fun)->
-  ecomet_transaction:internal_sync(Fun).
+  case ecomet_transaction:internal(Fun) of
+    {abort,Reason}->{error,Reason};
+    Ok->Ok
+  end.
 
 start_transaction()->
   ecomet_transaction:start().
@@ -327,6 +316,7 @@ rollback_transaction()->
 
 on_commit(Fun)->
   ecomet_transaction:on_commit(Fun).
+
 
 %%=================================================================
 %%	Identification API
@@ -355,6 +345,9 @@ object_behaviours(ID)->
 pattern_behaviours(ID)->
   ecomet_pattern:get_behaviours(ID).
 
+pattern_fields(ID)->
+  ecomet_pattern:get_fields(ID).
+
 %%=================================================================
 %%	Formatters
 %%=================================================================
@@ -377,13 +370,13 @@ ts()->
   ecomet_lib:ts().
 
 stop()->
-  application:stop(ecomet),
-  dlss:stop().
-
-get_storage_name(Name,Storage,Type)->
-  ecomet_backend:get_storage_name(Name,Storage,Type).
+  application:stop(ecomet).
 
 rebuild_index(OID)->
   ecomet_object:rebuild_index( OID ).
 rebuild_index(OID, Fields)->
   ecomet_object:rebuild_index(OID, Fields).
+
+wait_dbs( DBs )->
+  ecomet_db:wait_dbs( DBs ).
+

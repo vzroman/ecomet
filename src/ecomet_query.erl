@@ -35,7 +35,6 @@
   insert/2,
   delete/2,delete/3,
   object_map/2,
-  execute/2,execute/3,
   compile/3,compile/4,
   system/3
 ]).
@@ -75,14 +74,12 @@
 
 -define(TRANSACTION(Fun),
   case ecomet_transaction:get_type() of
-    _T when _T=:=none;_T=:=dirty->
-      ?LOGDEBUG("start internal transaction"),
-      case ecomet_transaction:internal_sync(Fun) of
+    none->
+      case ecomet_transaction:internal(Fun) of
         {ok,_TResult}->_TResult;
-        {error,_TError}->?ERROR(_TError)
+        {abort,_TError}->?ERROR(_TError)
       end;
     _->
-      ?LOGDEBUG("skip transaction"),
       Fun()
   end).
 
@@ -151,7 +148,7 @@ run_statement({transaction,Statements},Acc)->
     lists:foldl(fun run_statement/2,Acc,Statements)
   end) of
     {ok,Results}->Results;
-    {error,Error}->
+    {abort,Error}->
       Results=[{error,Error}||_<-lists:seq(1,length(Statements))],
       Results++Acc
   end.
@@ -180,11 +177,10 @@ get(DBs,Fields,Conditions,Params)->
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
   case maps:get(lock,Params,none) of
     none ->
-      % All operations are dirty - no need to start transaction
-      execute(CompiledQuery,DBs,Union);
+      % All operations are dirty
+      execute(no_transaction,CompiledQuery,DBs,Union);
     _->
-      % Operations require locks - wrap the query into transactions
-      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
+      execute(execute,CompiledQuery,DBs,Union)
   end.
 
 system(DBs,Fields,Conditions)->
@@ -195,7 +191,7 @@ system(DBs,Fields,Conditions)->
     map = Map,
     reduce = Reduce
   },
-  execute(Compiled,DBs,{'OR',ecomet_resultset:new()}).
+  execute(no_transaction,Compiled,DBs,{'OR',ecomet_resultset:new()}).
 
 %%=====================================================================
 %%	SUBSCRIBE
@@ -279,15 +275,7 @@ set(DBs,Fields,Conditions,Params) when is_list(Params)->
 set(DBs,Fields,Conditions,Params)->
   CompiledQuery=compile(set,Fields,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-
-  case maps:get(lock,Params,none) of
-    none ->
-      % All operations are dirty - no need to start transaction
-      execute(CompiledQuery,DBs,Union);
-    _->
-      % Operations require locks - wrap the query into transactions
-      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
-  end.
+  execute(execute,CompiledQuery,DBs,Union).
 
 %%=====================================================================
 %%	INSERT
@@ -333,15 +321,8 @@ delete(DBs,Conditions,Params) when is_list(Params)->
 delete(DBs,Conditions,Params)->
   CompiledQuery=compile(delete,none,Conditions,Params),
   Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
+  execute(execute,CompiledQuery,DBs,Union).
 
-  case maps:get(lock,Params,none) of
-    none ->
-      % All operations are dirty - no need to start transaction
-      execute(CompiledQuery,DBs,Union);
-    _->
-      % Operations require locks - wrap the query into transactions
-      ?TRANSACTION( fun()->execute(CompiledQuery,DBs,Union)  end )
-  end.
 %%=====================================================================
 %%	COMPILE
 %%=====================================================================
@@ -361,15 +342,20 @@ compile(Type,Fields,Conditions,Params)->
 %%=====================================================================
 %%	EXECUTE
 %%=====================================================================
-execute(CompiledQuery,DBs)->
-  execute(CompiledQuery,DBs,{'OR',ecomet_resultset:new()}).
-execute(#compiled_query{conditions = Conditions,map = Map,reduce = Reduce},DBs,Union)->
-  DBs1=
-    case DBs of
-      '*'-> ecomet_db:get_databases();
-      _-> DBs
-    end,
-  ecomet_resultset:execute(DBs1,Conditions,Map,Reduce,Union).
+execute(Handler,#compiled_query{conditions = Conditions,map = Map,reduce = Reduce}, DBs, Union)->
+  case prepare_dbs( DBs ) of
+    [] -> throw( {invalid_database, DBs} );
+    DBs1 -> ecomet_resultset:Handler(DBs1,Conditions,Map,Reduce,Union)
+  end.
+
+prepare_dbs( '*' )->
+  ecomet_db:get_databases();
+prepare_dbs([ Tag | Rest ]) when is_binary( Tag )->
+  ecomet_db:find_by_tag( Tag ) ++ prepare_dbs( Rest );
+prepare_dbs([ DB | Rest ]) when is_atom( DB )->
+  [DB| prepare_dbs( Rest )];
+prepare_dbs([])->
+  [].
 
 %%-------------GET------------------------------------------------
 %% Search params is a map:
@@ -966,14 +952,11 @@ read_up(none, get)->
   end;
 read_up(Lock, _Any)->
   fun(OID,Fields)->
-    Object = ecomet_object:open(OID,Lock),
-    if
-      Object =/= not_exists ->
-        object_map(Object,ecomet_object:read_fields(Object,Fields));
-      true ->
-        % TODO. The object doesn't exist.
-        % Currently we return the empty object.
-        % All its fields are none
+    try
+      Object = ecomet_object:open(OID,Lock),
+      object_map(Object,ecomet_object:read_fields(Object,Fields))
+    catch
+      _:not_exists->
         maps:merge(maps:from_list([{F,none}||F<-Fields]),#{
           <<".oid">>=> OID,
           object=> not_exists

@@ -28,48 +28,46 @@
   notify/1
 ]).
 
+
+-export([ 
+  worker_loop/0
+]).
+
 on_init( PoolSize )->
 
   spawn_link(fun ready_nodes/0),
 
-  [ persistent_term:put({?MODULE, I }, spawn_link( fun worker_loop/0 ) ) || I <- lists:seq(0, PoolSize) ],
+  [ persistent_term:put({?MODULE, I }, spawn_link( fun worker_loop/0 ) ) || I <- lists:seq(0, PoolSize-1) ],
 
   % Register the ServiceID for the subscriptions
   persistent_term:put({?MODULE,pool_size}, PoolSize).
 
 worker_loop()->
   receive
-    #ecomet_log{} = Log->
-      try
-        ecomet_subscription:on_commit( Log )
+    {log, Log} ->
+      [try ecomet_subscription:on_commit( L )
       catch
         _:Error:Stack->
           ?LOGERROR("log error ~p, ~p, ~p",[ Log, Error, Stack ])
-      end;
+      end || L <- Log],
+      worker_loop();
     Unexpected->
-      ?LOGWARNING("unexpected message ~p", [Unexpected])
-  end,
-  worker_loop().
-
-on_commit( #ecomet_log{changes = undefined} )->
-  ignore;
-on_commit( Logs0 )->
-  case [L || L=#ecomet_log{changes = C} <- Logs0, C=/=undefined] of
-    []->
-      ignore;
-    Logs->
-      [ rpc:cast( N, ?MODULE , notify,[ Logs ]) || N <- persistent_term:get({?MODULE,ready_nodes}) ],
-      notify( Logs )
+      ?LOGWARNING("unexpected message ~p", [Unexpected]),
+      worker_loop()
+  after
+    100-> erlang:hibernate(?MODULE, ?FUNCTION_NAME,[])
   end.
 
-notify( Logs )->
+on_commit( Log )->
+  ecall:cast_all(persistent_term:get({?MODULE,ready_nodes}), ?MODULE , notify,[ Log ] ),
+  notify( Log ).
+
+notify( Log )->
   case persistent_term:get({?MODULE,pool_size},none) of
     PoolSize when is_integer(PoolSize)->
-      [ begin
-          I = erlang:phash2(Log, PoolSize),
-          Worker = persistent_term:get({?MODULE,I}),
-          Worker ! Log
-        end || Log <- Logs ],
+      I = erlang:phash2(Log, PoolSize),
+      Worker = persistent_term:get({?MODULE,I}),
+      Worker ! {log,Log},
       ok;
     _->
       % Not initialized yet

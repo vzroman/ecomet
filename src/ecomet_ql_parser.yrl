@@ -152,11 +152,12 @@ Insert -> insert SetFieldList : { insert, maps:from_list('$2') ,#{} }.
 Delete -> delete from Databases where Condition Lock : { delete, '$3', '$5', maps:from_list(['$6'])}.
 Delete -> delete from Databases where Condition : { delete, '$3','$5', #{} }.
 
-Databases -> '*' : ecomet_db:get_databases().
+Databases -> '*' : '*'.
 Databases -> Database : ['$1'].
 Databases -> Database ',' Databases: ['$1'|'$3'].
 
 Database -> Atom : '$1'.
+Database -> '$' Atom : atom_to_binary('$2', utf8 ).
 Database -> text : binary_to_atom(get_token('$1'),utf8).
 
 GetFieldList -> '*': ['*'].
