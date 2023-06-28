@@ -25,37 +25,45 @@
 -export([
   on_init/1,
   on_commit/1,
-  notify/1
+  notify/1,
+  global_set/1,
+  global_reset/1
 ]).
 
-
--export([ 
-  worker_loop/0
+-export([
+  worker_loop/1
 ]).
+
 
 on_init( PoolSize )->
 
   spawn_link(fun ready_nodes/0),
 
-  [ persistent_term:put({?MODULE, I }, spawn_link( fun worker_loop/0 ) ) || I <- lists:seq(0, PoolSize-1) ],
+  [ persistent_term:put({?MODULE, I }, spawn_link(fun()->worker_loop( ecomet_subscription:new_bit_set() ) end)) || I <- lists:seq(0, PoolSize-1) ],
 
   % Register the ServiceID for the subscriptions
   persistent_term:put({?MODULE,pool_size}, PoolSize).
 
-worker_loop()->
+worker_loop( Global )->
   receive
     {log, Log} ->
-      [try ecomet_subscription:on_commit( L )
+      [try ecomet_subscription:on_commit( L, Global )
       catch
         _:Error:Stack->
           ?LOGERROR("log error ~p, ~p, ~p",[ Log, Error, Stack ])
       end || L <- Log],
-      worker_loop();
+      worker_loop( Global );
+    {{global_set, Bit}, Ref, ReplyTo}->
+      catch ReplyTo ! {Ref, self(), ok},
+      worker_loop( ecomet_subscription:set_bit( Global, Bit ) );
+    {{global_reset, Bit}, Ref, ReplyTo}->
+      catch ReplyTo ! {Ref, self(), ok},
+      worker_loop( ecomet_subscription:reset_bit( Global, Bit ) );
     Unexpected->
       ?LOGWARNING("unexpected message ~p", [Unexpected]),
-      worker_loop()
+      worker_loop( Global )
   after
-    100-> erlang:hibernate(?MODULE, ?FUNCTION_NAME,[])
+    100-> erlang:hibernate(?MODULE, ?FUNCTION_NAME,[ Global ])
   end.
 
 on_commit( Log )->
@@ -73,6 +81,32 @@ notify( Log )->
       % Not initialized yet
       ignore
   end.
+
+global_set( Bit )->
+  workers_update( {global_set, Bit} ).
+
+global_reset( Bit )->
+  workers_update( {global_reset, Bit} ).
+
+workers_update( Message )->
+  PoolSize = persistent_term:get({?MODULE,pool_size},none),
+  Ref = make_ref(),
+  Workers =
+    [ begin
+        Worker = persistent_term:get({?MODULE,I}),
+        Worker ! {Message, Ref, self()},
+        Worker
+      end || I <- lists:seq(0, PoolSize -1)],
+  wait_confirm(Workers, Ref).
+
+wait_confirm([], _Ref)->
+  ok;
+wait_confirm(Workers, Ref)->
+  receive
+    {Ref, Worker, ok} ->
+      wait_confirm( lists:delete( Worker, Workers ), Ref )
+  end.
+
 
 ready_nodes()->
   catch persistent_term:put({?MODULE, ready_nodes }, ecomet_node:get_ready_nodes() -- [node()]),

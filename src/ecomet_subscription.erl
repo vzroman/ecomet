@@ -25,7 +25,7 @@
 -export([
   on_init/0,
   get_subscriptions/1,
-  on_commit/1
+  on_commit/2
 ]).
 
 %%=================================================================
@@ -38,7 +38,9 @@
   new_bit_set/0,
   bit_and/2,
   bit_or/2,
-  bit_subtract/2
+  bit_subtract/2,
+  set_bit/2,
+  reset_bit/2
 ]).
 
 %%=================================================================
@@ -345,24 +347,10 @@ destroy_index([], _Self)->
   ok.
 
 global_set(Tag)->
-  {ok,Unlock} = elock:lock(?LOCKS,global, _IsShared = false, _Timeout = infinity),
-  try
-    Global = global_get(),
-    persistent_term:put({?MODULE, global}, ?SET_BIT(Global, Tag))
-  after
-    Unlock()
-  end.
-global_reset(Tag)->
-  {ok,Unlock} = elock:lock(?LOCKS,global, _IsShared = false, _Timeout = infinity),
-  try
-    Global = global_get(),
-    persistent_term:put({?MODULE, global}, ?RESET_BIT(Global, Tag))
-  after
-    Unlock()
-  end.
+  ecomet_router:global_set( Tag ).
 
-global_get()->
-  persistent_term:get( {?MODULE,global}, ?EMPTY_SET ).
+global_reset(Tag)->
+  ecomet_router:global_reset( Tag ).
 
 
 % SUBSCRIBE CID=test GET .name, f1 from * where and(.folder=$oid('/root/f1'), .name='o12')
@@ -413,13 +401,13 @@ on_commit(#{
   changes := Changes,
   self := Self,
   ts:=TS
-})->
+}, Global)->
   % Run object monitors
   IsDelete = TAdd =:=?EMPTY_SET andalso TOld =:= ?EMPTY_SET,
   catch esubscribe:notify(?ESUBSCRIPTIONS, {log,OID}, {IsDelete, Object, Changes, Self } ),
 
   % Run the search of query subscriptions
-  case global_get() of
+  case Global of
     ?EMPTY_SET->
       ignore;
     Global->
@@ -451,12 +439,13 @@ light_search(Global, OID, DB, Mask, Object, Changes, Self, TS )->
             maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers, TagNotified)->
               case bitmap_search(Mask, And, Not) of
                 true ->
-                  case lists:member(DB, DBs) of
-                    true ->
+                  IsDB = DBs=:='*' orelse lists:member(DB, DBs),
+                  if
+                    IsDB ->
                       ToNotify = ordsets:subtract( Subscribers, TagNotified ),
                       [ S ! {log, OID, Object, Changes, Self, TS} || S <- ToNotify ],
                       ordsets:union( TagNotified, ToNotify );
-                    _->
+                    true->
                       TagNotified
                   end;
                 false ->
@@ -479,12 +468,13 @@ search(Global, OID, DB, TMask, TNewMask, TOldMask, Object, Changes, Self, TS )->
             maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers, TagNotified)->
               case bitmap_search(TMask, TOldMask, TNewMask, And, Not) of
                 true ->
-                  case lists:member(DB, DBs) of
-                    true ->
+                  IsDB = DBs =:= '*' orelse lists:member(DB, DBs),
+                  if
+                    IsDB ->
                       ToNotify = ordsets:subtract( Subscribers, TagNotified ),
                       [ S ! {log, OID, Object, Changes, Self, TS} || S <- ToNotify ],
                       ordsets:union( TagNotified, ToNotify );
-                    _->
+                    true ->
                       TagNotified
                   end;
                 false ->
