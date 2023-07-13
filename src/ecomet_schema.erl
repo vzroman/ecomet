@@ -174,6 +174,7 @@
   <<"required">>=>#{ type => bool, index=> [simple] },
   <<"default">> =>#{ type => term },
   <<"storage">>=>#{ type => atom, default_value => disc, index=> [simple]  },
+  <<"is_parent">>=>#{ type => bool, required => false, index=> [simple], default_value => false },
   <<"autoincrement">>=>#{ type => bool, index=> [simple] }
 }).
 %-------------STORAGE PATTERNS--------------------------------------------

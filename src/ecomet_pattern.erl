@@ -387,7 +387,8 @@ inherit_fields(PatternID,ParentFields)->
       ecomet:create_object(Parent1#{
         <<".name">>=>Name,
         <<".folder">>=>PatternID,
-        <<".pattern">>=>{?PATTERN_PATTERN,?FIELD_PATTERN}
+        <<".pattern">>=>{?PATTERN_PATTERN,?FIELD_PATTERN},
+        <<"is_parent">> => true
       })
    end || {Name, Parent} <- ordsets:from_list(maps:to_list(ParentFields)) ],
   ok.
