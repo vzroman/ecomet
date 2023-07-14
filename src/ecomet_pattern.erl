@@ -384,14 +384,15 @@ inherit_fields(PatternID,ParentFields)->
        ok = ecomet:edit_object(Field,Child2);
      _->
        % CASE 2. The field is not defined in the child yet, create a new one
-       {ok, ParentFieldID} =ecomet_folder:find_object(PatternID, Name),
-       ParentFields = ecomet:read_fields( ecomet:open(ParentFieldID,write), FieldFields),
-        ecomet:create_object(ParentFields#{
-          <<".name">>=>Name,
-          <<".folder">>=>PatternID,
-          <<".pattern">>=>{?PATTERN_PATTERN,?FIELD_PATTERN},
-          <<"is_parent">> => true
-        })
+      ParentSchemaFields = ecomet_field:from_schema(Parent),
+      ParentOtherFields = parent_field_fields( PatternID, Name, FieldFields -- maps:keys( ParentSchemaFields ) ),
+      ParentInheritFields = maps:merge( ParentOtherFields, ParentSchemaFields ),
+      ecomet:create_object(ParentInheritFields#{
+        <<".name">>=>Name,
+        <<".folder">>=>PatternID,
+        <<".pattern">>=>{?PATTERN_PATTERN,?FIELD_PATTERN},
+        <<"is_parent">> => true
+      })
    end || {Name, Parent} <- ordsets:from_list(maps:to_list(ParentFields)) ],
   ok.
 
@@ -402,6 +403,15 @@ update_storage_types(Map)->
       Acc#{Storage=>true}
     end,#{}, get_fields(Map) ),
   maps:keys(Types).
+
+parent_field_fields( PatternID, Name, Fields )->
+  try
+    {ok, FieldID} =ecomet_folder:find_object(PatternID, Name),
+    Field = ecomet:open(FieldID,write),
+    ecomet:read_fields(Field, Fields )
+  catch
+    _:_->#{}
+  end.
 
 
 
