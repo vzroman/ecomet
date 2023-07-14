@@ -370,6 +370,7 @@ inherit_fields(Object)->
 %%	Internal helpers
 %%=================================================================
 inherit_fields(PatternID,ParentFields)->
+  FieldFields = maps:keys( get_fields( {?PATTERN_PATTERN,?FIELD_PATTERN} )),
   ChildFields = get_fields(PatternID),
 
   [case ChildFields of
@@ -383,13 +384,14 @@ inherit_fields(PatternID,ParentFields)->
        ok = ecomet:edit_object(Field,Child2);
      _->
        % CASE 2. The field is not defined in the child yet, create a new one
-      Parent1 = ecomet_field:from_schema(Parent),
-      ecomet:create_object(Parent1#{
-        <<".name">>=>Name,
-        <<".folder">>=>PatternID,
-        <<".pattern">>=>{?PATTERN_PATTERN,?FIELD_PATTERN},
-        <<"is_parent">> => true
-      })
+       {ok, ParentFieldID} =ecomet_folder:find_object(PatternID, Name),
+       ParentFields = ecomet:read_fields( ecomet:open(ParentFieldID,write), FieldFields),
+        ecomet:create_object(ParentFields#{
+          <<".name">>=>Name,
+          <<".folder">>=>PatternID,
+          <<".pattern">>=>{?PATTERN_PATTERN,?FIELD_PATTERN},
+          <<"is_parent">> => true
+        })
    end || {Name, Parent} <- ordsets:from_list(maps:to_list(ParentFields)) ],
   ok.
 
