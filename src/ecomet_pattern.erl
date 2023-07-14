@@ -406,7 +406,8 @@ update_storage_types(Map)->
 
 parent_field_fields( PatternID, Name, Fields )->
   try
-    {ok, FieldID} =ecomet_folder:find_object(PatternID, Name),
+    ParentID = get_parent(PatternID),
+    {ok, FieldID} =ecomet_folder:find_object(ParentID, Name),
     Field = ecomet:open(FieldID,write),
     ecomet:read_fields(Field, Fields )
   catch
