@@ -166,7 +166,8 @@ write(DB, Storage, Type, Key, Value, Lock)->
     #state{ type = internal }->
       ecomet_db:write( DB, Storage, Type, Key, Value, Lock );
     #state{ type = External } when is_pid(External)->
-      External ! {write, self(), DB, Storage, Type, Key, Value, Lock};
+      External ! {write, self(), DB, Storage, Type, Key, Value, Lock},
+      ok;
     _->
       throw(no_transaction)
   end.
@@ -176,7 +177,8 @@ delete(DB, Storage, Type, Key, Lock)->
     #state{ type = internal }->
       ecomet_db:delete( DB, Storage, Type, Key, Lock );
     #state{ type = External } when is_pid(External)->
-      External ! {delete, self(), DB, Storage, Type, Key, Lock};
+      External ! {delete, self(), DB, Storage, Type, Key, Lock},
+      ok;
     _->
       throw(no_transaction)
   end.
@@ -186,7 +188,8 @@ on_abort( DB, Storage, Type, Key, Value )->
     #state{ type = internal }->
       ecomet_db:on_abort( DB, Storage, Type, Key, Value );
     #state{ type = External } when is_pid(External)->
-      External ! {on_abort, self(), DB, Storage, Type, Key, Value};
+      External ! {on_abort, self(), DB, Storage, Type, Key, Value},
+      ok;
     _->
       throw(no_transaction)
   end.
@@ -217,7 +220,8 @@ log(OID, Value)->
         end,
       put(?transaction, State#state{ log = Log#{ OID =>{Queue,Value} }});
     #state{ type = External } when is_pid( External )->
-      External ! {log, self(), OID, Value};
+      External ! {log, self(), OID, Value},
+      ok;
     _->
       throw( no_transaction )
   end.
@@ -231,7 +235,8 @@ dict_put(KeyValueMap) when is_map(KeyValueMap)->
       Dict=maps:merge(Dict0,KeyValueMap),
       put(?transaction, State#state{ dict = Dict});
     #state{ type = External } when is_pid( External )->
-      External ! {dict_put, self(), KeyValueMap};
+      External ! {dict_put, self(), KeyValueMap},
+      ok;
     _->
       throw( no_transaction )
   end.
@@ -270,7 +275,8 @@ dict_remove(KeyList) when is_list(KeyList)->
       Dict=maps:without(KeyList,Dict0),
       put(?transaction, State#state{ dict = Dict});
     #state{ type = External } when is_pid( External )->
-      External ! {dict_remove, self(), KeyList};
+      External ! {dict_remove, self(), KeyList},
+      ok;
     _->
       ok
   end.
