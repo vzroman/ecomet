@@ -143,11 +143,11 @@ Subscribe -> subscribe text get GetFieldList from Databases where Condition: {su
 
 Unsubscribe -> unsubscribe text : { unsubscribe, get_token('$2') }.
 
-Set-> set SetFieldList in Databases where Condition SetParamList : {set, parse_values( maps:from_list('$2'), maps:get(format,maps:from_list('$7'), undefined) ) ,'$4','$6',maps:from_list('$7')}.
-Set-> set SetFieldList in Databases where Condition: {set,maps:from_list('$2'),'$4','$6',#{}}.
+Set-> set SetFieldList in Databases where Condition SetParamList : {set, parse_values( maps:from_list('$2') ) ,'$4','$6',maps:from_list('$7')}.
+Set-> set SetFieldList in Databases where Condition: {set, parse_values( maps:from_list('$2') ),'$4','$6',#{}}.
 
-Insert -> insert SetFieldList InsertParamList : { insert, parse_values( maps:from_list('$2'), maps:get(format,maps:from_list('$3'), undefined) ) ,maps:from_list('$3') }.
-Insert -> insert SetFieldList : { insert, maps:from_list('$2') ,#{} }.
+Insert -> insert SetFieldList InsertParamList : { insert, parse_values( maps:from_list('$2') ) ,maps:from_list('$3') }.
+Insert -> insert SetFieldList : { insert, parse_values( maps:from_list('$2') ) ,#{} }.
 
 Delete -> delete from Databases where Condition Lock : { delete, '$3', '$5', maps:from_list(['$6'])}.
 Delete -> delete from Databases where Condition : { delete, '$3','$5', #{} }.
@@ -307,10 +307,8 @@ field_value([Field])->
 field_value([Link|FieldChain])->
     {fun([OID])-> ecomet_ql_util:join([OID|FieldChain]) end,[Link]}.
 
-parse_values( Fields, undefined)->
-    Fields;
-parse_values( Fields, Format)->
-    maps:map( fun(_N, V)->Format(term, V) end, Fields).
+parse_values( Fields)->
+    maps:map( fun(_N, V)-> ecomet_types:from_string(term, V) end, Fields).
 
 
 compile(VarList)->
