@@ -287,10 +287,9 @@ on_edit(Object)->
   ok.
 
 on_delete(Object)->
-  case is_empty(?OID(Object)) of
-    true-> [ecomet:delete_object(ecomet:open(ChildID)) || ChildID <- get_children(Object)], ok;
-    _->?ERROR(has_objects)
-  end.
+  [ ecomet:delete_object(ecomet:open(OID)) || OID <- ecomet_query:system('*',[<<".oid">>], {<<".pattern">>,'=',?OID(Object)}) ],
+  [ ecomet:delete_object(ecomet:open(ChildID)) || ChildID <- get_children(Object )],
+  ok.
 
 check_parent(Object)->
   case ecomet:field_changes(Object,<<"parent_pattern">>) of
