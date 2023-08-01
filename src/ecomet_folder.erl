@@ -188,8 +188,8 @@ on_delete(Object)->
   % is in the user context. If the user does not have rights for the object the whole
   % transaction will throw
   [ begin
-      case try ecomet:open(ItemID,_Lock=none) catch _:object_deleted -> object_deleted end of
-        object_deleted ->
+      case try ecomet:open(ItemID,_Lock=none) catch _:not_exists -> not_exists end of
+        not_exists ->
           % The object is already deleted
           ignore;
         Item ->

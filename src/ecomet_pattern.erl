@@ -287,8 +287,8 @@ on_edit(Object)->
   ok.
 
 on_delete(Object)->
-  [ case try ecomet:open(OID,_Lock=none) catch _:object_deleted -> object_deleted end of
-      object_deleted ->
+  [ case try ecomet:open(OID,_Lock=none) catch _:not_exists -> not_exists end of
+      not_exists ->
         % The object is already deleted
         ignore;
       Item ->

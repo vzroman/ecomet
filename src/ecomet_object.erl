@@ -215,7 +215,7 @@ open(OID,Lock,_IsTransaction = true)->
 
   % Check if the object is under delete
   case ecomet_transaction:dict_get( {OID, handler}, undefined ) of
-    on_delete -> throw( object_deleted );
+    on_delete -> throw( not_exists );
     _ -> ok
   end,
 
@@ -610,7 +610,7 @@ on_delete(Object)->
         open(FolderID,none),
         ?ERROR(system_object)
       catch
-          _:object_deleted ->ok
+          _:not_exists ->ok
       end;
     _->
       ok

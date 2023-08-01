@@ -381,7 +381,7 @@ on_delete(Object)->
     {ok,Name}=ecomet:read_field(Object,<<".name">>),
     ecomet_pattern:remove_field(PatternID,Name)
   catch
-    _:object_deleted->ok
+    _:not_exists->ok
   end.
 
 
