@@ -287,7 +287,13 @@ on_edit(Object)->
   ok.
 
 on_delete(Object)->
-  [ ecomet:delete_object(ecomet:open(OID)) || OID <- ecomet_query:system('*',[<<".oid">>], {<<".pattern">>,'=',?OID(Object)}) ],
+  [ case try ecomet:open(OID,_Lock=none) catch _:object_deleted -> object_deleted end of
+      object_deleted ->
+        % The object is already deleted
+        ignore;
+      Item ->
+        ecomet:delete_object(Item)
+    end || OID <- ecomet_query:system('*',[<<".oid">>], {<<".pattern">>,'=',?OID(Object)}) ],
   [ ecomet:delete_object(ecomet:open(ChildID)) || ChildID <- get_children(Object )],
   ok.
 
