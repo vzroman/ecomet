@@ -118,6 +118,22 @@
   <<".path">>=>fun ecomet_lib:to_path/1,
   <<".object">>=>fun ecomet_lib:dummy/1
 }).
+
+%% This is the result of regex compilation from
+%% "^(?![ ])[^\\x00-\\x1F\\x2F\\x7F]*(?<![ ])$"
+%% x00-x1F: ASCII Table Codes from 0 to 31
+%% x2F: Slash Character Code
+%% x7F: Delete Character Code
+-define(BAD_CHARS_PATTERN, {re_pattern, 0, 0, 0,
+  <<69, 82, 67, 80, 126, 0, 0, 0, 16, 0, 0, 0, 1, 128, 0, 0, 255,
+    255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0,
+    64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 131, 0, 58, 27, 126, 0, 5, 29, 32,
+    120, 0, 5, 111, 0, 0, 0, 0, 255, 127, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 127, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 98, 128, 0, 8, 124, 0,
+    1, 29, 32, 120, 0, 8, 25, 120, 0, 58, 0>>}).
+
 %%=================================================================
 %%	Data API
 %%=================================================================
@@ -567,6 +583,7 @@ load_storage(_IsTransaction = true, OID, Type)->
 %% Behaviour handlers
 %%=====================================================================
 on_create(Object)->
+  check_name(Object),
   check_storage_type(Object),
   check_path(Object),
   edit_rights(Object),
@@ -591,8 +608,11 @@ on_edit(Object)->
   end,
   case field_changes(Object,<<".name">>) of
     none->ok;
-    {_,none}->ok;
-    {_New, Old}->
+    {New,none}->
+      check_name(New),
+      ok;
+    {New, Old}->
+      check_name(New),
       case is_system(Old) of
         true->?ERROR(system_object);
         _->ok
@@ -616,6 +636,19 @@ on_delete(Object)->
       ok
   end,
   ok.
+
+% Checking for whitespaces (leading / trailing)
+% and bad characters in the object name
+check_name(<<>>) ->
+  ?ERROR(<<"Name can not be empty">>);
+check_name(BinaryString) when is_binary(BinaryString) ->
+  case re:run(BinaryString, ?BAD_CHARS_PATTERN) of
+    {match, _} -> ok;
+    _ -> throw(name_has_whitespaces_or_bad_characters)
+  end;
+check_name(Object) ->
+  {ok, BinaryString} = ecomet:read_field(Object, <<".name">>),
+  check_name(BinaryString).
 
 check_storage_type(Object)->
   {ok,FolderID}=ecomet:read_field(Object,<<".folder">>),
@@ -648,20 +681,12 @@ check_path(Object)->
     Changed->
       {ok,FolderID}=read_field(Object,<<".folder">>),
       {ok,Name}=read_field(Object,<<".name">>),
-      if
-        Name =:= <<>> -> ?ERROR("name can not be empty");
-        true -> ok
-      end,
       OID = get_oid(Object),
       % Check that name does not include the path delimiter
-      case binary:split(Name,<<"/">>) of
-        [Name]->
-          case ecomet_folder:find_object_system(FolderID,Name) of
-            {error,not_found}->ok;
-            {ok,OID}->ok;
-            _->?ERROR({not_unique,Name})
-          end;
-        _->?ERROR("the '/' symbol is not allowed in names")
+      case ecomet_folder:find_object_system(FolderID,Name) of
+        {error,not_found}->ok;
+        {ok,OID}->ok;
+        _->?ERROR({not_unique,Name})
       end;
     true->ok
   end.
