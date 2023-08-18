@@ -293,7 +293,7 @@ from_json(term,Value) when is_map(Value)->
 from_json(term,Value) when is_binary(Value)->
   try ecomet_json:from_json( Value )
   catch
-    _:_->from_string(term,Value)
+    _:_->Value
   end;
 from_json(Type,Value)->
   % The default from_string parser is flexible enough
