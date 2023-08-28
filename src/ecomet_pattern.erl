@@ -375,7 +375,12 @@ inherit_fields(Object)->
 %%	Internal helpers
 %%=================================================================
 inherit_fields(PatternID,ParentFields)->
-  FieldFields = maps:keys( get_fields( {?PATTERN_PATTERN,?FIELD_PATTERN} )),
+  FieldFields = [ F || F <- maps:keys( get_fields( {?PATTERN_PATTERN,?FIELD_PATTERN} )),
+    case F of
+      <<".",_/binary>> -> false;
+      _ -> true
+    end
+  ],
   ChildFields = get_fields(PatternID),
 
   [case ChildFields of
