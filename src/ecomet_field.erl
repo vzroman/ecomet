@@ -351,9 +351,13 @@ on_edit(Object)->
       ok;
     none->
       % Check for schema changes
-      Changes=[ A || A <- maps:keys(?DEFAULT_DESCRIPTION), none=/=ecomet:field_changes(Object,?A2B(A)) ],
 
-      case Changes of
+      case [ F || F <- maps:keys( ecomet_object:object_changes( Object ) ),
+        case F of
+          <<".",_/binary>> -> false;
+          true-> true
+        end ]
+      of
         []->
           % No real schema changes
           ok;
