@@ -383,10 +383,12 @@ inherit_fields(PatternID,ParentFields)->
        % CASE 1. The field is already defined in the child, inherit algorithm
        Child1 = ecomet_field:inherit(Child,Parent),
        Child2 = ecomet_field:from_schema(Child1),
+       ParentOtherFields = parent_field_fields( PatternID, Name, FieldFields -- maps:keys( Child2 ) ),
+       ParentInheritFields = maps:merge( ParentOtherFields, Child2 ),
        % Edit object
        {ok, FieldID} =ecomet_folder:find_object(PatternID, Name),
        Field = ecomet:open(FieldID,write),
-       ok = ecomet:edit_object(Field,Child2);
+       ok = ecomet:edit_object(Field,ParentInheritFields);
      _->
        % CASE 2. The field is not defined in the child yet, create a new one
       ParentSchemaFields = ecomet_field:from_schema(Parent),
