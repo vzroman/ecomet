@@ -355,7 +355,7 @@ on_edit(Object)->
       case [ F || F <- maps:keys( ecomet_object:object_changes( Object ) ),
         case F of
           <<".",_/binary>> -> false;
-          true-> true
+          _-> true
         end ]
       of
         []->
