@@ -284,6 +284,8 @@ to_string({list,Type},Value)->
 %% ====================================================================
 from_json(_Type,null)->
   none;
+from_json(_Type,undefined)->
+  none;
 from_json({list,Type},Value)->
   [from_json(Type,Item)||Item <- Value];
 from_json(term,Value) when is_list(Value)->
@@ -301,6 +303,8 @@ from_json(Type,Value)->
 
 to_json(_Type,none)->
   null;
+to_json(_Type,undefined)->
+  undefined;
 % JSON friendly types
 to_json(bool,Value)->
   Value;
