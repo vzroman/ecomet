@@ -332,6 +332,8 @@ to_json(Number) when is_number(Number)->
   Number;
 to_json(none)->
   null;
+to_json(undefined)->
+  undefined;
 to_json(false)->
   false;
 to_json(true)->
