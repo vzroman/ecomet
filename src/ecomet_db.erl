@@ -291,7 +291,7 @@ first([T|Rest], Ref)->
     _:_->first( Rest, Ref )
   end;
 first([], _Ref)->
-  throw( undefined ).
+  undefined.
 
 last( Ref )->
   Types = lists:usort(maps:keys( Ref )),
@@ -305,7 +305,7 @@ last([T|Rest], Ref)->
     _:_->last( Rest, Ref )
   end;
 last([], _Ref)->
-  throw( undefined ).
+  undefined.
 
 next( Ref, #key{type = T, storage = S, key = K}=Key)->
   case Ref of
