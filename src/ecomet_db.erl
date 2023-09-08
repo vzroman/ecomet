@@ -128,7 +128,23 @@ init()->
   wait_local_dbs().
 
 wait_local_dbs()->
-  wait_dbs( zaya:node_dbs( node() ) ).
+  LocalDBs = zaya:node_dbs( node() ),
+  ReadyDBs =
+    [DB || DB <- LocalDBs, is_available(DB, node())],
+  case LocalDBs -- ReadyDBs of
+    []-> ok;
+    NotReady->
+      ?LOGINFO("~p databases are not ready yet, waiting...",[NotReady]),
+      timer:sleep( 5000 ),
+      wait_local_dbs()
+
+  end.
+
+is_available(DB, Node)->
+  case zaya:db_available_nodes(DB) of
+    Ns when is_list(Ns) -> lists:member(Node, DB);
+    _-> false
+  end.
 
 wait_dbs( DBs )->
   ReadyDBs =
