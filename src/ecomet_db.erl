@@ -142,7 +142,7 @@ wait_local_dbs()->
 
 is_available(DB, Node)->
   case zaya:db_available_nodes(DB) of
-    Ns when is_list(Ns) -> lists:member(Node, DB);
+    Ns when is_list(Ns) -> lists:member(Node, Ns);
     _-> false
   end.
 
