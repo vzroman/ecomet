@@ -83,37 +83,6 @@ class Ecomet{
         return this._action("login",{login,pass},OnOk,OnError,Timeout,-1);
     }
 
-    async debug_applyTo(fields, oid) {
-
-        const debugPath = () => {
-            return new Promise((resolve, reject) => {
-                if (!oid) {
-                    resolve(fields[".folder"]);
-                } else {
-                    if (oid.startsWith("/root")) {
-                        resolve(oid);
-                    } else {
-                        this.query(`get .path from * where .oid=$oid('${oid}')`, ([, items]) => {
-                            const [ path ] = items;
-                            resolve(path);
-                        }, console.error);
-                    }
-                }
-            });
-        }
-        
-        const path = await debugPath();
-
-        const isPrototype = path.match("^/root/FP/prototypes/[^/]+/content.*") !== null;
-
-        if (isPrototype) {
-            fields.ignore = [];
-        } 
-
-
-        return fields;
-    }
-
     create_object(fields,OnOk,OnError,Timeout) {
         return this._action("create",{fields},OnOk,OnError,Timeout,-1);
     }
