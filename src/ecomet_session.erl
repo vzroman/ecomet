@@ -64,6 +64,8 @@
 on_init()->
   % Prepare the storage for sessions
   ets:new(?SESSIONS,[named_table,public,ordered_set,{keypos, #session.id}]),
+  % prepare tokens for temporary session 
+  ets:new(?ECOMET_SESSION_TOKENS,[named_table,public,set]),	
 
   % Initialize subscriptions
   ecomet_subscription:on_init(),
