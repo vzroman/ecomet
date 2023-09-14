@@ -95,22 +95,28 @@ handle(<<"query">>,_ID,#{<<"statement">>:=Statement})->
       JSONResult = query_result(Result),
       {ok, JSONResult}
   end;
-handle(<<"activate_fork">>, _ID, #{<<"token">> := Token}) ->
-  case ets:lookup(token,Token) of
-		[{Token,Login}] -> {ok, fp_db:dirty_login(Login)};
-		_ -> {error, token_not_found}
-	end;
-handle(<<"fork_connection">>, ID, _Params) ->
+handle(<<"activate_fork">>, ID, #{<<"token">> := Token}) ->
+  case ets:lookup(?ECOMET_SESSION_TOKENS,Token) of
+		[{Token,Login}] -> 
+      case ecomet:dirty_login(Login) of
+        ok ->
+          {ok, ID};
+        _ ->
+          {error, access_denied}
+        end;
+  _ -> {error, access_denied}
+end;
+handle(<<"fork_connection">>, _ID, _Params) ->
   Token = base64:encode(crypto:hash(sha256,integer_to_binary(erlang:unique_integer([monotonic])))),
   Timeout = ?ENV(auth_timeout, 600),
-  {ok, User} = fp_db:get_user(),
-  {ok, Login} = fp_db:read_field(?OBJECT(User), <<".name">>),
+  {ok, User} = ecomet:get_user(),
+  {ok, Login} = ecomet:read_field(?OBJECT(User), <<".name">>),
   spawn(fun()->
-		ets:insert(token,{Token,Login}),
-		timer:sleep(Timeout),
-		ets:delete(token,Token)
-	end),
-	reply_ok(ID, Token);
+    ets:insert(?ECOMET_SESSION_TOKENS,{Token,Login}),
+    timer:sleep(Timeout),
+    ets:delete(?ECOMET_SESSION_TOKENS,Token)
+  end),
+  {ok, Token};
 %-----------------------------------------------------------
 % Object level actions
 %----------------------------------------------------------
