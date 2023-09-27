@@ -29,25 +29,39 @@ class Ecomet{
         this._connection=undefined;
         this._actions={};
         this._actionId=0;
+        this._URL = undefined;
     }
     connect(IP,Port,Protocol,OnOk,OnError,OnClose){
         this.connectUrl(Protocol+"//"+IP+":"+Port+"/websocket",OnOk,OnError,OnClose);
 
     }
 
+    forkConnection() {
+        return new Promise((resolve, reject) => {
+            const connection = new Ecomet();
+            connection.connectUrl(this._URL, () => {
+                this._action("fork_connection", null, (token) => {
+                    connection._action("activate_fork",token, () => {
+                        resolve(connection);
+                    }, reject);
+                }, reject);
+            }, reject);
+        });
+    }
+
     connectUrl(URL,OnOk,OnError,OnClose){
         URL=URL.replace("https:","wss:");
         // If the original protocol is https (secure)
         // then here is nothing left to replace
-        URL=URL.replace("http:","ws:");
+        this._URL=URL.replace("http:","ws:");
         try {
-            this._connection=new WebSocket(URL);
+            this._connection=new WebSocket(this._URL);
             this._connection.onopen=OnOk;
             this._connection.onmessage=event=>{ this._on_receive(event.data) };
             this._connection.onclose=()=>{
                 this._connection=undefined;
                 this._actions={};
-                OnClose();
+                if (typeof OnClose==="function") OnClose();
             };
         } catch(Error){ OnError(Error); }
 
@@ -104,13 +118,18 @@ class Ecomet{
     static to_ecomet1([Header,...Rows],all){
         if (all){
             return Rows.map(Object=>{
-                return {oid:Object[0][".oid"],fields:Object[0]}
+                const oid = Object[0][".oid"];
+                delete Object[0][".oid"];
+                return {
+                    oid:oid,fields:Object[0]}
             })
         }else{
             const oid=Header.indexOf(".oid");
             return Rows.map(Values=>{
                 return { oid:Values[oid], fields:Values.reduce((acc,v,i)=>{
-                    acc[Header[i]]=v;
+                    if (i !== oid) {
+                        acc[Header[i]]=v;
+                    }
                     return acc;
                 },{})}
             });
@@ -119,6 +138,23 @@ class Ecomet{
 
     query(statement,OnOk,OnError,Timeout) {
         return this._action("query",{statement},OnOk,OnError,Timeout,-1);
+    }
+
+    get(statement,OnOk,OnError,Timeout){
+        return this.query(statement,result => {
+            if ( statement.match(/^get\s+\.oid\s+from/) ){
+                let Items = result.map(oid => { return {".oid":oid} });
+                OnOk( Items );
+            }else{
+                let [H,...Items] = result;
+                Items = Items.map(item => H.reduce((acc, name, i)=>{
+                    acc[name] = item[i];
+                    return acc;
+                },{}));
+
+                OnOk( Items );
+            }
+        }, OnError, Timeout);
     }
 
     subscribe(statement,OnCreate,OnUpdate,OnDelete,OnError) {

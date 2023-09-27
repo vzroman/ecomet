@@ -61,6 +61,7 @@
 ).
 
 -define(SUBSCRIPTION(ID,Action,OID,Fields),{ecomet, ID, Action, OID, Fields }).
+-define(ECOMET_SESSION_TOKENS, ecomet_session_token).
 
 -define(B2A(Value),if is_atom(Value)->Value; true->list_to_atom(unicode:characters_to_list(Value)) end).
 -define(A2B(Atom),unicode:characters_to_binary(atom_to_list(Atom))).
