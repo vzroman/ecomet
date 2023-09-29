@@ -377,6 +377,13 @@ new_pattern_id()->
   end.
 
 get_pattern(ID)->
+  get_pattern( zaya:is_transaction(), ID ).
+get_pattern(_IsTransaction = true, ID)->
+  case zaya:read(?SCHEMA,[#pattern{id=ID}], none) of
+    [{_, Value}] -> Value;
+    _->none
+  end;
+get_pattern(_IsTransaction = false, ID)->
   case zaya:read(?SCHEMA,[#pattern{id=ID}]) of
     [{_, Value}] -> Value;
     _->none
