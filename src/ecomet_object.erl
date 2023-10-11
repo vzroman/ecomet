@@ -644,7 +644,7 @@ check_name(<<>>) ->
 check_name(BinaryString) when is_binary(BinaryString) ->
   case re:run(BinaryString, ?BAD_CHARS_PATTERN) of
     {match, _} -> ok;
-    _ -> throw(name_has_whitespaces_or_bad_characters)
+    _ -> throw({name_has_whitespaces_or_bad_characters,BinaryString})
   end;
 check_name(Object) ->
   {ok, BinaryString} = ecomet:read_field(Object, <<".name">>),

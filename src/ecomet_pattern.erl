@@ -229,7 +229,7 @@ append_field(Pattern,Field,Config)->
     edit_map(Pattern,Map2),
 
     % Update children
-    Fields = get_fields(Map2),
+    Fields = maps:with([Field],get_fields(Map2)),
     [ inherit_fields(ChildID,Fields) || ChildID <- get_children(Pattern)]
 
   end),
