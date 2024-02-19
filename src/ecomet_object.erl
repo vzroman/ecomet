@@ -518,6 +518,15 @@ check_move( #object{move=CanMove}=Object, EditFields )->
       case read_field( Object, <<".folder">> ) of
         {ok, NewFolder}-> ok;
         _ when CanMove->
+          % Check for recursion
+          Path = ?PATH(Object),
+          {ok, Name} = read_field(Object, <<".name">>),
+          NewPath = <<(?PATH(NewFolder))/binary,"/",Name/binary>>,
+          S = size(Path),
+          case NewPath of
+            <<Path:S/binary,_/binary>> -> throw(infinite_recursion);
+            _->ok
+          end,
           % Check rights
           #{
             <<".contentreadgroups">>:=Read,
