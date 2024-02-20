@@ -47,6 +47,7 @@
   new_pattern_id/0,
   get_pattern/1,
   set_pattern/2,
+  lock_pattern/1,
   list_patterns/0
 ]).
 
@@ -379,7 +380,7 @@ new_pattern_id()->
 get_pattern(ID)->
   get_pattern( zaya:is_transaction(), ID ).
 get_pattern(_IsTransaction = true, ID)->
-  case zaya:read(?SCHEMA,[#pattern{id=ID}], write) of
+  case zaya:read(?SCHEMA,[#pattern{id=ID}], none) of
     [{_, Value}] -> Value;
     _->none
   end;
@@ -396,6 +397,10 @@ set_pattern(ID,Value)->
     { ok, ok }-> ok;
     { abort, Reason }->?ERROR(Reason)
   end.
+
+lock_pattern( ID )->
+  zaya:read(?SCHEMA, [#pattern{id=ID}], write),
+  ok.
 
 list_patterns() ->
   MS=[{

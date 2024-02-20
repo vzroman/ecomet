@@ -100,6 +100,9 @@ edit_map(Pattern,Map)->
   end.
 
 wrap_transaction(PatternID,Fun)->
+
+  ok = ecomet_schema:lock_pattern( PatternID ),
+
   % Check if the schema is already under transaction
   RootTransaction = ecomet_transaction:dict_get({'@pattern_map@',PatternID},undefined)=:=undefined,
   % Put the schema into the transaction
