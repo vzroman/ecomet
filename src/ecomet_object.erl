@@ -1122,10 +1122,11 @@ do_commit( #object{oid = OID, pattern = P, db = DB}=Object, Changes, Rollback )-
     maps:fold(fun(_Type, {_,TData}, Acc)->
       maps:merge( maps:get(fields,TData,#{}), Acc )
     end,#{}, Changes),
-  ObjectMap =
+  ObjectMap1 =
     maps:fold(fun(_Type,TData, Acc)->
       maps:merge( maps:get(fields,TData,#{}), Acc )
     end, ObjectMap0, maps:without(maps:keys(Changes), Rollback)),
+  ObjectMap = maps:filter(fun(_F, V)-> V =/=none end, ObjectMap1),
 
   % Actually changed fields with their previous values
   Changes0 = maps:map(fun(_F,{V0,_})-> V0 end,FieldsChanges),
