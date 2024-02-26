@@ -437,15 +437,17 @@ field_changes(#object{oid=OID,pattern = P,db = DB},Field)->
 object_changes(Object)->
   maps:fold(fun(_T,{ Data0, Data1 }, Acc)->
     Fields0 = maps:get(fields, Data0, #{}),
-    maps:fold(fun(F,V1,TAcc)->
+    Fields1 = maps:get(fields, Data1, #{}),
+    lists:foldl(fun(F,TAcc)->
       V0 = maps:get(F, Fields0, none),
+      V1 = maps:get(F, Fields1, none),
       if
         V0 =/= V1 ->
           TAcc#{ F => {V1, V0} };
         true ->
           TAcc
       end
-    end, Acc, maps:get(fields, Data1, #{}))
+    end, Acc, maps:keys( maps:merge( Fields0, Fields1 ) ))
   end, #{}, compile_changes( Object )).
 
 field_type(#object{pattern = P},Field)->
