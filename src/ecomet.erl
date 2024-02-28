@@ -109,7 +109,8 @@
   ts/0,
   stop/0,
   rebuild_index/1, rebuild_index/2,
-  wait_dbs/1
+  wait_dbs/1,
+  wait_local_dbs/0
 ]).
 
 % @edoc ecomet object denotes map where each key is field_key()
@@ -383,4 +384,7 @@ rebuild_index(OID, Fields)->
 
 wait_dbs( DBs )->
   ecomet_db:wait_dbs( DBs ).
+
+wait_local_dbs()->
+  ecomet_db:wait_local_dbs().
 
