@@ -110,7 +110,8 @@
   stop/0,
   rebuild_index/1, rebuild_index/2,
   wait_dbs/1,
-  wait_local_dbs/0
+  wait_local_dbs/0,
+  db_available_nodes/1
 ]).
 
 % @edoc ecomet object denotes map where each key is field_key()
@@ -388,3 +389,5 @@ wait_dbs( DBs )->
 wait_local_dbs()->
   ecomet_db:wait_local_dbs().
 
+db_available_nodes( DB )->
+  ecomet_db:available_nodes( DB ).
