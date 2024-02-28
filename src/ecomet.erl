@@ -26,7 +26,8 @@
   get_user/0,
   is_admin/0,
   get_active_users/0,
-  get_sessions/0,get_sessions/1
+  get_sessions/0,get_sessions/1,
+  spawn_session/1
 ]).
 
 %%=================================================================
@@ -161,6 +162,9 @@ get_sessions()->
   ecomet_session:get_sessions().
 get_sessions(User)->
   ecomet_session:get_sessions(User).
+
+spawn_session( Fun )->
+  ecomet_user:spawn_session( Fun ).
 
 %%=================================================================
 %%	Object-level CRUD
