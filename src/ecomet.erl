@@ -26,7 +26,8 @@
   get_user/0,
   is_admin/0,
   get_active_users/0,
-  get_sessions/0,get_sessions/1
+  get_sessions/0,get_sessions/1,
+  spawn_session/1
 ]).
 
 %%=================================================================
@@ -109,7 +110,9 @@
   ts/0,
   stop/0,
   rebuild_index/1, rebuild_index/2,
-  wait_dbs/1
+  wait_dbs/1,
+  wait_local_dbs/0,
+  db_available_nodes/1
 ]).
 
 % @edoc ecomet object denotes map where each key is field_key()
@@ -159,6 +162,9 @@ get_sessions()->
   ecomet_session:get_sessions().
 get_sessions(User)->
   ecomet_session:get_sessions(User).
+
+spawn_session( Fun )->
+  ecomet_user:spawn_session( Fun ).
 
 %%=================================================================
 %%	Object-level CRUD
@@ -384,3 +390,8 @@ rebuild_index(OID, Fields)->
 wait_dbs( DBs )->
   ecomet_db:wait_dbs( DBs ).
 
+wait_local_dbs()->
+  ecomet_db:wait_local_dbs().
+
+db_available_nodes( DB )->
+  ecomet_db:available_nodes( DB ).

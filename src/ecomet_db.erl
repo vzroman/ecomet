@@ -148,7 +148,7 @@ is_available(DB, Node)->
 
 wait_dbs( DBs )->
   ReadyDBs =
-    [DB || DB <- DBs, lists:member(node(), zaya:db_available_nodes(DB))],
+    [DB || DB <- DBs, zaya:is_db_available(DB)],
   case DBs -- ReadyDBs of
     []->ok;
     NotReady->
