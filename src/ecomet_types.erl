@@ -288,8 +288,13 @@ from_json(_Type,undefined)->
   none;
 from_json({list,Type},Value)->
   [from_json(Type,Item)||Item <- Value];
-from_json(term,Value)->
-  decode_json( Value );
+from_json(term,Value) when is_binary( Value )->
+  Value1 =
+    try ecomet_json:from_json( Value )
+    catch
+      _:_->Value
+    end,
+  decode_json( Value1 );
 from_json(Type,Value)->
   % The default from_string parser is flexible enough
   from_string(Type,Value).
