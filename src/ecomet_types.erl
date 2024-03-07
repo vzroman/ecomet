@@ -288,15 +288,8 @@ from_json(_Type,undefined)->
   none;
 from_json({list,Type},Value)->
   [from_json(Type,Item)||Item <- Value];
-from_json(term,Value) when is_list(Value)->
-  [from_json(term,Item)||Item <- Value];
-from_json(term,Value) when is_map(Value)->
-  maps:map(fun(_K,V)->from_json(term,V) end, Value );
-from_json(term,Value) when is_binary(Value)->
-  try ecomet_json:from_json( Value )
-  catch
-    _:_->Value
-  end;
+from_json(term,Value)->
+  from_json( Value );
 from_json(Type,Value)->
   % The default from_string parser is flexible enough
   from_string(Type,Value).
@@ -314,33 +307,39 @@ to_json(float,Value)->
   1.0*Value;
 to_json({list,Type},Value)->
   [ to_json(Type,Item) || Item <- Value ];
-% Other types are converted to a string
 to_json(term,Value)->
   to_json(Value);
+% Other types are converted to a string
 to_json(Type,Value)->
   to_string(Type,Value).
 
+to_json(Value) when is_number( Value ); is_binary( Value ); is_boolean(Value); Value =:= null; Value =:= undefined->
+  Value;
 to_json(ItemsList) when is_list(ItemsList)->
   [to_json(I)||I<-ItemsList];
 to_json(ItemsMap) when is_map(ItemsMap)->
-  maps:fold(fun(K,V,Acc)->
-    Acc#{ to_json(K)=>to_json(V) }
-  end,#{},ItemsMap);
-to_json(String) when is_binary(String)->
-  String;
-to_json(Number) when is_number(Number)->
-  Number;
-to_json(none)->
-  null;
-to_json(undefined)->
-  undefined;
-to_json(false)->
-  false;
-to_json(true)->
-  true;
-to_json(null)->
-  null;
+  if
+    map_size(ItemsMap) > 0 ->
+      lists:usort([{ to_json(Key), to_json(Value) } || {Key, Value} <- maps:to_list( ItemsMap )]);
+    true ->
+      ItemsMap
+  end;
 to_json(Atom) when is_atom(Atom)->
-  atom_to_binary(Atom,utf8);
+  <<":atom:", (atom_to_binary(Atom, utf8))/binary>>;
 to_json(Term)->
-  ecomet_types:term_to_string(Term).
+  <<":term:", (ecomet_types:term_to_string(Term))/binary>>.
+
+from_json(Map) when is_map(Map) ->
+  maps:fold(fun (Key, Value, AccIn) ->
+    AccIn#{ from_json(Key) => from_json(Value) }
+  end, #{}, Map);
+from_json(<<":atom:", Value/binary>>) ->
+  binary_to_atom(Value, utf8);
+from_json(<<":term:", Value/binary>>) ->
+  case string_to_term(Value) of
+    {ok,Term}->Term;
+    _->Value
+  end;
+from_json(List) when is_list(List) ->
+  [ from_json(Item) || Item <- List ];
+from_json(Any) -> Any.
