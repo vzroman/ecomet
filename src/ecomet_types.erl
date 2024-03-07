@@ -288,15 +288,8 @@ from_json(_Type,undefined)->
   none;
 from_json({list,Type},Value)->
   [from_json(Type,Item)||Item <- Value];
-from_json(term,Value) when is_list(Value)->
-  [from_json(term,Item)||Item <- Value];
-from_json(term,Value) when is_map(Value)->
-  maps:map(fun(_K,V)->from_json(term,V) end, Value );
-from_json(term,Value) when is_binary(Value)->
-  try ecomet_json:from_json( Value )
-  catch
-    _:_->Value
-  end;
+from_json(term,Value)->
+  decode_json( Value );
 from_json(Type,Value)->
   % The default from_string parser is flexible enough
   from_string(Type,Value).
@@ -316,7 +309,7 @@ to_json({list,Type},Value)->
   [ to_json(Type,Item) || Item <- Value ];
 % Other types are converted to a string
 to_json(term,Value)->
-  to_json(Value);
+  encode_json(Value);
 to_json(Type,Value)->
   to_string(Type,Value).
 
@@ -344,3 +337,30 @@ to_json(Atom) when is_atom(Atom)->
   atom_to_binary(Atom,utf8);
 to_json(Term)->
   ecomet_types:term_to_string(Term).
+
+
+encode_json( Value ) when is_number( Value ); is_binary( Value ); is_boolean(Value); Value =:= null; Value =:= undefined ->
+  Value;
+encode_json(Map) when is_map(Map)->
+  maps:fold(fun(K,V,Acc)-> Acc#{ encode_json(K) => encode_json(V) } end, #{}, Map);
+encode_json(List) when is_list(List) ->
+  [ encode_json(Item) || Item <- List ];
+encode_json( Atom ) when is_atom( Atom ) ->
+  <<":atom:", (atom_to_binary(Atom, utf8))/binary>>;
+encode_json( Term ) ->
+  <<":term:", (?T2B(Term))/binary>>.
+
+decode_json(Map) when is_map(Map) ->
+  maps:fold(fun (Key, Value, AccIn) ->
+    AccIn#{ decode_json(Key) => decode_json(Value) }
+  end, #{}, Map);
+decode_json(<<":atom:", Value/binary>>) ->
+  binary_to_atom(Value, utf8);
+decode_json(<<":term:", Value/binary>>) ->
+  String = unicode:characters_to_list(<<Value/binary, ".">>),
+  {ok, Tokens, _EndLine} = erl_scan:string(String),
+  {ok, Field} = erl_parse:parse_term(Tokens),
+  Field;
+decode_json(List) when is_list(List) ->
+  [ decode_json(Item) || Item <- List ];
+decode_json(Any) -> Any.
