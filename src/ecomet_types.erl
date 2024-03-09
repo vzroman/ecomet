@@ -288,11 +288,16 @@ from_json(_Type,undefined)->
   none;
 from_json({list,Type},Value)->
   [from_json(Type,Item)||Item <- Value];
-from_json(term,Value) when is_binary( Value )->
+from_json(term,Value)->
   Value1 =
-    try ecomet_json:from_json( Value )
-    catch
-      _:_->Value
+    if
+      is_binary( Value )->
+        try ecomet_json:from_json( Value )
+        catch
+          _:_->Value
+        end;
+      true ->
+        Value
     end,
   decode_json( Value1 );
 from_json(Type,Value)->
