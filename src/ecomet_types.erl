@@ -349,7 +349,10 @@ encode_json( Value ) when is_number( Value ); is_binary( Value ); is_boolean(Val
 encode_json(Map) when is_map(Map)->
   maps:fold(fun(K,V,Acc)-> Acc#{ encode_json(K) => encode_json(V) } end, #{}, Map);
 encode_json(List) when is_list(List) ->
-  [ encode_json(Item) || Item <- List ];
+  case io_lib:char_list( List ) of
+    true -> <<":string:", (unicode:characters_to_binary(List))/binary >>;
+    _-> [ encode_json(Item) || Item <- List ]
+  end;
 encode_json( Atom ) when is_atom( Atom ) ->
   <<":atom:", (atom_to_binary(Atom, utf8))/binary>>;
 encode_json( Term ) ->
@@ -366,6 +369,8 @@ decode_json(<<":term:", Value/binary>>) ->
   {ok, Tokens, _EndLine} = erl_scan:string(String),
   {ok, Field} = erl_parse:parse_term(Tokens),
   Field;
+decode_json(<<":string:", Value/binary>>) ->
+  unicode:characters_to_list( Value );
 decode_json(List) when is_list(List) ->
   [ decode_json(Item) || Item <- List ];
 decode_json(Any) -> Any.
