@@ -767,7 +767,7 @@ params_diff( NewParams, OldParams, Modules )->
         Module = maps:get(Type,Modules),
         TypeParams =
           case NodeParams of
-            #{Type:=_TypeParams}->
+            #{Type:= #{ params:= _TypeParams }}->
               if
                 is_map(_TypeParams)->
                   _TypeParams;
