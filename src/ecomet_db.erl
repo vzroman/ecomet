@@ -503,7 +503,7 @@ get_by_name(Name) when is_binary(Name)->
 
 find_by_tag( Tag )->
   {_, DBs} =  ecomet_query:system([?ROOT],[<<".name">>],{'AND',[
-    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.database">>)},
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.database">>)},
     {<<"tags">>,'=',Tag }
   ]}),
   [ binary_to_atom( DB, utf8 ) || [DB] <- DBs ].
