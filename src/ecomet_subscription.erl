@@ -225,14 +225,16 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
         ]}
     end,
   Tags = ecomet_resultset:subscription_prepare( Conditions ),
-  Index = compile_index( Tags, DBs ),
+
+  IndexDBs = index_dbs( DBs ),
+  Index = compile_index( Tags, IndexDBs ),
   build_index(Index, self()),
 
   StartTS =
     if
       Stateless -> -1;
       true ->
-        RS = ecomet_query:get(DBs,rs,InConditions),
+        RS = ecomet_query:get(IndexDBs,rs,InConditions),
         ecomet_resultset:foldl(fun(OID,TS)->
           Object = ecomet_object:construct( OID ),
 
@@ -279,6 +281,15 @@ tag_hash( Tag )->
 
 get_subscriptions( Session )->
   [ #{id => Id, ts => TS, pid => PID} || [Id,TS,PID] <-ets:match(?SUBSCRIPTIONS, #subscription{id = {Session,'$1'}, ts ='$2', pid='$3', _ = '_'})].
+
+index_dbs( '*' )->
+  '*';
+index_dbs([ Tag | Rest ]) when is_binary( Tag )->
+  ecomet_db:find_by_tag( Tag ) ++ index_dbs( Rest );
+index_dbs([ DB | Rest ]) when is_atom( DB )->
+  [DB| index_dbs( Rest )];
+index_dbs([])->
+  [].
 
 %%------------------------------------------------------------
 %%  Search engine
