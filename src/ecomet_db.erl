@@ -744,16 +744,14 @@ check_types(Object)->
 check_params(Object)->
   case ecomet:field_changes(Object,<<"params">>) of
     none->ok;
-    { NewParams, OldParams } when is_map(NewParams)->
+    { NewParams, _OldParams } when is_map(NewParams)->
       {ok,Modules}= ecomet:read_field(Object,<<"modules">>),
-      params_diff( NewParams, OldParams, Modules );
+      params_diff( NewParams, Modules );
     _->
       throw(invalid_params)
   end.
 
-params_diff( NewParams, none, Modules )->
-  params_diff(NewParams, #{}, Modules);
-params_diff( NewParams, OldParams, Modules )->
+params_diff( NewParams, Modules )->
   Types = maps:keys(Modules),
   %-------Add new nodes or change copies params---------------
   maps:fold(fun(Node,NodeParams,Acc)->
@@ -780,12 +778,9 @@ params_diff( NewParams, OldParams, Modules )->
         TAcc#{Type => #{module => Module, params => TypeParams} }
       end,#{},Types),
     NewNodeParams = maps:merge(OtherParams, NodeTypesParams),
-    case OldParams of
-      #{Node := NewNodeParams}->
-        Acc;
-      _->
-        Acc#{Node => NewNodeParams}
-    end
+
+    Acc#{Node => NewNodeParams}
+
   end, #{}, NewParams).
 
 
