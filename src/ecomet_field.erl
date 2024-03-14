@@ -33,15 +33,6 @@
 ]).
 
 %%=================================================================
-%%	Data API
-%%=================================================================
--export([
-  get_value/3,get_value/4,
-  lookup_storage/3,
-  field_changes/4
-]).
-
-%%=================================================================
 %%	Schema API
 %%=================================================================
 -export([
@@ -268,49 +259,6 @@ is_required(Description, FieldName) ->
       {ok, maps:get(required, Spec)};
     _ ->
       {error, {undefined_field,FieldName}}
-  end.
-
-%%=================================================================
-%%	Data API
-%%=================================================================
-get_value(Map,OID,Name,Default)->
-  case get_value(Map,OID,Name) of
-    {ok,none}->Default;
-    {ok,Value}->Value
-  end.
-% Get field actual value
-get_value(Map,OID,Name)->
-  % Load storage
-  case get_storage(Map,Name) of
-    {error,Error}->
-      {error,Error};
-    {ok,StorageType}->
-      case ecomet_object:load_storage(OID,StorageType) of
-        % Storage is empty
-        none->{ok,none};
-        Storage->{ok,maps:get(Name,Storage,none)}
-      end
-  end.
-
-% Direct dirty lookup in storage
-lookup_storage(Type,OID,FieldName)->
-  case ecomet_object:load_storage(OID,Type) of
-    none->none;
-    Storage->maps:get(FieldName,Storage,none)
-  end.
-
-% Get changes for the field. {NewValue, OldValue} or 'none' is returned
-field_changes(Map,Project,OID,Name)->
-  case Project of
-    % Field is in the project. It's changed or it is object creating
-    #{Name:=New}->
-      % Compare with the old value
-      {ok,Storage}=get_storage(Map,Name),
-      case lookup_storage(Storage,OID,Name) of
-        New->none;
-        Old->{New,Old}
-      end;
-    _->none
   end.
 
 %%=================================================================

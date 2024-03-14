@@ -53,8 +53,7 @@ internal(Fun)->
         Res = Fun(),
         State = #state{log = Log} = get(?transaction),
         OrderedLog = lists:usort([{Queue,Value} || {Queue, Value} <- maps:values(Log)]),
-        CommitLog0 = ecomet_object:commit([Value || {_,Value} <- OrderedLog]),
-        CommitLog = ecomet_index:commit( CommitLog0 ),
+        CommitLog = ecomet_object:commit([Value || {_,Value} <- OrderedLog]),
         put(?transaction,State#state{log = CommitLog}),
         Res
       end),

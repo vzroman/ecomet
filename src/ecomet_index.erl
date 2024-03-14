@@ -60,39 +60,39 @@
 %------------------PHASE 1---------------------------------------------
 %               Prepare object tags
 %----------------------------------------------------------------------
-build_index(Changes, Map)->
+build_index(Changes, Schema)->
   maps:fold(fun(Field,{PrevValue, NewValue},Acc)->
+    FieldSchema = maps:get( Field, Schema ),
     PrevTags =
       if
         PrevValue =/= none->
-          field_tags( Field, Map, PrevValue );
+          field_tags( Field, PrevValue, FieldSchema );
         true->
           []
       end,
     NewTags =
       if
         NewValue =/= none->
-          field_tags( Field, Map, NewValue );
+          field_tags( Field, NewValue, FieldSchema );
         true->
           []
       end,
     case { NewTags -- PrevTags, PrevTags -- NewTags } of
       {[],[]}-> Acc;
       {AddTags,DelTags}->
-        {ok,Type} = ecomet_field:get_storage(Map, Field),
+        Type = maps:get( storage, FieldSchema ),
         {TypeAddAcc, TypeDelAcc} = maps:get(Type, Acc, {[],[]}),
         Acc#{ Type => { AddTags ++ TypeAddAcc, DelTags ++ TypeDelAcc } }
     end
   end, #{}, Changes).
 
-field_tags( Field, Map, Value )->
-  case ecomet_field:get_index(Map, Field) of
-    {ok, none}->
-      [];
-    {ok, IndexTypes}->
+field_tags( Field, Value, Schema )->
+  case Schema of
+    #{ index := none } -> [];
+    IndexTypes ->
       ListValue =
-        case ecomet_field:get_type(Map, Field) of
-          {ok,{list,_}}-> Value;
+        case Schema of
+          #{ type := list } -> Value;
           _-> [Value]
         end,
       lists:usort(lists:append(lists:foldl(fun(Type,Acc)->
@@ -168,9 +168,7 @@ commit(LogList)->
     maps:fold(fun(Type,Tags,_)->
       maps:fold(fun(Tag,OIDs,_)->
         Commit = prepare_commit(Tag, OIDs),
-        Rollback = prepare_rollback(Commit),
-        ok = ecomet_db:bulk_write(DB,?INDEX,Type,Commit,_Lock = none),
-        ok = ecomet_db:bulk_on_abort(DB,?INDEX,Type,Rollback)
+        ok = ecomet_db:bulk_write(DB,?INDEX,Type,Commit,_Lock = none)
       end, undefined, Tags)
     end, undefined, Types)
   end, undefined, ByDBsTypes),
@@ -217,11 +215,6 @@ prepare_commit(Tag, OIDs)->
       {Tag,[idl,PatternID,IDHN,IDLN]} => Value
     }
   end,#{},OIDs)).
-
-prepare_rollback([{Tag, Value}| Rest])->
-  [{Tag, not Value} | prepare_rollback(Rest)];
-prepare_rollback([])->
-  [].
 
 %------------------PHASE 3---------------------------------------------
 %               Write changes to the real database
