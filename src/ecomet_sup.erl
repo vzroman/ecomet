@@ -47,13 +47,13 @@ init([]) ->
     modules=>[elock]
   },
 
-  IndexLockServer = #{
-    id=>?INDEX_LOCKS,
-    start=>{elock,start_link,[ ?INDEX_LOCKS ]},
+  IndexCache = #{
+    id=>?INDEX_CACHE,
+    start=>{ecomet_index, start_link,[]},
     restart=>permanent,
     shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
     type=>worker,
-    modules=>[elock]
+    modules=>[ecomet_index]
   },
 
   ESubsriptionsServer = #{
@@ -88,7 +88,7 @@ init([]) ->
   {ok, {Supervisor,
     [
       LockServer,
-      IndexLockServer,
+      IndexCache,
       ESubsriptionsServer,
       SchemaSrv
       |Listeners]

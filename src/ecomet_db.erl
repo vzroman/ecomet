@@ -60,6 +60,14 @@
   dump_batch/2
 ]).
 
+%%	TRANSACTION API
+-export([
+  commit/3,
+  commit1/3,
+  commit2/2,
+  rollback/2
+]).
+
 %%	INFO API
 -export([
   get_size/1
@@ -406,6 +414,77 @@ copy(Ref, Fun, InAcc)->
 dump_batch(Ref, KVs)->
   write(Ref, KVs).
 
+%%	TRANSACTION
+%-------------Commit to a single storage
+commit(Ref, Write, Delete) when map_size( Ref ) =:= 1->
+  {Data, IndexLog} = prepare_write( Write ),
+  Delete = prepare_delete( Delete ),
+  light_commit( Ref, Data, Delete, IndexLog );
+
+commit(Ref, Write, Delete)->
+  {Data, IndexLog} = prepare_write( Write ),
+  Delete = prepare_delete( Delete ),
+  case needs_log( Data, Delete, IndexLog ) of
+    false -> light_commit( Ref, Data, Delete, IndexLog );
+    true -> strict_commit( Ref, Data, Delete, IndexLog )
+  end.
+
+commit1(_Ref, Write, Delete)->
+  {Write, Delete}.
+
+commit2(Ref, {Write, Delete})->
+  commit( Ref, Write, Delete ).
+
+rollback( _Ref, _TRef )->
+  ok.
+
+light_commit(Ref, Data, Delete, IndexLog )->
+
+  [ case Ref of
+      #{ T := { Module, TRef } }->
+        TData = maps:get( T, Data, [] ),
+        TDelete = maps:get( T, Delete, [] ),
+        TIndexLog = maps:get( T, IndexLog, [] ),
+        { TIndexWrite, TIndexDel } = ecomet_index:prepare_write(Module, Ref, TIndexLog ),
+        Module:commit( TRef, TData ++ TIndexWrite,  TDelete ++ TIndexDel);
+      _->
+        ignore
+    end || T <- [ ram, disc, ramdisc ]],
+
+  ok.
+
+strict_commit( Ref, Data, Delete, IndexLog )->
+  todo.
+
+prepare_write( Write )->
+  ByTypes =
+    lists:foldl(fun({#key{ type = T, storage = S, key = K }, V}, Acc)->
+      TypeAcc = maps:get(T,Acc,[]),
+      Acc#{ T => [{S,K,V} | TypeAcc]}
+    end,#{}, Write),
+  maps:map(fun(_Type, Recs)->
+    lists:foldl(fun({S,K,V},{DAcc,IAcc})->
+      if
+        S =:= ?INDEX, is_boolean(V)->
+          % The trick.
+          % If the value of the index is a boolean it's an index update as a result of commit
+          % but not real value. This write must be done by ecomet_index module
+          {DAcc,[{K,V}|IAcc]};
+        true->
+          {[{{S,[K]}, V}|DAcc], IAcc}
+      end
+    end,{[],[]}, Recs)
+  end, ByTypes).
+
+prepare_delete( Delete )->
+  lists:foldl(fun(#key{ type = T, storage = S, key = K }, Acc)->
+    TypeAcc = maps:get(T,Acc,[]),
+    Acc#{ T => [{S,[K]} | TypeAcc]}
+  end,#{}, Delete).
+
+needs_log( Data, Delete, IndexLog )->
+  Storages = lists:usort( maps:keys( Data ) ++ maps:keys( Delete ) ++ maps:keys( IndexLog ) ),
+  lists:member( disc, Storages ) andalso lists:member( ramdisc, Storages ).
 
 %%=================================================================
 %%	INFO

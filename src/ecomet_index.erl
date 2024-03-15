@@ -20,12 +20,19 @@
 -include("ecomet.hrl").
 
 %% ====================================================================
+%% Service API
+%% ====================================================================
+-export([
+  start_link/0
+]).
+
+%% ====================================================================
 %% Indexing API
 %% ====================================================================
 -export([
   build_index/3,
   destroy_index/2,
-  write/3
+  prepare_write/3
 ]).
 
 %% ====================================================================
@@ -55,6 +62,9 @@
 -endif.
 
 -define(AS_LIST( V ), if is_list(V) -> V; true -> [V] end).
+-define(EMPTY, persistent_term:get({ ?MODULE, empty })).
+-define(CACHE_TIME, 1000).
+-define(CACHE_CLEAR_PERIOD, 100).
 
 %% ====================================================================
 %% Indexing
@@ -310,17 +320,12 @@ dt_index(DT)->
 %------------------PHASE 2---------------------------------------------
 %               Write changes to the real database
 %----------------------------------------------------------------------
-write(Module, Ref, Updates)->
+-record(update_index,{ from, module, ref, tag, add, del }).
+prepare_write(Module, Ref, Updates)->
   ByTags = group_by_tags( Updates ),
-  maps:fold(fun(Tag,Patterns,_)->
-    {ok, Unlock} = elock:lock(?INDEX_LOCKS, {Ref,Tag}, _IsShared = false, _Timeout=infinity,[node()]),
-    try update_tag(Module, Ref, Tag, Patterns)
-    after
-      Unlock()
-    end,
-    ignore
-  end,ignore,ByTags),
-  ok.
+  maps:fold(fun(Tag,Patterns, Acc)->
+    update_tag(Module, Ref, Tag, Patterns, Acc)
+  end, {[],[]} , ByTags).
 
 group_by_tags( Updates )->
   % #{
@@ -342,26 +347,27 @@ group_by_tags( Updates )->
       Acc
   end, #{} ,Updates).
 
-update_tag( Module, Ref, Tag, Patterns )->
-  Ps =
-    maps:fold(fun(P,IDHs,PAcc)->
-      Hs = maps:fold(fun(H,Ls,HAcc)->
-        case build_bitmap(Module, Ref, {Tag,[idl,P,H]},Ls) of
-          stop-> HAcc;
-          Value -> HAcc#{ H => Value }
+update_tag( Module, Ref, Tag, Patterns, Acc )->
+  {Ps, Acc1} =
+    maps:fold(fun(P,IDHs,{PAcc, PAccLog})->
+      {Hs, PAccLog1} = maps:fold(fun(H,Ls,{HAcc, HAccLog})->
+        case build_bitmap(Module, Ref, {Tag,[idl,P,H]}, Ls, HAccLog) of
+          {stop, HAccLog1}-> {HAcc, HAccLog1};
+          {Value, HAccLog1} -> {HAcc#{ H => Value }, HAccLog1 }
         end
-      end,#{},IDHs),
-      case build_bitmap(Module, Ref, {Tag,[idh,P]}, Hs) of
-        stop-> PAcc;
-        Value -> PAcc#{ P => Value }
+      end,{#{}, PAccLog}, IDHs),
+      case build_bitmap(Module, Ref, {Tag,[idh,P]}, Hs, PAccLog1) of
+        {stop, PAccLog2}-> {PAcc, PAccLog2};
+        {Value, PAccLog2} -> {PAcc#{ P => Value }, PAccLog2}
       end
-    end,#{}, Patterns),
-  build_bitmap(Module, Ref, {Tag,patterns}, Ps).
+    end,{#{}, Acc }, Patterns),
+  build_bitmap(Module, Ref, {Tag,patterns}, Ps, Acc1).
 
-build_bitmap(_Module, _Ref, _Tag, Update) when map_size(Update) =:= 0->
-  stop;
-build_bitmap(Module, Ref, Tag, Update)->
-  Empty = ecomet_bitmap:create(),
+build_bitmap(_Module, _Ref, _Tag, Update, Acc) when map_size(Update) =:= 0->
+  {stop, Acc};
+build_bitmap(Module, Ref, Tag, Update, { WriteAcc, DelAcc })->
+
+  Empty = ?EMPTY,
   {Add, Del}=
     maps:fold(fun(ID,Value,{AddAcc,DelAcc})->
       if
@@ -370,26 +376,82 @@ build_bitmap(Module, Ref, Tag, Update)->
       end
     end,{Empty,Empty}, Update),
 
-  case Module:read(Ref,[{?INDEX,[Tag]}]) of
-    []->
-      case ecomet_bitmap:bit_andnot(Add,Del) of
-        Empty->
-          stop;
-        LevelValue->
-          ok = Module:write( Ref, [{{?INDEX,[Tag]}, LevelValue}]),
-          true
-      end;
-    [{_,LevelValue0}]->
-      LevelValue1 = ecomet_bitmap:bit_or(LevelValue0, Add ),
-      case ecomet_bitmap:bit_andnot(LevelValue1,Del) of
-        Empty->
-          ok = Module:delete( Ref, [{?INDEX,[Tag]}]),
-          false;
-        LevelValue->
-          ok = Module:write( Ref, [{{?INDEX,[Tag]}, LevelValue}]),
-          stop
+  case update_index(#update_index{
+    from = self(),
+    module = Module,
+    ref = Ref,
+    tag = {?INDEX,[Tag]},
+    add = Add,
+    del = Del
+  }) of
+    { Empty, Empty } ->
+      { stop, { WriteAcc, DelAcc } };
+    { Empty, _Value0 }->
+      { false, { WriteAcc, [ {?INDEX,[Tag]} | DelAcc ] }};
+    { Value, Empty } ->
+      { true, { [ {{?INDEX,[Tag]}, Value} |  WriteAcc ], DelAcc } };
+    { Value, _Value0 }->
+      { stop, { [ {{?INDEX,[Tag]}, Value} |  WriteAcc ], DelAcc } }
+  end.
+
+update_index( #update_index{ tag = Tag } = Index )->
+  ?MODULE ! Index,
+  receive
+    { tag, Tag, Value, Value0 }-> { Value, Value0 }
+  end.
+
+
+start_link()->
+  {ok, spawn_link(fun cache_init/0)}.
+
+cache_init()->
+  register( ?MODULE, self() ),
+  persistent_term:put( {?MODULE, empty}, ecomet_bitmap:create() ),
+  cache_loop( #{} ).
+
+cache_loop( IndexCache )->
+  receive
+    #update_index{
+      from = From,
+      module = Module,
+      ref = Ref,
+      tag = Tag,
+      add = Add,
+      del = Del
+    } ->
+
+      Value0 = get_tag_value( IndexCache, Module, Ref, Tag ),
+      Value1 = ecomet_bitmap:bit_or( Value0, Add ),
+      Value = ecomet_bitmap:bit_andnot(Value1, Del),
+
+      catch From ! { tag, Tag,  Value, Value0 },
+
+      cache_loop(IndexCache#{
+        { Module, Ref, Tag } => { Value, ecomet_lib:ts() + ?CACHE_TIME }
+      });
+    _->
+      cache_loop( IndexCache )
+  after
+    ?CACHE_CLEAR_PERIOD ->
+      cache_loop( clear_cache( IndexCache ) )
+  end.
+
+get_tag_value( Cache, Module, Ref, Tag )->
+  case Cache of
+    #{ { Module, Ref, Tag } := { Value, _TS } } ->
+      Value;
+    _->
+      case Module:read(Ref,[Tag]) of
+        []-> ?EMPTY;
+        [{_,Value}]-> Value
       end
   end.
+
+clear_cache( Cache )->
+  TS = ecomet_lib:ts(),
+  maps:filter(fun(_K, {_, TagTS}) -> TS > TagTS end, Cache).
+
+
 
 %%==============================================================================================
 %%	Search
