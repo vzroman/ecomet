@@ -23,8 +23,8 @@
 %% Indexing API
 %% ====================================================================
 -export([
-  build_index/2,
-  commit/1,
+  build_index/3,
+  destroy_index/2,
   write/3
 ]).
 
@@ -54,51 +54,199 @@
 ]).
 -endif.
 
+-define(AS_LIST( V ), if is_list(V) -> V; true -> [V] end).
+
 %% ====================================================================
 %% Indexing
 %% ====================================================================
 %------------------PHASE 1---------------------------------------------
-%               Prepare object tags
+%               Prepare object tags and commit
 %----------------------------------------------------------------------
-build_index(Changes, Schema)->
-  maps:fold(fun(Field,{PrevValue, NewValue},Acc)->
-    FieldSchema = maps:get( Field, Schema ),
-    PrevTags =
-      if
-        PrevValue =/= none->
-          field_tags( Field, PrevValue, FieldSchema );
-        true->
-          []
-      end,
-    NewTags =
-      if
-        NewValue =/= none->
-          field_tags( Field, NewValue, FieldSchema );
-        true->
-          []
-      end,
-    case { NewTags -- PrevTags, PrevTags -- NewTags } of
-      {[],[]}-> Acc;
-      {AddTags,DelTags}->
-        Type = maps:get( storage, FieldSchema ),
-        {TypeAddAcc, TypeDelAcc} = maps:get(Type, Acc, {[],[]}),
-        Acc#{ Type => { AddTags ++ TypeAddAcc, DelTags ++ TypeDelAcc } }
-    end
-  end, #{}, Changes).
+-record(index,{ field, type, storage, value }).
+-record(acc,{ index, log }).
+% indexes:
+% #{
+%   Storage => #{
+%     Field => #{
+%       Type => [ ...values ]
+%     }
+%   }
+% }
+% log:
+% #{
+%   Storage => { [ ...AddTags ], [...OtherTags] ,[ ...DelTags ] }
+% }
+%---------------------Create-----------------------------------
+build_index(OID, Changes, Indexes) when map_size( Indexes ) =:= 0->
 
-field_tags( Field, Value, Schema )->
-  case Schema of
-    #{ index := none } -> [];
-    IndexTypes ->
-      ListValue =
-        case Schema of
-          #{ type := list } -> Value;
-          _-> [Value]
-        end,
-      lists:usort(lists:append(lists:foldl(fun(Type,Acc)->
-        [[{Field,TagValue,Type}||TagValue<-build_values(Type,ListValue)]|Acc]
-      end,[],IndexTypes)))
-  end.
+  #acc{
+    index = Indexes,
+    log = Log
+  } = maps:fold(fun(Field, {Value, Index, Storage}, Acc)->
+
+    create_index(#index{
+      field = Field,
+      type = ?AS_LIST( Index ),
+      value = ?AS_LIST( Value ),
+      storage = Storage
+    }, Acc)
+  end, #acc{
+    index = #{},
+    log = #{}
+  }, Changes ),
+
+  %--------------------Commit index-------------------------------
+  DB = ecomet_object:get_db_name( OID ),
+  maps:foreach(fun( S, Tags )->
+
+    Commit = prepare_commit( Tags, OID , _Value = true ),
+    ok = ecomet_db:bulk_write(DB, ?INDEX, S, Commit, _Lock = none)
+
+  end, Log ),
+
+
+  { Indexes, Log };
+
+%---------------------Update-----------------------------------
+build_index(OID, Changes, Indexes)->
+
+  #acc{
+    index = Indexes,
+    log = Log
+  } = maps:fold(fun(Field, {Value, Index, Storage}, Acc)->
+
+    update_index(Acc#index{
+      field = Field,
+      type = ?AS_LIST( Index ),
+      value = ?AS_LIST( Value ),
+      storage = Storage
+    }, Acc)
+
+  end, #acc{
+    index = Indexes,
+    log = #{}
+  }, Changes ),
+
+  %--------------------Commit index-------------------------------
+  DB = ecomet_object:get_db_name( OID ),
+  maps:foreach(fun( S, {AddTags, _Other, DelTags} )->
+
+    CommitAdd = prepare_commit( AddTags, OID, true ),
+    CommitDel = prepare_commit( DelTags, OID , false ),
+    ok = ecomet_db:bulk_write(DB, ?INDEX, S, CommitAdd ++ CommitDel, _Lock = none)
+
+  end, Log ),
+
+  { Indexes, Log }.
+
+
+create_index(#index{
+  field = Field,
+  type = Types,
+  value = Values,
+  storage = Storage
+}, #acc{
+  log = LogAcc,
+  index = IndexAcc
+} = Acc)->
+
+  SLogAcc = maps:get( Storage, LogAcc, []),
+  SIndexAcc = maps:get( Storage, IndexAcc, #{} ),
+
+  {Index, Log} =
+    lists:foldl(fun(T, {TAcc, LAcc})->
+      case build_values(T, Values) of
+        [] -> { TAcc, LAcc };
+        TValues0 ->
+          TValues = ordsets:from_list( TValues0 ),
+          Tags = [{Field,V,T} || V <- TValues],
+          { TAcc#{ T => TValues }, Tags ++ LAcc }
+      end
+    end, {#{}, SLogAcc}, Types),
+
+  Acc#acc{
+    index = IndexAcc#{ Storage => SIndexAcc#{ Field => Index } },
+    log = LogAcc#{ Storage => Log }
+  }.
+
+update_index(#index{
+  field = Field,
+  type = Types,
+  value = Values,
+  storage = Storage
+}, #acc{
+  log = LogAcc,
+  index = IndexAcc
+} = Acc)->
+
+  SLogAcc = maps:get( Storage, LogAcc, {[],[],[]}),
+  SIndexAcc = maps:get( Storage, IndexAcc, #{} ),
+  Index0 = maps:get( Field, SIndexAcc, #{} ),
+
+  {Index, Log} =
+    lists:foldl(fun(T, FieldAcc)->
+      TValues = ordsets:from_list( build_values(T, Values) ),
+      update_field_index(TValues, T, Field, FieldAcc )
+    end, {Index0, SLogAcc}, Types),
+
+  Acc#acc{
+    index = IndexAcc#{ Storage => SIndexAcc#{ Field => Index } },
+    log = LogAcc#{ Storage => Log }
+  }.
+
+update_field_index([], Type, Field, {IndexAcc, {LogAddAcc, LogOtherAcc, LogDelAcc}} )->
+  DelAcc1 =
+    case IndexAcc of
+      #{ Type := Values } -> [{Field,V,Type} || V <- Values] ++ LogDelAcc;
+      _-> LogDelAcc
+    end,
+  { maps:remove( Type, IndexAcc ), {LogAddAcc, LogOtherAcc, DelAcc1} };
+
+update_field_index( Values, Type, Field , {IndexAcc, {LogAddAcc, LogOtherAcc, LogDelAcc}} )->
+
+  Tags = [{Field,V,Type} || V <- Values],
+
+  LogAcc =
+    case IndexAcc of
+      #{ Type := Values0 } ->
+        Tags0 = [{Field,V,Type} || V <- Values0],
+        LogAdd = ordsets:subtract( Tags, Tags0 ),
+        LogDel = ordsets:subtract( Tags0, Tags ),
+        LogOther = ordsets:subtract( Tags0, LogDel ),
+        { LogAdd ++ LogAddAcc, LogOther ++ LogOtherAcc, LogDel ++ LogDelAcc };
+      _->
+        { Tags ++ LogAddAcc,   LogDelAcc}
+    end,
+  { IndexAcc#{ Type => Values }, LogAcc }.
+
+destroy_index(OID, Index)->
+  DB = ecomet_object:get_db_name( OID ),
+  maps:foreach(fun( S, Fields )->
+    Tags =
+      maps:fold(fun(F, Types, Acc)->
+        maps:fold(fun( T, Values, FAcc ) ->
+          [{F,V,T} || V <- Values] ++ FAcc
+        end, Acc, Types )
+      end, [], Fields ),
+
+    Commit = prepare_commit( Tags, OID , false ),
+    ok = ecomet_db:bulk_write(DB, ?INDEX, S,  Commit, _Lock = none)
+
+  end, Index ).
+
+prepare_commit(Tags, OID ,Value)->
+
+  PatternID=ecomet_object:get_pattern(OID),
+  ObjectID=ecomet_object:get_id(OID),
+  IDHN=ObjectID div ?BITSTRING_LENGTH,
+  IDLN=ObjectID rem ?BITSTRING_LENGTH,
+
+  lists:append([[
+    {{Tag,patterns}, false},
+    {{Tag,[idh,PatternID]}, false},
+    {{Tag,[idl,PatternID,IDHN]}, false},
+    {{Tag,[idl,PatternID,IDHN,IDLN]}, Value}
+  ] || Tag <- Tags]).
 
 %----------------------------------------
 %   Indexing a value
@@ -160,63 +308,6 @@ dt_index(DT)->
 
 
 %------------------PHASE 2---------------------------------------------
-%               Prepare changes for each tag
-%----------------------------------------------------------------------
-commit(LogList)->
-  {ByDBsTypes, LogList1 } = group_by_dbs_types_tags( LogList ),
-  maps:fold(fun(DB,Types,_)->
-    maps:fold(fun(Type,Tags,_)->
-      maps:fold(fun(Tag,OIDs,_)->
-        Commit = prepare_commit(Tag, OIDs),
-        ok = ecomet_db:bulk_write(DB,?INDEX,Type,Commit,_Lock = none)
-      end, undefined, Tags)
-    end, undefined, Types)
-  end, undefined, ByDBsTypes),
-  lists:reverse(LogList1).
-
-
-group_by_dbs_types_tags( LogList )->
-  % #{
-  %   DB => #{
-  %     Type => #{
-  %       Tag => #{
-  %         OID => true | false
-  %       }
-  %     }
-  %   }
-  % }
-  lists:foldl(fun(#{db := DB, object:=#{ <<".oid">>:=OID }, index_log := IndexLog}=Log, {Acc,LogAcc})->
-    DBAcc0 = maps:get(DB, Acc, #{}),
-    DBAcc = maps:fold(fun(Type,{Add, Del}, InDBAcc ) ->
-        TypeAcc0 = maps:get(Type, InDBAcc, #{}),
-        TypeAcc1 = lists:foldl(fun(Tag,InTagAcc) ->
-          TagAcc = maps:get(Tag, InTagAcc, #{}),
-          InTagAcc#{Tag => TagAcc#{OID => true}}
-        end, TypeAcc0, Add),
-        TypeAcc = lists:foldl(fun(Tag,InTagAcc) ->
-          TagAcc = maps:get(Tag, InTagAcc, #{}),
-          InTagAcc#{Tag => TagAcc#{OID => false}}
-         end, TypeAcc1, Del),
-        InDBAcc#{Type => TypeAcc }
-        end, DBAcc0,IndexLog),
-      {Acc#{ DB => DBAcc }, [maps:remove(index_log, Log)|LogAcc]}
-  end,{#{},[]}, LogList).
-
-prepare_commit(Tag, OIDs)->
-  maps:to_list(maps:fold(fun(OID,Value,Acc)->
-    PatternID=ecomet_object:get_pattern(OID),
-    ObjectID=ecomet_object:get_id(OID),
-    IDHN=ObjectID div ?BITSTRING_LENGTH,
-    IDLN=ObjectID rem ?BITSTRING_LENGTH,
-    Acc#{
-      {Tag,patterns} => false,
-      {Tag,[idh,PatternID]} => false,
-      {Tag,[idl,PatternID,IDHN]} => false,
-      {Tag,[idl,PatternID,IDHN,IDLN]} => Value
-    }
-  end,#{},OIDs)).
-
-%------------------PHASE 3---------------------------------------------
 %               Write changes to the real database
 %----------------------------------------------------------------------
 write(Module, Ref, Updates)->
@@ -299,7 +390,6 @@ build_bitmap(Module, Ref, Tag, Update)->
           stop
       end
   end.
-
 
 %%==============================================================================================
 %%	Search

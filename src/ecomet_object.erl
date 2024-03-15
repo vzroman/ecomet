@@ -28,7 +28,6 @@
 %%	Service API
 %%=================================================================
 -export([
-  load_storage/2,
   commit/1,
   get_db_id/1,
   get_db_name/1,
@@ -183,7 +182,7 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
         prepare_create(Fields2 ,Object),
-        save(Object, on_create)
+        save(Object)
       end),
       Object#object{ pattern = PatternID };
     _->?ERROR(access_denied)
@@ -200,7 +199,7 @@ delete(#object{oid=OID, pattern = P}=Object) when is_map(P)->
       % Queue the procedure.
       ?TRANSACTION( fun()->
         prepare_delete(Object),
-        save(Object, on_delete),
+        save(Object),
         ok
       end );
     _->
@@ -259,7 +258,7 @@ read_field(#object{oid = OID} = Object, Field)->
     _->
       case ecomet_transaction:get_type() of
         none ->
-          lookup_field( Object, Field );
+          lookup_field(Object, Field );
         _->
           case ecomet_transaction:dict_get( {OID, data} ) of
             #{ Field := { Value, _ } } ->
@@ -271,14 +270,14 @@ read_field(#object{oid = OID} = Object, Field)->
   end.
 
 lookup_field(#object{ oid = OID, pattern = P }, Field )->
-  Schema = ecomet:pattern_fields( ?map(P) ),
+  Schema = ?map(P),
   case Schema of
     #{ Field := #{ storage := S } }->
       case load_storage( OID, S ) of
-        SFields when is_map( SFields )->
-          {ok, maps:get( Field, SFields, none )};
+        #{ fields := #{ Field := Value } } ->
+          { ok, Value };
         _->
-          {ok,none}
+          {ok, none }
       end;
     _->
       {error, {undefined_field, Field}}
@@ -311,47 +310,69 @@ read_fields(#object{oid = OID,pattern = P}=Object,Fields,Params) when is_map(Fie
 
   IsTransaction = ecomet:is_transaction(),
 
-  Changes =
+  {Changes, Storages0} =
     if
-      IsTransaction -> ecomet_transaction:dict_get( {OID, data}, #{} );
-      true -> #{}
+      IsTransaction ->
+        {
+          ecomet_transaction:dict_get( {OID, data}, #{} ),
+          ecomet_transaction:dict_get( {OID, storages}, #{} )
+        };
+      true -> { #{}, #{} }
     end,
 
-  Schema = ecomet_pattern:get_fields( ?map(P) ),
+  Schema = ?map(P),
 
-  {ReadyFields, Rest} =
-    maps:fold(fun(F,_V, {AccReady, AccRest})->
+  {Result, Storages} =
+    maps:fold(fun(F,_V, {FAcc, SAcc})->
       case ?SERVICE_FIELDS of
         #{F:=Fun}->
           % The field is a virtual field
-          { AccReady#{ F => Fun(Object)}, AccRest };
+          { FAcc#{ F => Fun(Object)}, SAcc };
         _->
           case Changes of
             #{ F:= { V, _ } }->
-              { AccReady#{ F => V } };
+              % The field is already under transform
+              { FAcc#{ F => V }, SAcc };
             _->
-              case maps:is_key( F, Schema ) of
-                true -> { AccReady, [F|AccRest] };
-                false -> { AccReady#{ F => undefined_field }, AccRest }
+              % Read the field from storage
+              case Schema of
+                #{ F := #{ storage := S } } ->
+                  case SAcc of
+                    #{ S := SData }->
+                      % The storage is already loaded
+                      case SData of
+                        #{ fields := #{ F := V }} -> { FAcc#{ F => V }, SAcc };
+                        _-> { FAcc#{ F => none }, SAcc }
+                      end;
+                    _->
+                      % Load the storage
+                      SData = load_storage( false, OID, S  ),
+                      case SData of
+                        #{ fields := #{ F := V }} -> { FAcc#{ F => V }, SAcc#{ S => SData } };
+                        _-> { FAcc#{ F => none }, SAcc#{ S => SData } }
+                      end
+                  end;
+                _ ->
+                  % The field is not in the schema
+                  { FAcc#{ F => undefined_field }, SAcc }
               end
           end
       end
-    end, {#{}, []}, Fields ),
+    end, {#{}, Storages0}, Fields ),
 
-  {AllFields, _} =
-    lists:foldl(fun(F, {FAcc, SAcc})->
-      #{ storage := S } = maps:get( F, Schema ),
-      case SAcc of
-        #{ S := SFields } -> { FAcc#{ F => maps:get( F, SFields, none ) }, SAcc };
-        _ ->
-          case load_storage(IsTransaction, OID, S ) of
-            SFields when is_map( SFields ) ->
-              { FAcc#{ S => maps:get( F, SFields, none )}, SAcc#{ S => SFields } };
-            _->
-              { FAcc#{ F => none}, SAcc#{ S => #{} } }
-          end
-      end
-    end, {ReadyFields,#{}}, Rest),
+  if
+    IsTransaction ->
+      case ecomet_transaction:dict_get( {OID, data}, none ) of
+        none ->
+          ignore;
+        _->
+          % The object is under transform, update it's storages
+          ecomet_transaction:dict_put(#{ {OID, storages} => Storages } )
+      end;
+    true ->
+      ignore
+  end,
+
 
   case Params of
     #{format:=Format}->
@@ -361,12 +382,14 @@ read_fields(#object{oid = OID,pattern = P}=Object,Fields,Params) when is_map(Fie
             Format({list,Type},V);
           #{ F := #{ type:= Type } }->
             Format(Type, V);
+          _ when V =:= undefined_field->
+            Format( string, V );
           _->
-            Format( string, V )
+            V % system fields
         end
-      end, AllFields );
+      end, Result );
     _->
-      AllFields
+      Result
   end.
 
 % Read all object fields
@@ -405,7 +428,7 @@ edit(#object{oid = OID, pattern = Map}=Object,InFields,_Params)->
     none ->
       ?TRANSACTION(fun()->
         prepare_edit(Fields, Object),
-        save(Object, on_edit)
+        save(Object)
       end);
     _->
       % If object is under behaviour handlers, just save changes
@@ -566,14 +589,20 @@ load_storage(OID,Type)->
 load_storage(_IsTransaction = false, OID, Type)->
   DB = get_db_name( OID ),
   case ecomet_db:read(DB, ?DATA, Type, OID ) of
-    #{ fields := Fields } -> Fields;
-    _ -> none
+    SData when is_map( SData ) -> SData;
+    _ -> #{}
   end;
 load_storage(_IsTransaction = true, OID, Type)->
-  case ecomet_transaction:dict_get( {OID, storages} ) of
-    #{ Type := #{ fields := Fields } } -> Fields;
+  case ecomet_transaction:dict_get( {OID, handler}, undefined ) of
+    on_create ->
+      % The object is under create, no storages
+      #{};
     _->
-      load_storage( false, OID, Type )
+      case ecomet_transaction:dict_get( {OID, storages} ) of
+        #{ Type := #{ fields := Fields } } -> Fields;
+        _->
+          load_storage( false, OID, Type )
+      end
   end.
 
 %%=====================================================================
@@ -832,72 +861,77 @@ construct(OID)->
 prepare_create(Fields, #object{oid = OID})->
   ecomet_transaction:dict_put( #{
     {OID, data} => maps:map(fun(_F, V)->{ V, none } end, Fields) ,
-    {OID, storages} => #{}
+    {OID, storages} => #{},
+    {OID, handler} => on_create
   }),
   ok.
 
-prepare_edit(Fields, #object{oid = OID, pattern = P} = Object)->
+prepare_edit(Fields, #object{oid = OID, pattern = P})->
 
-  Schema = ecomet_pattern:get_fields( ?map(P) ),
+  Schema = ?map(P),
 
-  {ChangesAcc, Storages} = get_transaction_data( Object ),
+  Acc0 = {
+    ecomet_transaction:dict_get( {OID, data}, #{} ),
+    ecomet_transaction:dict_get( {OID, storages}, #{} )
+  },
 
-  Changes =
-    maps:fold(fun( Field, Value, Acc )->
-      case Acc of
-        #{ Field := { _V1, V0 } } when V0 =:= Value->
-          maps:remove( Field, Acc );
-        #{ Field := { _V1, V0 } }->
-          Acc#{ Field => { Value, V0 } };
+  {ChangesAcc, StoragesAcc} =
+    maps:fold(fun( F, V, { FAcc, SAcc } )->
+      case FAcc of
+        #{ F := { _V1, V0 } } when V0 =:= V->
+          { maps:remove( F, FAcc ), SAcc };
+        #{ F := { _V1, V0 } }->
+          { FAcc#{ F => { V, V0 } }, SAcc };
         _->
-          #{ storage := Type } = maps:get( Field, Schema ),
-          case Storages of
-            #{ Type := #{ fields := #{ Field := V0 } } } when V0 =/= Value->
-              Acc#{ Field => { Value, V0 } };
+          #{ storage := S } = maps:get( F, Schema ),
+          case SAcc of
+            #{ S := SData }->
+              % The storage is already loaded
+              case SData of
+                #{ fields := #{ F := V0 } } when V0 =:= V ->
+                  { maps:remove( F, FAcc ), SAcc };
+                #{ fields := #{ F := V0 } }->
+                  { FAcc#{ F => { V, V0 } }, SAcc };
+                _->
+                  { FAcc#{ F => { V, none } }, SAcc }
+              end;
             _->
-              Acc#{ Field => { Value, none } }
+              % load the storage
+              SData = load_storage( false, OID, S ),
+              case SData of
+                #{ fields := #{ F := V0 } } when V0 =:= V ->
+                  { maps:remove( F, FAcc ), SAcc#{ S => SData } };
+                #{ fields := #{ F := V0 } }->
+                  { FAcc#{ F => { V, V0 } }, SAcc#{ S => SData } };
+                _->
+                  { FAcc#{ F => { V, none } }, SAcc#{ S => SData } }
+              end
           end
       end
-    end, ChangesAcc, Fields ),
+    end, Acc0, Fields ),
 
   ecomet_transaction:dict_put( #{
-    {OID, data} => Changes,
-    {OID, storages} => Storages
+    {OID, data} => ChangesAcc,
+    {OID, storages} => StoragesAcc,
+    {OID, handler} => on_edit
   }).
 
-prepare_delete(#object{pattern = P} = Object)->
+prepare_delete(#object{oid = OID, pattern = P})->
 
   Fields = maps:keys( ecomet_pattern:get_fields( ?map( P ) ) ),
   Changes = maps:from_list([{ F, none } || F <- Fields]),
-  prepare_edit( Changes, Object ).
 
-get_transaction_data(#object{oid = OID, pattern = P, db = DB})->
-  case ecomet_transaction:dict_get( {OID, data}, none ) of
-    none ->
-      % Load object storages
-      StorageTypes = ecomet_pattern:get_storage_types( ?map(P) ),
-      Storages =
-        lists:foldl(fun( Type, Acc )->
-          case ecomet_transaction:read(DB, ?DATA, Type, OID, none ) of
-            Data when is_map( Data )-> Acc#{ Type => Data };
-            _-> Acc
-          end
-        end, #{}, StorageTypes),
-      { #{}, Storages };
-    ChangesAcc ->
-      % The object is already under transformation
-      Storages = ecomet_transaction:dict_get( {OID, storages} ),
-      {ChangesAcc, Storages}
-  end.
+  ecomet_transaction:dict_put( #{
+    {OID, data} => Changes,
+    {OID, storages} => #{},
+    {OID, handler} => on_delete
+  }).
 
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet
-save(#object{oid=OID,pattern = P}=Object, Handler)->
+save(#object{oid=OID,pattern = P}=Object)->
 
-  % All operations within transaction. No changes applied if something is wrong
-  ecomet_transaction:dict_put([
-    {{OID,handler},Handler}	% Object is under the Handler
-  ]),
+  Handler = ecomet_transaction:dict_get( {OID, handler} ),
 
   % Run behaviours
   [ case erlang:function_exported(Behaviour,Handler,1) of
@@ -907,11 +941,8 @@ save(#object{oid=OID,pattern = P}=Object, Handler)->
         ?LOGWARNING("invalid behaviour ~p:~p",[Behaviour, Handler])
   end || Behaviour <- ecomet_pattern:get_behaviours(?map(P)) ],
 
-  % Release object from under the Handler
-  ecomet_transaction:dict_remove([{OID,handler}]),
-
   % Confirm the commit
-  ecomet_transaction:log(OID,Object),
+  ecomet_transaction:log( OID, {Object, Handler} ),
 
   % The result
   ok.
@@ -921,113 +952,205 @@ commit( Commits )->
   CommitLog = commit( Commits, _Log = [] ),
   ecomet_index:commit( CommitLog ).
 
-commit([ #object{oid = OID} = Object|Rest], Acc)->
+commit([ {#object{oid = OID} = Object, Handler}|Rest], Acc)->
   Changes = ecomet_transaction:dict_get( {OID, data} ),
   if
     map_size( Changes ) > 0 ->
-      Log = commit_object( Object, Changes ),
+      Log = commit_object(Handler, Object, Changes ),
       commit( Rest, [Log | Acc] )
   end;
 commit([], Acc)->
   Acc.
 
--record(s_commit, {tags, data, type, oid, db, fields }).
--record(commit_acc, {add_tags, tags, del_tags, object }).
+changes_by_storage( Changes, Schema )->
+  maps:fold(fun(F, {V, _}, {SAcc, IAcc} )->
 
-commit_object( #object{oid = OID, pattern = P, db = DB}=Object, Changes )->
-  Map = ?map( P ),
-  %----------Define fields changes-------------------
-  Storages = ecomet_transaction:dict_get( {OID, storages}, #{} ),
+    #{storage := S, index := I} = maps:get( F, Schema ),
 
-  FieldsSchema = ecomet_pattern:get_fields( Map ),
+    SAcc0 = maps:get( S, SAcc, #{} ),
+    SAcc1 = SAcc#{ S => SAcc0#{ F => V } },
 
-  Tags = ecomet_index:build_index(Changes, FieldsSchema),
-  % #{
-  %   ram => { Add, Del },
-  %   ramdisc => { Add, Del },
-  %   disc => { Add, Del }
-  % }
+    if
+      I =:= none ->
+        { SAcc1,  IAcc };
+      true ->
+        {SAcc1, IAcc#{ F => {V,I,S} }}
+    end
 
+  end, {#{}, #{}}, Changes ).
 
-  FieldsByStorageTypes =
-    maps:fold(fun(F, {V, _}, Acc )->
-      #{storage := S} = maps:get( F, FieldsSchema ),
-      SAcc0 =
-        case Acc of
-          #{ S := _SAcc } -> _SAcc;
-          _->
-            case Storages of
-              #{ S:= #{ fields := _SAcc } } -> _SAcc;
-              _-> #{}
-            end
-        end,
+merge_fields( Fields0, Fields )->
+  Fields1 = maps:merge( Fields0, Fields ),
+  maps:filter(fun(_F,V) -> V =/= none end, Fields1 ).
 
-      if
-        V =/= none -> Acc#{ S => SAcc0#{ F => V } };
-        true -> Acc#{ S => maps:remove( F, SAcc0 ) }
-      end
-    end, #{}, Changes ),
+load_storage_types( OID, Types, Preloaded )->
+  lists:foldl(fun( S, Acc )->
+    case maps:is_key( S, Acc ) of
+      true -> Acc;
+      false -> Acc#{ S => load_storage( false, OID, S ) }
+    end
+  end, Preloaded, Types ).
 
+get_storage_indexes( Storages )->
+  maps:fold(fun(S, Data, Acc ) ->
+    case Data of
+      #{ index := SIndex }->  Acc#{ S => SIndex };
+      _-> Acc
+    end
+  end, #{}, Storages ).
+
+-record(s_data,{ oid, db, type, fields, data ,index, tags }).
+%-------------------------Create commit---------------------------------------------
+commit_object(on_create, #object{oid = OID, pattern = P, db = DB}=Object, Changes )->
+
+  {ByStorageTypes, IndexedFields} = changes_by_storage( Changes, ?map( P ) ),
+
+  {Index, Tags} = ecomet_index:build_index(OID, IndexedFields, #{}),
 
   %-----Commit changes---------------------------
   EmptySet = ecomet_subscription:new_bit_set(),
-  CommitAcc0 = #commit_acc{
-    add_tags = EmptySet,
-    tags = EmptySet,
-    del_tags = EmptySet,
-    object = #{}
-  },
-  CommitAcc1 =  maps:fold(fun(Type, Fields, Acc)->
-    commit_storage(#s_commit{
-      type = Type,
+  AddTags =  maps:fold(fun(Type, Fields, Acc)->
+    commit_storage_create(#s_data{
       oid = OID,
       db = DB,
-      fields = Fields,
-      tags = maps:get( Type, Tags, none ),
-      data = maps:get( Type, Storages, none )
+      type =Type,
+      fields = maps:filter(fun(_F, V)-> V=/= none end, Fields ),
+      index = maps:get( Type, Index, none),
+      tags = maps:get( Type, Tags, none)
     }, Acc )
-  end, CommitAcc0, FieldsByStorageTypes),
+  end, EmptySet, ByStorageTypes),
 
-  % Add not changed tags and fields from not changed storages
-  CommitAcc =
-    if
-      is_map(Storages), map_size( Storages ) > map_size( FieldsByStorageTypes )->
-        NotChangedStorages = maps:without( maps:keys( FieldsByStorageTypes ), Storages ),
-        maps:fold(fun(_S, SData, Acc )->
-            not_changed( SData, Acc )
-        end, CommitAcc1, NotChangedStorages);
-      true ->
-        CommitAcc1
-    end,
+  ChangesMap = maps:map(fun(_F,{V,_}) -> V end, Changes),
 
-  #commit_acc{
+  % Log timestamp. If it is an object creation then timestamp must be the same as
+  % the timestamp of the object, otherwise it is taken as the current timestamp
+  TS = maps:get( <<".ts">>, ChangesMap ),
+
+  #{
+    action => create,
+    object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, #{  }),
+    db => DB,
+    ts => TS,
+    index_log => Tags,
+    tags => AddTags,
+    changes => ChangesMap
+  };
+
+%-------------------------Edit commit---------------------------------------------
+commit_object(on_edit, #object{oid = OID, pattern = P}=Object, Changes )->
+
+  Storages = ecomet_transaction:dict_get( {OID, storages}, #{} ),
+  {ByStorageTypes, IndexedFields} = changes_by_storage( Changes, ?map( P ) ),
+
+  if
+    map_size( IndexedFields ) =:= 0 ->
+      commit_update_light( Object, Changes, ByStorageTypes, Storages );
+    true ->
+      commit_update_full( Object, Changes, ByStorageTypes, IndexedFields , Storages )
+  end;
+
+%-------------------------Delete commit---------------------------------------------
+commit_object(on_delete, #object{oid = OID, pattern = P, db = DB}, _Changes )->
+
+  Storages0 = ecomet_transaction:dict_get( {OID, storages}, #{} ),
+
+  % Load storages that are not loaded
+  Storages = load_storage_types( OID, ecomet_pattern:get_storage_types( P ), Storages0 ),
+
+  % Get full map of indexes
+  Index = get_storage_indexes( Storages ),
+
+  %------------Commit--------------------------------
+  maps:foreach(fun( S, _ )->
+    ok = ecomet_transaction:delete(DB, ?DATA, S, OID,  none)
+  end, Storages),
+
+  ecomet_index:destroy_index( OID, Index ),
+
+  % This is to trigger only sticky subscriptions
+  #{
+    action => delete,
+    oid => OID
+  }.
+
+%-------------------------Light Edit commit (no tags changed)---------------------------------------------
+commit_update_light(#object{oid = OID, db = DB}, Changes, ByStorageTypes, Storages )->
+
+  %-----Commit changes---------------------------
+  maps:foreach(fun(Type, Fields)->
+    commit_storage_update(#s_data{
+      oid = OID,
+      db = DB,
+      type =Type,
+      fields = Fields,
+      data = maps:get( Type, Storages )
+    } )
+  end, ByStorageTypes),
+
+  % This is to trigger only sticky subscriptions
+  #{
+    action => update,
+    oid => OID,
+    changes => maps:map(fun(_F,{V,_}) -> V end, Changes )
+  }.
+%-------------------------Full Edit commit (tags changed)---------------------------------------------
+% The heaviest version of commit, because we need to build full object with it's tags to properly trigger query subscriptions
+-record(full_update_acc,{ add_tags, other_tags, del_tags, object }).
+commit_update_full( #object{ oid = OID, pattern = P, db = DB } = Object, Changes, ByStorageTypes, IndexedFields , Storages0 )->
+
+  % Load storages that are not loaded
+  Storages = load_storage_types( OID, ecomet_pattern:get_storage_types( P ), Storages0 ),
+
+  % Get full map of indexes
+  Index0 = get_storage_indexes( Storages ),
+
+  % Update the index
+  { Index, Tags } = ecomet_index:build_index(OID, IndexedFields, Index0 ),
+
+  %-----Commit changes---------------------------
+  EmptySet = ecomet_subscription:new_bit_set(),
+  CommitAcc =  maps:fold(fun(Type, Fields, Acc)->
+    commit_storage_update(#s_data{
+      oid = OID,
+      db = DB,
+      type =Type,
+      fields = Fields,
+      data = maps:get( Type, Storages ),
+      index = maps:get( Type, Index, none),
+      tags = maps:get( Type, Tags, none)
+    }, Acc )
+  end, #full_update_acc{
+    add_tags = EmptySet,
+    other_tags = EmptySet,
+    del_tags = EmptySet,
+    object = #{}
+  }, ByStorageTypes),
+
+  #full_update_acc{
     add_tags = AddTags,
-    tags = OldTags,
+    other_tags = OtherTags,
     del_tags = DelTags,
     object = ObjectMap
   } = CommitAcc,
 
-  % Log timestamp. If it is an object creation then timestamp must be the same as
-  % the timestamp of the object, otherwise it is taken as the current timestamp
-  TS =
-    case Changes of
-      #{<<".ts">>:=CreateTS}->CreateTS;
-      _->ecomet_lib:log_ts()
-    end,
+  ChangesMap = maps:map(fun(_F,{V,_}) -> V end, Changes),
+
+  TS = ecomet_lib:log_ts(),
 
   #{
+    action => update,
     object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, ObjectMap),
     db => DB,
     ts => TS,
     index_log => Tags,
-    tags => { AddTags, OldTags, DelTags},
-    changes => Changes
+    tags => {AddTags, OtherTags, DelTags},
+    changes => ChangesMap
   }.
 
-% Create new storage without tags
-commit_storage(#s_commit{
-  data = none,
-  tags = none,
+%=============================Create===================================
+% Create new storage without index
+commit_storage_create(#s_data{
+  index = none,
   db = DB,
   type = Type,
   oid = OID,
@@ -1037,138 +1160,175 @@ commit_storage(#s_commit{
   ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields },  none),
   Acc;
 
-% Create new storage with tags
-commit_storage(#s_commit{
-  data = none,
-  tags = {AddTags, _},
+% Create new storage with index
+commit_storage_create(#s_data{
+  index = Index,
+  tags = Tags,
   db = DB,
   type = Type,
   oid = OID,
   fields = Fields
-}, #commit_acc{
+}, Acc )->
+
+  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields, index => Index },  none),
+
+  TagsHash = ecomet_subscription:build_tag_hash( Tags ),
+  ecomet_subscription:bit_or(Acc,  TagsHash).
+
+%=============================Light update===================================
+% Light update storage with index
+commit_storage_update(#s_data{
+  data = #{ index := Index, fields := Fields0 },
+  db = DB,
+  type = Type,
+  oid = OID,
+  fields = Fields
+} )->
+
+  case merge_fields( Fields0, Fields ) of
+    NewFields when map_size( NewFields ) > 0->
+      ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => NewFields, index => Index }, none);
+    _->
+      ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none)
+  end;
+
+% Light update storage without index
+commit_storage_update(#s_data{
+  data = #{ fields := Fields0 },
+  db = DB,
+  type = Type,
+  oid = OID,
+  fields = Fields
+} )->
+
+  case merge_fields( Fields0, Fields ) of
+    NewFields when map_size( NewFields ) > 0->
+      ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => NewFields }, none);
+    _->
+      ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none)
+  end;
+
+% Light create storage
+commit_storage_update(#s_data{
+  db = DB,
+  type = Type,
+  oid = OID,
+  fields = Fields
+})->
+  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields }, none).
+
+%=============================Full update===================================
+% Update storage without index without tags
+commit_storage_update(#s_data{
+  data = #{ fields := Fields0 },
+  index = none,
+  tags = none,
+  oid = OID,
+  db = DB,
+  type =Type,
+  fields = Fields
+}, #full_update_acc{
+  object = ObjectAcc
+} = Acc)->
+
+  case merge_fields( Fields0, Fields ) of
+    NewFields when map_size( NewFields ) > 0->
+      ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => NewFields }, none);
+    _->
+      ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none)
+  end,
+
+  Acc#full_update_acc{
+    object = maps:merge(ObjectAcc, Fields0 )
+  };
+
+% Update storage without index with deleted tags
+commit_storage_update(#s_data{
+  data = #{ fields := Fields0 },
+  index = none,
+  tags = { _AddTags, _OtherTags, DelTags },
+  oid = OID,
+  db = DB,
+  type =Type,
+  fields = Fields
+}, #full_update_acc{
+  del_tags = DelTagsAcc,
+  object = ObjectAcc
+} = Acc)->
+
+  case merge_fields( Fields0, Fields ) of
+    NewFields when map_size( NewFields ) > 0->
+      ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => NewFields }, none);
+    _->
+      ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none)
+  end,
+
+  DelTagsHash = ecomet_subscription:build_tag_hash( DelTags ),
+
+  Acc#full_update_acc{
+    del_tags = ecomet_subscription:bit_or(DelTagsAcc,  DelTagsHash),
+    object = maps:merge(ObjectAcc, Fields0 )
+  };
+
+% Update storage with index with tags
+commit_storage_update(#s_data{
+  data = #{ fields := Fields0 },
+  index = Index,
+  tags = { AddTags, OtherTags, DelTags },
+  oid = OID,
+  db = DB,
+  type =Type,
+  fields = Fields
+}, #full_update_acc{
+  add_tags = AddTagsAcc,
+  other_tags = OtherTagsAcc,
+  del_tags = DelTagsAcc,
+  object = ObjectAcc
+} = Acc)->
+
+  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => merge_fields( Fields0, Fields ), index => Index },  none),
+
+  AddTagsHash = ecomet_subscription:build_tag_hash( AddTags ),
+  OtherTagsHash = ecomet_subscription:build_tag_hash( OtherTags ),
+  DelTagsHash = ecomet_subscription:build_tag_hash( DelTags ),
+
+  Acc#full_update_acc{
+    add_tags = ecomet_subscription:bit_or(AddTagsAcc,  AddTagsHash),
+    other_tags = ecomet_subscription:bit_or(OtherTagsAcc,  OtherTagsHash),
+    del_tags = ecomet_subscription:bit_or(DelTagsAcc,  DelTagsHash),
+    object = maps:merge(ObjectAcc, Fields0 )
+  };
+
+% Create storage without index
+commit_storage_update(#s_data{
+  index = none,
+  oid = OID,
+  db = DB,
+  type =Type,
+  fields = Fields
+}, Acc)->
+
+  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields },  none),
+  Acc;
+
+% Create storage with index
+commit_storage_update(#s_data{
+  index = Index,
+  tags = { AddTags, _OtherTags, _DelTags },
+  oid = OID,
+  db = DB,
+  type =Type,
+  fields = Fields
+}, #full_update_acc{
   add_tags = AddTagsAcc
 } = Acc)->
 
-  TagsHash = ecomet_subscription:build_tag_hash( AddTags ),
-  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields, tags => TagsHash }, none),
-
-  Acc#commit_acc{
-    add_tags = ecomet_subscription:bit_or(AddTagsAcc,  TagsHash)
-  };
-
-% Update storage with tags with no new tags
-commit_storage(#s_commit{
-  data = #{ tags := Tags, fields := Object },
-  tags = none,
-  db = DB,
-  type = Type,
-  oid = OID,
-  fields = Fields
-}, #commit_acc{
-  tags = TagsAcc,
-  object = ObjectAcc
-} = Acc ) when map_size( Fields ) > 0->
-
-  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields, tags => Tags }, none),
-  Acc#commit_acc{
-    tags = ecomet_subscription:bit_or(Tags,  TagsAcc),
-    object = maps:merge( Object, ObjectAcc )
-  };
-
-% Update storage without tags with no new tags
-commit_storage(#s_commit{
-  data = #{ fields := Object },
-  tags = none,
-  db = DB,
-  type = Type,
-  oid = OID,
-  fields = Fields
-}, #commit_acc{
-  object = ObjectAcc
-} = Acc) when Fields > 0->
-  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields }, none),
-  Acc#commit_acc{
-    object = maps:merge( Object, ObjectAcc )
-  };
-
-% Update storage with tags with new tags
-commit_storage(#s_commit{
-  data = #{ tags := Tags0, fields := Object },
-  tags = { AddTags, DelTags },
-  db = DB,
-  type = Type,
-  oid = OID,
-  fields = Fields
-}, #commit_acc{
-  add_tags = AddTagsAcc,
-  tags = TagsAcc,
-  del_tags = DelTagsAcc,
-  object = ObjectAcc
-} = Acc)->
+  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields, index => Index },  none),
 
   AddTagsHash = ecomet_subscription:build_tag_hash( AddTags ),
-  DelTagsHash = ecomet_subscription:build_tag_hash( DelTags ),
-  NotChanged = ecomet_subscription:bit_subtract(Tags0, DelTagsHash),
 
-  Tags = ecomet_subscription:bit_or(AddTagsHash,  NotChanged),
-
-  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields, tags => Tags }, none),
-  Acc#commit_acc{
-    add_tags = ecomet_subscription:bit_or(AddTagsHash,  AddTagsAcc),
-    tags = ecomet_subscription:bit_or(NotChanged,  TagsAcc),
-    del_tags = ecomet_subscription:bit_or(DelTagsHash,  DelTagsAcc),
-    object = maps:merge( Object, ObjectAcc)
-  };
-
-% Delete storage with tags
-commit_storage(#s_commit{
-  data = #{ tags := Tags, fields := Object},
-  db = DB,
-  type = Type,
-  oid = OID,
-  fields = Fields
-}, #commit_acc{
-  del_tags = DelTagsAcc,
-  object = ObjectAcc
-} = Acc) when map_size( Fields ) =:=0->
-
-  ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none),
-
-  Acc#commit_acc{
-    del_tags = ecomet_subscription:bit_or(Tags,  DelTagsAcc),
-    object = maps:merge( Object, ObjectAcc )
-  };
-
-% Delete storage without tags
-commit_storage(#s_commit{
-  data = #{ fields := Object },
-  db = DB,
-  type = Type,
-  oid = OID,
-  fields = Fields
-}, #commit_acc{
-  object = ObjectAcc
-} = Acc ) when map_size( Fields ) =:=0->
-
-  ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none),
-
-  Acc#commit_acc{
-    object = maps:merge( Object, ObjectAcc )
-  }.
-
-not_changed( #{ fields := Object, tags := Tags }, #commit_acc{
-  tags = TagsAcc,
-  object = ObjectAcc
-} = Acc )->
-  Acc#commit_acc{
-    tags = ecomet_subscription:bit_or(Tags,  TagsAcc),
-    object = maps:merge( Object, ObjectAcc )
-  };
-not_changed( #{ fields := Object }, #commit_acc{
-  object = ObjectAcc
-} = Acc )->
-  Acc#commit_acc{
-    object = maps:merge( Object, ObjectAcc )
+  Acc#full_update_acc{
+    add_tags = ecomet_subscription:bit_or(AddTagsAcc,  AddTagsHash)
   }.
 
 
