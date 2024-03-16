@@ -89,10 +89,10 @@
 %   Storage => { [ ...AddTags ], [...OtherTags] ,[ ...DelTags ] }
 % }
 %---------------------Create-----------------------------------
-build_index(OID, Changes, Indexes) when map_size( Indexes ) =:= 0->
+build_index(OID, Changes, Index0) when map_size( Index0 ) =:= 0->
 
   #acc{
-    index = Indexes,
+    index = Index,
     log = Log
   } = maps:fold(fun(Field, {Value, Index, Storage}, Acc)->
 
@@ -117,17 +117,17 @@ build_index(OID, Changes, Indexes) when map_size( Indexes ) =:= 0->
   end, Log ),
 
 
-  { Indexes, Log };
+  { Index, Log };
 
 %---------------------Update-----------------------------------
-build_index(OID, Changes, Indexes)->
+build_index(OID, Changes, Index0)->
 
   #acc{
-    index = Indexes,
+    index = Index,
     log = Log
   } = maps:fold(fun(Field, {Value, Index, Storage}, Acc)->
 
-    update_index(Acc#index{
+    update_index(#index{
       field = Field,
       type = ?AS_LIST( Index ),
       value = ?AS_LIST( Value ),
@@ -135,7 +135,7 @@ build_index(OID, Changes, Indexes)->
     }, Acc)
 
   end, #acc{
-    index = Indexes,
+    index = Index0,
     log = #{}
   }, Changes ),
 
@@ -149,7 +149,7 @@ build_index(OID, Changes, Indexes)->
 
   end, Log ),
 
-  { Indexes, Log }.
+  { Index, Log }.
 
 
 create_index(#index{
@@ -227,7 +227,7 @@ update_field_index( Values, Type, Field , {IndexAcc, {LogAddAcc, LogOtherAcc, Lo
         LogOther = ordsets:subtract( Tags0, LogDel ),
         { LogAdd ++ LogAddAcc, LogOther ++ LogOtherAcc, LogDel ++ LogDelAcc };
       _->
-        { Tags ++ LogAddAcc,   LogDelAcc}
+        { Tags ++ LogAddAcc, LogOtherAcc,  LogDelAcc}
     end,
   { IndexAcc#{ Type => Values }, LogAcc }.
 
@@ -321,7 +321,7 @@ dt_index(DT)->
 prepare_write(Module, Ref, Updates)->
   ByTags = group_by_tags( Updates ),
   maps:fold(fun(Tag, Patterns, Acc)->
-    update_tag(Tag, Module, Ref, Patterns, Acc)
+    update_tag(Module, Ref, Tag, Patterns, Acc)
   end, {[],[]} , ByTags).
 
 group_by_tags( Updates )->
@@ -446,12 +446,9 @@ cache_loop(#cache{
       Value0 = get_tag_value( Tags, Module, Ref, Tag, Empty ),
       Value = udpate_value( Add, Del, Value0, Empty ),
 
-      Value1 = ecomet_bitmap:bit_or( Value0, Add ),
-      Value = ecomet_bitmap:bit_andnot(Value1, Del),
-
       catch From ! { tag, Tag,  Value, Value0 },
 
-      cache_loop( State#{ tags => Tags#{
+      cache_loop(State#cache{ tags = Tags#{
         { Module, Ref, Tag } => { Value, ecomet_lib:ts()  }
       }});
     _->
@@ -488,52 +485,56 @@ udpate_value( Add, Del, Value0, Empty )->
       ecomet_bitmap:bit_andnot(Value1, Del)
   end.
 
-decrease_cache(#cache{
-  tags = Tags0,
-  dur = Dur0,
-  wait = Wait0
-} = State)->
+decrease_cache(State)->
+  State.
+%%decrease_cache(#cache{
+%%  tags = Tags0,
+%%  dur = Dur0,
+%%  wait = Wait0
+%%} = State)->
+%%
+%%  Dur =
+%%    if
+%%      Dur0 > 2 -> Dur0 bsr 1;
+%%      true -> Dur0
+%%    end,
+%%
+%%  Wait =
+%%    if
+%%      Wait0 > 2 -> Wait0 bsr 1;
+%%      true -> Wait0
+%%    end,
+%%
+%%  Tags = clear_cache( Tags0, ecomet_lib:ts() - Dur ),
+%%
+%%  State#cache{ tags = Tags, dur = Dur, wait = Wait }.
 
-  Dur =
-    if
-      Dur0 > 2 -> Dur0 bsr 1;
-      true -> Dur0
-    end,
+increase_cache(State)->
+  State.
+%%increase_cache(#cache{
+%%  tags = Tags0,
+%%  dur = Dur0,
+%%  wait = Wait0
+%%} = State)->
+%%
+%%  Dur =
+%%    if
+%%      Dur0 < ?CACHE_DUR -> Dur0 bsl 1;
+%%      true -> Dur0
+%%    end,
+%%
+%%  Wait =
+%%    if
+%%      Wait0 < ?CACHE_WAIT -> Wait0 bsl 1;
+%%      true -> Wait0
+%%    end,
+%%
+%%  Tags = clear_cache( Tags0, ecomet_lib:ts() - Dur ),
+%%
+%%  State#cache{ tags = Tags, dur = Dur, wait = Wait }.
 
-  Wait =
-    if
-      Wait0 > 2 -> Wait0 bsr 1;
-      true -> Wait0
-    end,
-
-  Tags = clear_cache( Tags0, ecomet_lib:ts() - Dur ),
-
-  State#cache{ tags = Tags, dur = Dur, wait = Wait }.
-
-increase_cache(#cache{
-  tags = Tags0,
-  dur = Dur0,
-  wait = Wait0
-} = State)->
-
-  Dur =
-    if
-      Dur0 < ?CACHE_DUR -> Dur0 bsl 1;
-      true -> Dur0
-    end,
-
-  Wait =
-    if
-      Wait0 < ?CACHE_WAIT -> Wait0 bsl 1;
-      true -> Wait0
-    end,
-
-  Tags = clear_cache( Tags0, ecomet_lib:ts() - Dur ),
-
-  State#cache{ tags = Tags, dur = Dur, wait = Wait }.
-
-clear_cache( Cache, TS )->
-  maps:filter(fun(_K, {_, TagTS}) -> TS > TagTS end, Cache).
+%%clear_cache( Cache, TS )->
+%%  maps:filter(fun(_K, {_, TagTS}) -> TS > TagTS end, Cache).
 
 %%==============================================================================================
 %%	Search

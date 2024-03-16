@@ -182,8 +182,9 @@ create(#{ <<".pattern">>:=PatternID, <<".folder">>:=FolderID } = Fields, _Params
       % Wrap the operation into a transaction
       ?TRANSACTION(fun()->
         prepare_create(Fields2 ,Object),
-        save(Object)
+        save(Object, on_create)
       end),
+
       Object#object{ pattern = PatternID };
     _->?ERROR(access_denied)
   end.
@@ -199,7 +200,7 @@ delete(#object{oid=OID, pattern = P}=Object) when is_map(P)->
       % Queue the procedure.
       ?TRANSACTION( fun()->
         prepare_delete(Object),
-        save(Object),
+        save(Object, on_delete),
         ok
       end );
     _->
@@ -260,7 +261,7 @@ read_field(#object{oid = OID} = Object, Field)->
         none ->
           lookup_field(Object, Field );
         _->
-          case ecomet_transaction:dict_get( {OID, data} ) of
+          case ecomet_transaction:dict_get( {OID, data}, none ) of
             #{ Field := { Value, _ } } ->
               { ok, Value };
             _->
@@ -322,7 +323,7 @@ read_fields(#object{oid = OID,pattern = P}=Object,Fields,Params) when is_map(Fie
 
   Schema = ?map(P),
 
-  {Result, Storages} =
+  {Result0, Storages} =
     maps:fold(fun(F,_V, {FAcc, SAcc})->
       case ?SERVICE_FIELDS of
         #{F:=Fun}->
@@ -359,6 +360,16 @@ read_fields(#object{oid = OID,pattern = P}=Object,Fields,Params) when is_map(Fie
           end
       end
     end, {#{}, Storages0}, Fields ),
+
+  % Set default values for none fields
+  Result =
+    maps:map(fun(F, V) ->
+      if
+        V =:= none -> maps:get(F, Fields);
+        true -> V
+      end
+    end, Result0 ),
+
 
   if
     IsTransaction ->
@@ -428,7 +439,7 @@ edit(#object{oid = OID, pattern = Map}=Object,InFields,_Params)->
     none ->
       ?TRANSACTION(fun()->
         prepare_edit(Fields, Object),
-        save(Object)
+        save(Object, on_edit)
       end);
     _->
       % If object is under behaviour handlers, just save changes
@@ -593,13 +604,13 @@ load_storage(_IsTransaction = false, OID, Type)->
     _ -> #{}
   end;
 load_storage(_IsTransaction = true, OID, Type)->
-  case ecomet_transaction:dict_get( {OID, handler}, undefined ) of
+  case ecomet_transaction:dict_get( {OID, handler}, none ) of
     on_create ->
       % The object is under create, no storages
       #{};
     _->
-      case ecomet_transaction:dict_get( {OID, storages} ) of
-        #{ Type := #{ fields := Fields } } -> Fields;
+      case ecomet_transaction:dict_get( {OID, storages}, none ) of
+        #{ Type := SData} when is_map( SData ) -> SData;
         _->
           load_storage( false, OID, Type )
       end
@@ -861,8 +872,7 @@ construct(OID)->
 prepare_create(Fields, #object{oid = OID})->
   ecomet_transaction:dict_put( #{
     {OID, data} => maps:map(fun(_F, V)->{ V, none } end, Fields) ,
-    {OID, storages} => #{},
-    {OID, handler} => on_create
+    {OID, storages} => #{}
   }),
   ok.
 
@@ -892,8 +902,10 @@ prepare_edit(Fields, #object{oid = OID, pattern = P})->
                   { maps:remove( F, FAcc ), SAcc };
                 #{ fields := #{ F := V0 } }->
                   { FAcc#{ F => { V, V0 } }, SAcc };
+                _ when V =/= none ->
+                  { FAcc#{ F => { V, none } }, SAcc };
                 _->
-                  { FAcc#{ F => { V, none } }, SAcc }
+                  { FAcc, SAcc }
               end;
             _->
               % load the storage
@@ -903,8 +915,10 @@ prepare_edit(Fields, #object{oid = OID, pattern = P})->
                   { maps:remove( F, FAcc ), SAcc#{ S => SData } };
                 #{ fields := #{ F := V0 } }->
                   { FAcc#{ F => { V, V0 } }, SAcc#{ S => SData } };
+                _ when V =/= none->
+                  { FAcc#{ F => { V, none } }, SAcc#{ S => SData } };
                 _->
-                  { FAcc#{ F => { V, none } }, SAcc#{ S => SData } }
+                  { FAcc, SAcc#{ S => SData } }
               end
           end
       end
@@ -912,8 +926,7 @@ prepare_edit(Fields, #object{oid = OID, pattern = P})->
 
   ecomet_transaction:dict_put( #{
     {OID, data} => ChangesAcc,
-    {OID, storages} => StoragesAcc,
-    {OID, handler} => on_edit
+    {OID, storages} => StoragesAcc
   }).
 
 prepare_delete(#object{oid = OID, pattern = P})->
@@ -923,15 +936,14 @@ prepare_delete(#object{oid = OID, pattern = P})->
 
   ecomet_transaction:dict_put( #{
     {OID, data} => Changes,
-    {OID, storages} => #{},
-    {OID, handler} => on_delete
+    {OID, storages} => #{}
   }).
 
 
 % Save routine. This routine runs when we edit object, that is not under behaviour handlers yet
-save(#object{oid=OID,pattern = P}=Object)->
+save(#object{oid=OID,pattern = P}=Object, Handler)->
 
-  Handler = ecomet_transaction:dict_get( {OID, handler} ),
+  ecomet_transaction:dict_put( #{ {OID, handler} => Handler }),
 
   % Run behaviours
   [ case erlang:function_exported(Behaviour,Handler,1) of
@@ -948,19 +960,16 @@ save(#object{oid=OID,pattern = P}=Object)->
   ok.
 
 % Save object changes to the storage
-commit( Commits )->
-  CommitLog = commit( Commits, _Log = [] ),
-  ecomet_index:commit( CommitLog ).
-
-commit([ {#object{oid = OID} = Object, Handler}|Rest], Acc)->
+commit([ {#object{oid = OID} = Object, Handler}|Rest])->
   Changes = ecomet_transaction:dict_get( {OID, data} ),
   if
     map_size( Changes ) > 0 ->
-      Log = commit_object(Handler, Object, Changes ),
-      commit( Rest, [Log | Acc] )
+      [ commit_object(Handler, Object, Changes ) | commit( Rest ) ];
+    true->
+      commit( Rest )
   end;
-commit([], Acc)->
-  Acc.
+commit([])->
+  [].
 
 changes_by_storage( Changes, Schema )->
   maps:fold(fun(F, {V, _}, {SAcc, IAcc} )->
@@ -1031,7 +1040,6 @@ commit_object(on_create, #object{oid = OID, pattern = P, db = DB}=Object, Change
     object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, #{  }),
     db => DB,
     ts => TS,
-    index_log => Tags,
     tags => AddTags,
     changes => ChangesMap
   };
@@ -1142,7 +1150,6 @@ commit_update_full( #object{ oid = OID, pattern = P, db = DB } = Object, Changes
     object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, ObjectMap),
     db => DB,
     ts => TS,
-    index_log => Tags,
     tags => {AddTags, OtherTags, DelTags},
     changes => ChangesMap
   }.

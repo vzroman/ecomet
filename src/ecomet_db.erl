@@ -399,24 +399,25 @@ dump_batch(Ref, KVs)->
 
 %%	TRANSACTION
 %-------------Commit to a single storage
-commit(Ref, Write, Delete) when map_size( Ref ) =:= 1->
-  {Data, IndexLog} = prepare_write( Write ),
-  Delete = prepare_delete( Delete ),
+commit(Ref, KVs, Keys) when map_size( Ref ) =:= 1->
+  {Data, IndexLog} = prepare_write( KVs ),
+  Delete = prepare_delete( Keys ),
   commit( Ref, Data, Delete, IndexLog );
 
-commit(Ref, Write, Delete)->
-  {Data, IndexLog} = prepare_write( Write ),
-  Delete = prepare_delete( Delete ),
+commit(Ref, KVs, Keys)->
+
+  {Data, IndexLog} = prepare_write( KVs ),
+  Delete = prepare_delete( Keys ),
   case needs_log( Data, Delete ) of
     false -> commit( Ref, Data, Delete, IndexLog );
     true -> two_phase_commit( Ref, Data, Delete, IndexLog )
   end.
 
-commit1(_Ref, Write, Delete)->
-  {Write, Delete}.
+commit1(_Ref, KVs, Keys)->
+  {KVs, Keys}.
 
-commit2(Ref, {Write, Delete})->
-  commit( Ref, Write, Delete ).
+commit2(Ref, {KVs, Keys})->
+  commit( Ref, KVs, Keys ).
 
 rollback( _Ref, _TRef )->
   ok.
@@ -497,24 +498,19 @@ two_phase_commit( Ref, Data, Delete, IndexLog )->
   commit( Ref, Data, Delete, IndexLog ).
 
 prepare_write( Write )->
-  ByTypes =
-    lists:foldl(fun({#key{ type = T, storage = S, key = K }, V}, Acc)->
-      TypeAcc = maps:get(T,Acc,[]),
-      Acc#{ T => [{S,K,V} | TypeAcc]}
-    end,#{}, Write),
-  maps:map(fun(_Type, Recs)->
-    lists:foldl(fun({S,K,V},{DAcc,IAcc})->
-      if
-        S =:= ?INDEX, is_boolean(V)->
-          % The trick.
-          % If the value of the index is a boolean it's an index update as a result of commit
-          % but not real value. This write must be done by ecomet_index module
-          {DAcc,[{K,V}|IAcc]};
-        true->
-          {[{{S,[K]}, V}|DAcc], IAcc}
-      end
-    end,{[],[]}, Recs)
-  end, ByTypes).
+  lists:foldl(fun( { #key{ type = T, storage = S, key = K }, V}, {DAcc, IAcc})->
+    if
+      S =:= ?INDEX, is_boolean( V )->
+        % The trick.
+        % If the value of the index is a boolean it's an index update as a result of commit
+        % but not real value. This write must be done by ecomet_index module
+        TIAcc = maps:get( T, IAcc, [] ),
+        { DAcc, IAcc#{ T => [{K,V}|TIAcc] } };
+      true ->
+        TDAcc = maps:get( T, DAcc, [] ),
+        { DAcc#{ T => [{{S,[K]}, V}|TDAcc] } , IAcc}
+    end
+  end, { #{}, #{} }, Write ).
 
 prepare_delete( Delete )->
   lists:foldl(fun(#key{ type = T, storage = S, key = K }, Acc)->
