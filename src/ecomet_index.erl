@@ -413,6 +413,7 @@ update_index( #update_index{ tag = Tag } = Index )->
 start_link()->
   {ok, spawn_link(fun cache_init/0)}.
 
+% TODO, Implement a pool of index lockers based on tag hash
 cache_init()->
 
   register( ?MODULE, self() ),
