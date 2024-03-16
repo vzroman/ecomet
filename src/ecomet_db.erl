@@ -80,10 +80,7 @@
   read/4, read/5, bulk_read/4, bulk_read/5,
   write/5, write/6, bulk_write/4, bulk_write/5,
   delete/4, delete/5, bulk_delete/4, bulk_delete/5,
-  transaction/1,
-
-  changes/4, bulk_changes/4,
-  on_abort/5, bulk_on_abort/4
+  transaction/1
 ]).
 
 %%=================================================================
@@ -576,21 +573,6 @@ bulk_delete(DB, Storage, Type, Keys, Lock)->
 
 transaction(Fun)->
   zaya:transaction(Fun).
-
-changes(DB, Storage, Type, Key)->
-  K = #key{type = Type, storage = Storage, key = Key},
-  case zaya:changes(DB, [K]) of
-    #{ K:= Changes }-> Changes;
-    _->none
-  end.
-bulk_changes(DB, Storage, Type, Keys)->
-  Result = zaya:changes(DB, [#key{type = Type, storage = Storage, key = K} || K <- Keys]),
-  maps:fold(fun(#key{key = K}, V, Acc)->Acc#{ K => V } end, #{}, Result).
-
-on_abort(DB, Storage, Type, Key, Value)->
-  zaya:on_abort(DB, [{#key{type = Type, storage = Storage, key = Key}, Value}] ).
-bulk_on_abort(DB, Storage, Type, KVs)->
-  zaya:on_abort(DB, [{#key{type = Type, storage = Storage, key = K}, V} || {K,V} <- KVs] ).
 
 %%=================================================================
 %%	SERVICE API

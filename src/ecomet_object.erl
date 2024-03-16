@@ -847,12 +847,8 @@ get_lock(Lock = none,#object{oid=OID,pattern = P})->
   DB = get_db_name(OID),
   Type=ecomet_pattern:get_storage(?map(P)),
   case ecomet_transaction:read(DB, ?DATA, Type, OID, Lock ) of
-    not_found->
-      ecomet_transaction:on_abort(DB,?DATA,Type,OID,delete),
-      none;
-    Storage->
-      ecomet_transaction:on_abort(DB,?DATA,Type,OID,Storage),
-      Storage
+    not_found-> none;
+    Storage->Storage
   end;
 get_lock(Lock,#object{oid=OID,pattern = P})->
   % Define the key
@@ -948,7 +944,7 @@ save(#object{oid=OID,pattern = P}=Object, Handler)->
   % Run behaviours
   [ case erlang:function_exported(Behaviour,Handler,1) of
       true ->
-        Behaviour:Handler(Object);
+        try Behaviour:Handler(Object) catch _:E:S->?LOGERROR("DEBUG: behaviour ~p error ~p : ~p",[ Behaviour, E, S ])  end;
       _ ->
         ?LOGWARNING("invalid behaviour ~p:~p",[Behaviour, Handler])
   end || Behaviour <- ecomet_pattern:get_behaviours(?map(P)) ],
@@ -1367,7 +1363,7 @@ rebuild_index(OID, Fields)->
         case ecomet_transaction:read(DB, ?DATA, Type, OID,  none) of
           Data when is_map(Data)->
             ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
-            ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Data),
+            %ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Data),
             Acc#{ Type => Data };
           _->
             Acc
@@ -1454,28 +1450,47 @@ rebuild_index(OID, Fields)->
     ok
   end).
 
-debug(Folder, Count, Batch)->
+debug(Folder, Count, _Batch)->
   ecomet:dirty_login(<<"system">>),
   P = ?OID(<<"/root/.patterns/test_pattern">>),
   F = ?OID(<<"/root/",Folder/binary>>),
-  spawn(fun()->
-    ecomet:dirty_login(<<"system">>),
-    fill(#{<<".folder">> => F, <<".pattern">> => P}, 0, Batch, Count)
-  end).
 
-fill(Fields,C, Batch, Stop) when C < Stop ->
-  Res = ecomet:transaction(fun()->
-    [ create(maps:merge(Fields,#{
-      <<".name">> => integer_to_binary( I ),
-      <<"f1">> => integer_to_binary(erlang:phash2({I}, 200000000)),
-      <<"f2">> => integer_to_binary(erlang:phash2(I, 200000000))
-    })) ||I <- lists:seq(C,C-1+Batch)],
-    ok
-  end),
-  if (C rem 10000) =:= 0-> ?LOGINFO("DEBUG: write ~p res ~p",[C+Batch,Res]); true-> ignore end,
-  %timer:sleep(10),
-  fill(Fields,C+Batch,Batch,Stop);
-fill(_F,_C,_B,_S)->
+  Fields = #{<<".folder">> => F, <<".pattern">> => P},
+
+  [ begin
+      ?LOGINFO("DEBUG: ~p",[I]),
+      create(maps:merge(Fields,#{
+        <<".name">> => integer_to_binary( I ),
+        <<"f1">> => integer_to_binary(erlang:phash2({I}, 200000000)),
+        <<"f2">> => integer_to_binary(erlang:phash2(I, 200000000))
+      }))
+    end ||I <- lists:seq(1, Count)],
+
   ok.
 
-% ecomet_object:debug(<<"test2">>, 1000000, 1000).
+  %fill(#{<<".folder">> => F, <<".pattern">> => P}, 0, Batch, Count).
+%%  spawn(fun()->
+%%    try
+%%    ecomet:dirty_login(<<"system">>),
+%%    fill(#{<<".folder">> => F, <<".pattern">> => P}, 0, Batch, Count)
+%%    catch
+%%      _:E:S->?LOGERROR("DEBUG: error ~p: ~p",[E,S])
+%%    end
+%%  end).
+
+%%fill(Fields,C, Batch, Stop) when C < Stop ->
+%%  Res = ecomet:transaction(fun()->
+%%    [ create(maps:merge(Fields,#{
+%%      <<".name">> => integer_to_binary( I ),
+%%      <<"f1">> => integer_to_binary(erlang:phash2({I}, 200000000)),
+%%      <<"f2">> => integer_to_binary(erlang:phash2(I, 200000000))
+%%    })) ||I <- lists:seq(C,C-1+Batch)],
+%%    ok
+%%  end),
+%%  if (C rem 10000) =:= 0-> ?LOGINFO("DEBUG: write ~p res ~p",[C+Batch,Res]); true-> ignore end,
+%%  %timer:sleep(10),
+%%  fill(Fields,C+Batch,Batch,Stop);
+%%fill(_F,_C,_B,_S)->
+%%  ok.
+
+% ecomet_object:debug(<<"F1">>, 1000000, 1000).
