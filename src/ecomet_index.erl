@@ -62,9 +62,11 @@
 -endif.
 
 -define(AS_LIST( V ), if is_list(V) -> V; true -> [V] end).
+
 -define(EMPTY, persistent_term:get({ ?MODULE, empty })).
--define(CACHE_TIME, 1000).
--define(CACHE_CLEAR_PERIOD, 100).
+-define(CACHE_DUR, 10000).  % 10 sec
+-define(CACHE_WAIT, 10000). % 10 sec
+-define(CACHE_MAX_SIZE, 10000).
 
 %% ====================================================================
 %% Indexing
@@ -251,12 +253,7 @@ prepare_commit(Tags, OID ,Value)->
   IDHN=ObjectID div ?BITSTRING_LENGTH,
   IDLN=ObjectID rem ?BITSTRING_LENGTH,
 
-  lists:append([[
-    {{Tag,patterns}, false},
-    {{Tag,[idh,PatternID]}, false},
-    {{Tag,[idl,PatternID,IDHN]}, false},
-    {{Tag,[idl,PatternID,IDHN,IDLN]}, Value}
-  ] || Tag <- Tags]).
+  [{{Tag,[idl,PatternID,IDHN,IDLN]}, Value} || Tag <- Tags].
 
 %----------------------------------------
 %   Indexing a value
@@ -323,8 +320,8 @@ dt_index(DT)->
 -record(update_index,{ from, module, ref, tag, add, del }).
 prepare_write(Module, Ref, Updates)->
   ByTags = group_by_tags( Updates ),
-  maps:fold(fun(Tag,Patterns, Acc)->
-    update_tag(Module, Ref, Tag, Patterns, Acc)
+  maps:fold(fun(Tag, Patterns, Acc)->
+    update_tag(Tag, Module, Ref, Patterns, Acc)
   end, {[],[]} , ByTags).
 
 group_by_tags( Updates )->
@@ -337,39 +334,50 @@ group_by_tags( Updates )->
   %     }
   %   }
   % }
-  lists:foldl(fun
-    ({{Tag,[idl,PatternID,IDH,IDL]}, Value},Acc)->
+  lists:foldl(fun({{Tag,[idl,PatternID,IDH,IDL]}, Value},Acc)->
       TAcc = maps:get(Tag,Acc,#{}),
       PAcc = maps:get(PatternID,TAcc,#{}),
       IDHAcc = maps:get(IDH,PAcc,#{}),
-      Acc#{ Tag => TAcc#{ PatternID=> PAcc#{ IDH =>IDHAcc#{ IDL => Value }}}};
-    (_,Acc)->
-      Acc
+      Acc#{ Tag => TAcc#{ PatternID=> PAcc#{ IDH =>IDHAcc#{ IDL => Value }}}}
   end, #{} ,Updates).
 
-update_tag( Module, Ref, Tag, Patterns, Acc )->
-  {Ps, Acc1} =
-    maps:fold(fun(P,IDHs,{PAcc, PAccLog})->
-      {Hs, PAccLog1} = maps:fold(fun(H,Ls,{HAcc, HAccLog})->
+update_tag( Module, Ref, Tag, Patterns, LogAcc )->
+  {Ps, LogAcc1} =
+    %----------pattern loop------------------------
+    maps:fold(fun(P, IDHs, {PAcc, PAccLog})->
+
+      %----------IDHs loop------------------------
+      {Hs, PAccLog1} = maps:fold(fun(H, Ls, {HAcc, HAccLog})->
+        % Update IDL bitmap
         case build_bitmap(Module, Ref, {Tag,[idl,P,H]}, Ls, HAccLog) of
-          {stop, HAccLog1}-> {HAcc, HAccLog1};
-          {Value, HAccLog1} -> {HAcc#{ H => Value }, HAccLog1 }
+          {stop, HAccLog1}->  % The bitmap was just updated, no need to update IDH bitmap
+            { HAcc, HAccLog1 };
+          {Value, HAccLog1} ->  % The bitmap was either created or deleted, we have to update IDH bitmap
+            {HAcc#{ H => Value }, HAccLog1 }
         end
       end,{#{}, PAccLog}, IDHs),
+
+      % Update IDH bitmap that need to be modified
       case build_bitmap(Module, Ref, {Tag,[idh,P]}, Hs, PAccLog1) of
-        {stop, PAccLog2}-> {PAcc, PAccLog2};
-        {Value, PAccLog2} -> {PAcc#{ P => Value }, PAccLog2}
+        {stop, PAccLog2}->  % The bitmap was just updated, no need to update pattern bitmap
+          {PAcc, PAccLog2};
+        {Value, PAccLog2} -> % The bitmap was either created or deleted, we have to update pattern bitmap
+          { PAcc#{ P => Value }, PAccLog2}
       end
-    end,{#{}, Acc }, Patterns),
-  build_bitmap(Module, Ref, {Tag,patterns}, Ps, Acc1).
+
+    end,{#{}, LogAcc }, Patterns),
+
+  % Update pattern bitmap that need to be modified
+  {_, LogAcc2} = build_bitmap(Module, Ref, {Tag,patterns}, Ps, LogAcc1),
+  LogAcc2.
 
 build_bitmap(_Module, _Ref, _Tag, Update, Acc) when map_size(Update) =:= 0->
   {stop, Acc};
-build_bitmap(Module, Ref, Tag, Update, { WriteAcc, DelAcc })->
+build_bitmap(Module, Ref, Tag, Update, { LogAddAcc, LogDelAcc })->
 
   Empty = ?EMPTY,
   {Add, Del}=
-    maps:fold(fun(ID,Value,{AddAcc,DelAcc})->
+    maps:fold(fun(ID,Value,{AddAcc, DelAcc})->
       if
         Value -> { ecomet_bitmap:set_bit(AddAcc,ID), DelAcc };
         true-> { AddAcc, ecomet_bitmap:set_bit(DelAcc,ID) }
@@ -385,13 +393,13 @@ build_bitmap(Module, Ref, Tag, Update, { WriteAcc, DelAcc })->
     del = Del
   }) of
     { Empty, Empty } ->
-      { stop, { WriteAcc, DelAcc } };
+      { stop, { LogAddAcc, LogDelAcc } };
     { Empty, _Value0 }->
-      { false, { WriteAcc, [ {?INDEX,[Tag]} | DelAcc ] }};
+      { false, { LogAddAcc, [ {?INDEX,[Tag]} | LogDelAcc ] }};
     { Value, Empty } ->
-      { true, { [ {{?INDEX,[Tag]}, Value} |  WriteAcc ], DelAcc } };
+      { true, { [ {{?INDEX,[Tag]}, Value} |  LogAddAcc ], LogDelAcc } };
     { Value, _Value0 }->
-      { stop, { [ {{?INDEX,[Tag]}, Value} |  WriteAcc ], DelAcc } }
+      { stop, { [ {{?INDEX,[Tag]}, Value} |  LogAddAcc ], LogDelAcc } }
   end.
 
 update_index( #update_index{ tag = Tag } = Index )->
@@ -400,16 +408,31 @@ update_index( #update_index{ tag = Tag } = Index )->
     { tag, Tag, Value, Value0 }-> { Value, Value0 }
   end.
 
-
+-record(cache,{ tags, dur, wait, empty }).
 start_link()->
   {ok, spawn_link(fun cache_init/0)}.
 
 cache_init()->
-  register( ?MODULE, self() ),
-  persistent_term:put( {?MODULE, empty}, ecomet_bitmap:create() ),
-  cache_loop( #{} ).
 
-cache_loop( IndexCache )->
+  register( ?MODULE, self() ),
+  Empty = ecomet_bitmap:create(),
+  persistent_term:put( {?MODULE, empty}, Empty ),
+
+  cache_loop( #cache{
+    dur = ?CACHE_DUR,
+    wait = ?CACHE_WAIT,
+    tags = #{},
+    empty = Empty
+  }).
+
+cache_loop( #cache{ tags = Tags } = State ) when map_size( Tags ) > ?CACHE_MAX_SIZE ->
+  State1 = decrease_cache( State ),
+  cache_loop( State1 );
+cache_loop(#cache{
+  tags = Tags,
+  wait = Wait,
+  empty = Empty
+} = State )->
   receive
     #update_index{
       from = From,
@@ -420,38 +443,97 @@ cache_loop( IndexCache )->
       del = Del
     } ->
 
-      Value0 = get_tag_value( IndexCache, Module, Ref, Tag ),
+      Value0 = get_tag_value( Tags, Module, Ref, Tag, Empty ),
+      Value = udpate_value( Add, Del, Value0, Empty ),
+
       Value1 = ecomet_bitmap:bit_or( Value0, Add ),
       Value = ecomet_bitmap:bit_andnot(Value1, Del),
 
       catch From ! { tag, Tag,  Value, Value0 },
 
-      cache_loop(IndexCache#{
-        { Module, Ref, Tag } => { Value, ecomet_lib:ts() + ?CACHE_TIME }
-      });
+      cache_loop( State#{ tags => Tags#{
+        { Module, Ref, Tag } => { Value, ecomet_lib:ts()  }
+      }});
     _->
-      cache_loop( IndexCache )
+      cache_loop( State )
   after
-    ?CACHE_CLEAR_PERIOD ->
-      cache_loop( clear_cache( IndexCache ) )
+    Wait ->
+      State1 = increase_cache( State ),
+      cache_loop( State1 )
   end.
 
-get_tag_value( Cache, Module, Ref, Tag )->
+get_tag_value( Cache, Module, Ref, Tag, Empty )->
   case Cache of
     #{ { Module, Ref, Tag } := { Value, _TS } } ->
       Value;
     _->
       case Module:read(Ref,[Tag]) of
-        []-> ?EMPTY;
+        []-> Empty;
         [{_,Value}]-> Value
       end
   end.
 
-clear_cache( Cache )->
-  TS = ecomet_lib:ts(),
+udpate_value( Add, Del, Value0, Empty )->
+  if
+    Value0 =:= Empty, Del =:= Empty -> Add;
+    Value0 =:= Empty, Add =:= Empty -> Empty;
+    Value0 =:= Empty->
+      ecomet_bitmap:bit_andnot(Add, Del);
+    Del =:= Empty ->
+      ecomet_bitmap:bit_or( Value0, Add );
+    Add =:= Empty->
+      ecomet_bitmap:bit_andnot(Value0, Del);
+    true ->
+      Value1 = ecomet_bitmap:bit_or( Value0, Add ),
+      ecomet_bitmap:bit_andnot(Value1, Del)
+  end.
+
+decrease_cache(#cache{
+  tags = Tags0,
+  dur = Dur0,
+  wait = Wait0
+} = State)->
+
+  Dur =
+    if
+      Dur0 > 2 -> Dur0 bsr 1;
+      true -> Dur0
+    end,
+
+  Wait =
+    if
+      Wait0 > 2 -> Wait0 bsr 1;
+      true -> Wait0
+    end,
+
+  Tags = clear_cache( Tags0, ecomet_lib:ts() - Dur ),
+
+  State#cache{ tags = Tags, dur = Dur, wait = Wait }.
+
+increase_cache(#cache{
+  tags = Tags0,
+  dur = Dur0,
+  wait = Wait0
+} = State)->
+
+  Dur =
+    if
+      Dur0 < ?CACHE_DUR -> Dur0 bsl 1;
+      true -> Dur0
+    end,
+
+  Wait =
+    if
+      Wait0 < ?CACHE_WAIT -> Wait0 bsl 1;
+      true -> Wait0
+    end,
+
+  Tags = clear_cache( Tags0, ecomet_lib:ts() - Dur ),
+
+  State#cache{ tags = Tags, dur = Dur, wait = Wait }.
+
+clear_cache( Cache, TS )->
   maps:filter(fun(_K, {_, TagTS}) -> TS > TagTS end, Cache).
-
-
 
 %%==============================================================================================
 %%	Search

@@ -348,7 +348,9 @@ external_loop( Owner )->
 %%-----------------------------------------------------------------------
 %% Internal helpers
 %%-----------------------------------------------------------------------
-tcommit( #state{ log = Log, on_commit = OnCommit, owner = Owner })->
-  catch ecomet_router:on_commit( [ L#{ self => Owner } || L <- Log ] ),
-  [ catch F() || F <- lists:reverse(OnCommit) ].
+tcommit( _State )->
+  ok.
+%%tcommit( #state{ log = Log, on_commit = OnCommit, owner = Owner })->
+%%  catch ecomet_router:on_commit( [ L#{ self => Owner } || L <- Log ] ),
+%%  [ catch F() || F <- lists:reverse(OnCommit) ].
 

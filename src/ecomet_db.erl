@@ -264,43 +264,26 @@ read(_Ref,[])->
   [].
 
 write(Ref, KVs)->
-  ByTypes =
-    lists:foldl(fun({#key{ type = T, storage = S, key = K }, V}, Acc)->
-      TypeAcc = maps:get(T,Acc,[]),
-      Acc#{ T => [{S,K,V} | TypeAcc]}
-    end,#{}, KVs),
-  maps:map(fun(Type, Recs)->
-    { Module, TRef } = maps:get(Type, Ref),
-    {Data, Indexes}=
-      lists:foldl(fun({S,K,V},{DAcc,IAcc})->
-        if
-          S =:= ?INDEX, is_boolean(V)->
-            % The trick.
-            % If the value of the index is a boolean it's an index update as a result of commit
-            % but not real value. This write must be done by ecomet_index module
-            {DAcc,[{K,V}|IAcc]};
-          true->
-            {[{{S,[K]}, V}|DAcc], IAcc}
-        end
-      end,{[],[]}, Recs),
-    % Write data
-    ok = Module:write( TRef, Data ),
-    % Update indexes
-    ok = ecomet_index:write(Module, TRef, Indexes )
-  end, ByTypes),
-  ok.
+
+  % Not transactional writes only used by zaya copy engine
+  % there is no need in to cross module two phase commit
+  % because is something goes wrong the copy will be destroyed and restarted
+
+  {Data, IndexLog} = prepare_write( KVs ),
+
+  commit( Ref, Data, _Delete = #{}, IndexLog ).
+
 
 delete(Ref, Keys)->
-  ByTypes =
-    lists:foldl(fun(#key{ type = T, storage = S, key = K }, Acc)->
-      TypeAcc = maps:get(T,Acc,[]),
-      Acc#{ T => [{S,[K]} | TypeAcc]}
-    end,#{}, Keys),
-  maps:map(fun(Type, TKeys)->
-    { Module, TRef } = maps:get(Type, Ref),
-    ok = Module:delete( TRef, TKeys )
-  end, ByTypes),
-  ok.
+
+  % Not transactional deletes only used by zaya copy engine
+  % there is no need in to cross module two phase commit
+  % because is something goes wrong the copy will be destroyed and restarted
+
+  Delete = prepare_delete( Keys ),
+
+  commit( Ref, _Data = #{}, Delete, _IndexLog = #{} ).
+
 
 %%	ITERATOR
 first( Ref )->
@@ -419,14 +402,14 @@ dump_batch(Ref, KVs)->
 commit(Ref, Write, Delete) when map_size( Ref ) =:= 1->
   {Data, IndexLog} = prepare_write( Write ),
   Delete = prepare_delete( Delete ),
-  light_commit( Ref, Data, Delete, IndexLog );
+  commit( Ref, Data, Delete, IndexLog );
 
 commit(Ref, Write, Delete)->
   {Data, IndexLog} = prepare_write( Write ),
   Delete = prepare_delete( Delete ),
-  case needs_log( Data, Delete, IndexLog ) of
-    false -> light_commit( Ref, Data, Delete, IndexLog );
-    true -> strict_commit( Ref, Data, Delete, IndexLog )
+  case needs_log( Data, Delete ) of
+    false -> commit( Ref, Data, Delete, IndexLog );
+    true -> two_phase_commit( Ref, Data, Delete, IndexLog )
   end.
 
 commit1(_Ref, Write, Delete)->
@@ -438,23 +421,80 @@ commit2(Ref, {Write, Delete})->
 rollback( _Ref, _TRef )->
   ok.
 
-light_commit(Ref, Data, Delete, IndexLog )->
+commit(Ref, Data, Delete, IndexLog)->
 
-  [ case Ref of
-      #{ T := { Module, TRef } }->
-        TData = maps:get( T, Data, [] ),
-        TDelete = maps:get( T, Delete, [] ),
-        TIndexLog = maps:get( T, IndexLog, [] ),
-        { TIndexWrite, TIndexDel } = ecomet_index:prepare_write(Module, Ref, TIndexLog ),
-        Module:commit( TRef, TData ++ TIndexWrite,  TDelete ++ TIndexDel);
-      _->
-        ignore
-    end || T <- [ ram, disc, ramdisc ]],
+  Storages = get_commit_storages( Data, Delete ),
+  case Storages -- maps:keys( Ref ) of
+    [] -> ok;
+    Invalid ->
+      %% ATTENTION! If the user tries to save object with storage type
+      %% that is not in the DB then it will crash here
+      ?LOGERROR("attempt to save to not configured storage types: ~p",[ Invalid ]),
+      throw({ invalid_storage_type, Invalid })
+  end,
+
+  % Order commit the heavier types go first
+  CommitOrder = [ ramdisc, disc, ram ],
+  Ordered = CommitOrder -- ( CommitOrder -- Storages ),
+
+  [ begin
+      { Module, TRef } = maps:get(T, Ref),
+      TData = maps:get( T, Data, none ),
+      TDelete = maps:get( T, Delete, none ),
+      TIndexLog = maps:get( T, IndexLog, none ),
+      commit( TRef, Module, TData, TDelete, TIndexLog )
+    end || T <- Ordered],
 
   ok.
 
-strict_commit( Ref, Data, Delete, IndexLog )->
-  todo.
+%%-----------------Only write commit (no index, no delete)----------------------------------
+commit(Ref, Module, Data, _Delete = none, _IndexLog = none) ->
+  Module:write( Ref, Data);
+
+%%-----------------Only delete commit (no index, no write)----------------------------------
+commit(Ref, Module, _Data = none, Delete, _IndexLog = none) ->
+  Module:delete( Ref, Delete);
+
+%%-----------------Write and delete with no index----------------------------------
+commit(Ref, Module, Data , Delete , _IndexLog = none) ->
+  Module:commit( Ref, Data, Delete);
+
+%%-----------------Write commit with index (no delete)----------------------------------
+commit(Ref, Module, Data, _Delete = none, IndexLog) ->
+
+  case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
+    { IndexWrite, IndexDel } when length( IndexDel ) > 0 ->
+      Module:commit( Ref, Data ++ IndexWrite, IndexDel);
+    { IndexWrite, _ }->
+      Module:write( Ref, Data ++ IndexWrite)
+  end;
+
+%%-----------------Delete commit with index (no write)----------------------------------
+commit(Ref, Module, _Data = none, Delete, IndexLog) ->
+
+  case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
+    { IndexWrite, IndexDel } when length( IndexWrite ) > 0 ->
+      Module:commit( Ref, IndexWrite, Delete ++ IndexDel);
+    { _IndexWrite, IndexDel }->
+      Module:delete( Ref, Delete ++ IndexDel)
+  end;
+
+commit(Ref, Module, Data, Delete, IndexLog)->
+
+  { IndexWrite, IndexDel } = ecomet_index:prepare_write(Module, Ref, IndexLog ),
+
+  if
+    length( IndexDel ) =:= 0->
+      Module:commit( Ref, Data ++ IndexWrite, Delete);
+    length( IndexWrite ) =:= 0->
+      Module:commit( Ref, Data, Delete ++ IndexDel);
+    true ->
+      Module:commit( Ref, Data ++ IndexWrite, Delete ++ IndexDel)
+  end.
+
+two_phase_commit( Ref, Data, Delete, IndexLog )->
+  % TODO
+  commit( Ref, Data, Delete, IndexLog ).
 
 prepare_write( Write )->
   ByTypes =
@@ -482,9 +522,12 @@ prepare_delete( Delete )->
     Acc#{ T => [{S,[K]} | TypeAcc]}
   end,#{}, Delete).
 
-needs_log( Data, Delete, IndexLog )->
-  Storages = lists:usort( maps:keys( Data ) ++ maps:keys( Delete ) ++ maps:keys( IndexLog ) ),
+needs_log( Data, Delete )->
+  Storages = get_commit_storages( Data, Delete ),
   lists:member( disc, Storages ) andalso lists:member( ramdisc, Storages ).
+
+get_commit_storages( Data, Delete )->
+  lists:usort( maps:keys( Data ) ++ maps:keys( Delete )).
 
 %%=================================================================
 %%	INFO
