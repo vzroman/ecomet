@@ -443,6 +443,8 @@ commit(Ref, Data, Delete, IndexLog)->
       commit( TRef, Module, TData, TDelete, TIndexLog )
     end || T <- Ordered],
 
+  ecomet_index ! { unlock , self() },
+
   ok.
 
 %%-----------------Only write commit (no index, no delete)----------------------------------

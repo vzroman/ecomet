@@ -300,14 +300,7 @@ read_field(Object,Field,Params) when is_map(Params)->
     Other->Other
   end.
 
-read_fields(Object,Fields)->
-  read_fields(Object,Fields,#{}).
-read_fields(Object,Fields,Params) when is_list(Fields)->
-  FieldsMap = maps:from_list([ {Field,none} || Field <- Fields ]),
-  read_fields(Object,FieldsMap,Params);
-read_fields(Object,Fields,Params) when is_list(Params)->
-  read_fields(Object,Fields,maps:from_list(Params));
-read_fields(#object{oid = OID,pattern = P}=Object,Fields,Params) when is_map(Fields),is_map(Params)->
+read_fields( #object{ oid = OID, pattern = P } = Object, Fields) when is_list( Fields )->
 
   IsTransaction = ecomet:is_transaction(),
 
@@ -323,8 +316,8 @@ read_fields(#object{oid = OID,pattern = P}=Object,Fields,Params) when is_map(Fie
 
   Schema = ?map(P),
 
-  {Result0, Storages} =
-    maps:fold(fun(F,_V, {FAcc, SAcc})->
+  {Result, Storages} =
+    lists:foldl(fun(F, {FAcc, SAcc})->
       case ?SERVICE_FIELDS of
         #{F:=Fun}->
           % The field is a virtual field
@@ -361,16 +354,6 @@ read_fields(#object{oid = OID,pattern = P}=Object,Fields,Params) when is_map(Fie
       end
     end, {#{}, Storages0}, Fields ),
 
-  % Set default values for none fields
-  Result =
-    maps:map(fun(F, V) ->
-      if
-        V =:= none -> maps:get(F, Fields);
-        true -> V
-      end
-    end, Result0 ),
-
-
   if
     IsTransaction ->
       case ecomet_transaction:dict_get( {OID, data}, none ) of
@@ -384,24 +367,66 @@ read_fields(#object{oid = OID,pattern = P}=Object,Fields,Params) when is_map(Fie
       ignore
   end,
 
+  Result;
+
+read_fields(Object, Fields) when is_map( Fields )->
+
+  Result = read_fields( Object, maps:keys( Fields ) ),
+
+  % Set default values for none fields
+  maps:map(fun(F, V) ->
+    if
+      V =:= none -> maps:get(F, Fields);
+      true -> V
+    end
+  end, Result ).
+
+read_fields(Object,Fields,Params) when is_list(Params)->
+  read_fields(Object,Fields,maps:from_list(Params));
+read_fields(#object{ pattern = P} = Object, Fields, Params) when is_list(Fields)->
+
+  Result = read_fields( Object, Fields ),
 
   case Params of
-    #{format:=Format}->
-      maps:map(fun(F,V) ->
-        case Schema of
-          #{ F := #{ type:= list, subtype := Type } }->
-            Format({list,Type},V);
-          #{ F := #{ type:= Type } }->
-            Format(Type, V);
-          _ when V =:= undefined_field->
-            Format( string, V );
-          _->
-            V % system fields
-        end
-      end, Result );
+    #{format:=Formatter}->
+      format_read_result( Formatter, ?map(P), Result );
+    _->
+      Result
+  end;
+
+read_fields(#object{pattern = P}=Object, Fields, Params) when is_map(Fields)->
+
+  Result0 = read_fields( Object, maps:keys( Fields ) ),
+
+  % Set default values for none fields
+  Result =
+    maps:map(fun(F, V) ->
+      if
+        V =:= none -> maps:get(F, Fields);
+        true -> V
+      end
+    end, Result0 ),
+
+  case Params of
+    #{format:=Formatter}->
+      format_read_result( Formatter, ?map(P), Result );
     _->
       Result
   end.
+
+format_read_result( Formatter, Schema, Fields )->
+  maps:map(fun(F,V) ->
+    case Schema of
+      #{ F := #{ type:= list, subtype := Type } }->
+        Formatter({list,Type},V);
+      #{ F := #{ type:= Type } }->
+        Formatter(Type, V);
+      _ when V =:= undefined_field->
+        Formatter( string, V );
+      _->
+        V % system fields
+    end
+  end, Fields ).
 
 % Read all object fields
 read_all(Object)->
@@ -1450,47 +1475,51 @@ rebuild_index(OID, Fields)->
     ok
   end).
 
-debug(Folder, Count, _Batch)->
+debug(Folder, Count, Batch)->
   ecomet:dirty_login(<<"system">>),
   P = ?OID(<<"/root/.patterns/test_pattern">>),
   F = ?OID(<<"/root/",Folder/binary>>),
 
-  Fields = #{<<".folder">> => F, <<".pattern">> => P},
-
-  [ begin
-      ?LOGINFO("DEBUG: ~p",[I]),
-      create(maps:merge(Fields,#{
-        <<".name">> => integer_to_binary( I ),
-        <<"f1">> => integer_to_binary(erlang:phash2({I}, 200000000)),
-        <<"f2">> => integer_to_binary(erlang:phash2(I, 200000000))
-      }))
-    end ||I <- lists:seq(1, Count)],
-
-  ok.
-
-  %fill(#{<<".folder">> => F, <<".pattern">> => P}, 0, Batch, Count).
-%%  spawn(fun()->
-%%    try
-%%    ecomet:dirty_login(<<"system">>),
-%%    fill(#{<<".folder">> => F, <<".pattern">> => P}, 0, Batch, Count)
-%%    catch
-%%      _:E:S->?LOGERROR("DEBUG: error ~p: ~p",[E,S])
-%%    end
-%%  end).
-
-%%fill(Fields,C, Batch, Stop) when C < Stop ->
-%%  Res = ecomet:transaction(fun()->
-%%    [ create(maps:merge(Fields,#{
-%%      <<".name">> => integer_to_binary( I ),
-%%      <<"f1">> => integer_to_binary(erlang:phash2({I}, 200000000)),
-%%      <<"f2">> => integer_to_binary(erlang:phash2(I, 200000000))
-%%    })) ||I <- lists:seq(C,C-1+Batch)],
-%%    ok
-%%  end),
-%%  if (C rem 10000) =:= 0-> ?LOGINFO("DEBUG: write ~p res ~p",[C+Batch,Res]); true-> ignore end,
-%%  %timer:sleep(10),
-%%  fill(Fields,C+Batch,Batch,Stop);
-%%fill(_F,_C,_B,_S)->
+%%  Fields = #{<<".folder">> => F, <<".pattern">> => P},
+%%
+%%  ?LOGINFO("DEBUG: start"),
+%%  [ begin
+%%      create(maps:merge(Fields,#{
+%%        <<".name">> => integer_to_binary( I ),
+%%        <<"f1">> => integer_to_binary(erlang:phash2({I}, 200000000)),
+%%        <<"f2">> => integer_to_binary(erlang:phash2(I, 200000000))
+%%      }))
+%%    end ||I <- lists:seq(1, Count)],
+%%
+%%  ?LOGINFO("DEBUG: end"),
+%%
 %%  ok.
 
-% ecomet_object:debug(<<"F1">>, 1000000, 1000).
+  %fill(#{<<".folder">> => F, <<".pattern">> => P}, 0, Batch, Count).
+  spawn(fun()->
+    try
+    ecomet:dirty_login(<<"system">>),
+    fill(#{<<".folder">> => F, <<".pattern">> => P}, 0, Batch, Count)
+    catch
+      _:E:S->?LOGERROR("DEBUG: error ~p: ~p",[E,S])
+    end
+  end).
+
+fill(Fields,C, Batch, Stop) when C < Stop ->
+  Res = ecomet:transaction(fun()->
+    [ create(maps:merge(Fields,#{
+      <<".name">> => integer_to_binary( I ),
+      <<"f1">> => integer_to_binary(erlang:phash2({I}, 200000000)),
+      <<"f2">> => integer_to_binary(erlang:phash2(I, 200000000))
+    })) ||I <- lists:seq(C,C-1+Batch)],
+    ok
+  end),
+  if (C rem 10000) =:= 0-> ?LOGINFO("DEBUG: write ~p res ~p",[C+Batch,Res]); true-> ignore end,
+  %timer:sleep(10),
+  fill(Fields,C+Batch,Batch,Stop);
+fill(_F,_C,_B,_S)->
+  ok.
+
+% ecomet_object:debug(<<"F1">>, 1000000, 10).
+% ecomet_object:debug(<<"F2">>, 1000000, 10).
+% ecomet_object:debug(<<"F3">>, 1000000, 10).

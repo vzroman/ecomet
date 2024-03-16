@@ -26,7 +26,7 @@
 start(_StartType, _StartArgs) ->
 
 %%    debugger:start(),
-%%    timer:sleep( 20000 ),
+%%    timer:sleep( 30000 ),
 
     ecomet_sup:start_link().
 
