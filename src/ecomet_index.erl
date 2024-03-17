@@ -308,41 +308,105 @@ dt_index(DT)->
 %               Write changes to the real database
 %----------------------------------------------------------------------
 prepare_write(Module, Ref, Updates)->
-  lists:foldl(fun({{Tag,[idl,P,H,L]}, Bit}, Acc)->
-    update_tag({Tag,[idl,P,H]}, L, Bit , Module, Ref, Acc )
-  end,{[],[]}, Updates ).
+  ByTags = group_by_tags( Updates ),
+  maps:fold(fun(Tag, Patterns, Acc)->
+    try update_tag(Module, Ref, Tag, Patterns, Acc)
+    catch
+      _:E:S->?LOGERROR("DEBUG: index ~p : ~p",[E,S]), throw(E)
+    end
+  end, {[],[]} , ByTags).
 
-update_tag(Tag, BitID, Bit, Module, Ref, {LogAddAcc, LogDelAcc})->
+group_by_tags( Updates )->
+  % #{
+  %   Tag => #{
+  %     Pattern => #{
+  %       IDH => #{
+  %         IDL => true | false
+  %       }
+  %     }
+  %   }
+  % }
+  lists:foldl(fun({{Tag,[idl,PatternID,IDH,IDL]}, Value},Acc)->
+      TAcc = maps:get(Tag,Acc,#{}),
+      PAcc = maps:get(PatternID,TAcc,#{}),
+      IDHAcc = maps:get(IDH,PAcc,#{}),
+      Acc#{ Tag => TAcc#{ PatternID=> PAcc#{ IDH =>IDHAcc#{ IDL => Value }}}}
+  end, #{} ,Updates).
+
+update_tag( Module, Ref, Tag, Patterns, LogAcc )->
+  {Ps, LogAcc1} =
+    %----------pattern loop------------------------
+    maps:fold(fun(P, IDHs, {PAcc, PAccLog})->
+
+      %----------IDHs loop------------------------
+      {Hs, PAccLog1} = maps:fold(fun(H, Ls, {HAcc, HAccLog})->
+        % Update IDL bitmap
+        case build_bitmap(Module, Ref, {Tag,[idl,P,H]}, Ls, HAccLog) of
+          {stop, HAccLog1}->  % The bitmap was just updated, no need to update IDH bitmap
+            { HAcc, HAccLog1 };
+          {Value, HAccLog1} ->  % The bitmap was either created or deleted, we have to update IDH bitmap
+            {HAcc#{ H => Value }, HAccLog1 }
+        end
+      end,{#{}, PAccLog}, IDHs),
+
+      % Update IDH bitmap that need to be modified
+      case build_bitmap(Module, Ref, {Tag,[idh,P]}, Hs, PAccLog1) of
+        {stop, PAccLog2}->  % The bitmap was just updated, no need to update pattern bitmap
+          {PAcc, PAccLog2};
+        {Value, PAccLog2} -> % The bitmap was either created or deleted, we have to update pattern bitmap
+          { PAcc#{ P => Value }, PAccLog2}
+      end
+
+    end,{#{}, LogAcc }, Patterns),
+
+  % Update pattern bitmap that need to be modified
+  {_, LogAcc2} = build_bitmap(Module, Ref, {Tag,patterns}, Ps, LogAcc1),
+  LogAcc2.
+
+build_bitmap(_Module, _Ref, _Tag, Update, Acc) when map_size(Update) =:= 0->
+  {stop, Acc};
+build_bitmap(Module, Ref, Tag, Update, { LogAddAcc, LogDelAcc })->
+  {Add, Del}=
+    maps:fold(fun(ID, BitValue, {AddAcc, DelAcc})->
+      if
+        BitValue -> { ecomet_bitmap:set_bit(AddAcc,ID), DelAcc };
+        true-> { AddAcc, ecomet_bitmap:set_bit(DelAcc,ID) }
+      end
+    end,{?EMPTY,?EMPTY}, Update),
+
   Value0 =
     case Module:read(Ref,[{?INDEX,[ Tag ]}]) of
       []-> ?EMPTY;
       [{_,V}]-> V
     end,
 
-  Value1 =
-    if
-      Bit -> ecomet_bitmap:set_bit(Value0, BitID);
-      true -> ecomet_bitmap:reset_bit( Value0, BitID )
-    end,
+  Value = udpate_value( Add, Del, Value0 ),
 
-  case { Value1, Value0 } of
+  case {Value, Value0} of
     { ?EMPTY, ?EMPTY } ->
-      { LogAddAcc, LogDelAcc };
+      { stop, { LogAddAcc, LogDelAcc } };
     { ?EMPTY, _Value0 }->
-      level_up( Tag, false, Module, Ref, {LogAddAcc, [{?INDEX,[Tag]} | LogDelAcc ]} );
+      { false, { LogAddAcc, [ {?INDEX,[Tag]} | LogDelAcc ] }};
     { Value, ?EMPTY } ->
-      level_up( Tag, true, Module, Ref, { [ {{?INDEX,[Tag]}, Value} |  LogAddAcc ], LogDelAcc } );
+      { true, { [ {{?INDEX,[Tag]}, Value} |  LogAddAcc ], LogDelAcc } };
     { Value, _Value0 }->
-      { [ {{?INDEX,[Tag]}, Value} |  LogAddAcc ], LogDelAcc }
+      { stop, { [ {{?INDEX,[Tag]}, Value} |  LogAddAcc ], LogDelAcc } }
   end.
 
-level_up({Tag,[idl,P,H]}, Bit, Module, Ref, Acc )->
-  update_tag({Tag,[idh,P]}, H, Bit, Module, Ref, Acc);
-level_up({Tag,[idh,P]}, Bit, Module, Ref, Acc )->
-  update_tag({Tag,patterns}, P, Bit, Module, Ref, Acc);
-level_up(_, _Bit, _Module, _Ref, Acc )->
-  Acc.
-
+udpate_value( Add, Del, Value )->
+  if
+    Value =:= ?EMPTY, Del =:= ?EMPTY -> Add;
+    Value =:= ?EMPTY, Add =:= ?EMPTY -> ?EMPTY;
+    Value =:= ?EMPTY->
+      ecomet_bitmap:bit_andnot(Add, Del);
+    Del =:= ?EMPTY ->
+      ecomet_bitmap:bit_or( Value, Add );
+    Add =:= ?EMPTY->
+      ecomet_bitmap:bit_andnot(Value, Del);
+    true ->
+      Value1 = ecomet_bitmap:bit_or( Value, Add ),
+      ecomet_bitmap:bit_andnot(Value1, Del)
+  end.
 
 %%==============================================================================================
 %%	Search
