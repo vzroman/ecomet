@@ -18,7 +18,7 @@
 -module(ecomet_router).
 
 -include("ecomet.hrl").
-
+-include("ecomet_subscription.hrl").
 %%=================================================================
 %%	SERVICE API
 %%=================================================================
@@ -39,7 +39,7 @@ on_init( PoolSize )->
 
   spawn_link(fun ready_nodes/0),
 
-  [ persistent_term:put({?MODULE, I }, spawn_link(fun()->worker_loop( ecomet_subscription:new_bit_set() ) end)) || I <- lists:seq(0, PoolSize-1) ],
+  [ persistent_term:put({?MODULE, I }, spawn_link(fun()->worker_loop( ?EMPTY_SET ) end)) || I <- lists:seq(0, PoolSize-1) ],
 
   % Register the ServiceID for the subscriptions
   persistent_term:put({?MODULE,pool_size}, PoolSize).
@@ -55,10 +55,10 @@ worker_loop( Global )->
       worker_loop( Global );
     {{global_set, Bit}, Ref, ReplyTo}->
       catch ReplyTo ! {Ref, self(), ok},
-      worker_loop( ecomet_subscription:set_bit( Global, Bit ) );
+      worker_loop( ?SET_ADD( Bit, Global ) );
     {{global_reset, Bit}, Ref, ReplyTo}->
       catch ReplyTo ! {Ref, self(), ok},
-      worker_loop( ecomet_subscription:reset_bit( Global, Bit ) );
+      worker_loop( ?SET_DEL( Bit, Global ) );
     Unexpected->
       ?LOGWARNING("unexpected message ~p", [Unexpected]),
       worker_loop( Global )

@@ -19,6 +19,7 @@
 
 -include("ecomet.hrl").
 -include("ecomet_schema.hrl").
+-include("ecomet_subscription.hrl").
 
 -callback on_create(Object::tuple())->term().
 -callback on_edit(Object::tuple())->term().
@@ -1038,7 +1039,6 @@ commit_object(on_create, #object{oid = OID, pattern = P, db = DB}=Object, Change
   {Index, Tags} = ecomet_index:build_index(OID, IndexedFields, #{}),
 
   %-----Commit changes---------------------------
-  EmptySet = ecomet_subscription:new_bit_set(),
   AddTags =  maps:fold(fun(Type, Fields, Acc)->
     commit_storage_create(#s_data{
       oid = OID,
@@ -1048,7 +1048,7 @@ commit_object(on_create, #object{oid = OID, pattern = P, db = DB}=Object, Change
       index = maps:get( Type, Index, none),
       tags = maps:get( Type, Tags, none)
     }, Acc )
-  end, EmptySet, ByStorageTypes),
+  end, ?EMPTY_SET, ByStorageTypes),
 
   ChangesMap = maps:map(fun(_F,{V,_}) -> V end, Changes),
 
@@ -1058,6 +1058,7 @@ commit_object(on_create, #object{oid = OID, pattern = P, db = DB}=Object, Change
 
   #{
     action => create,
+    oid => OID,
     object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, #{  }),
     db => DB,
     ts => TS,
@@ -1103,7 +1104,7 @@ commit_object(on_delete, #object{oid = OID, pattern = P, db = DB}, _Changes )->
   }.
 
 %-------------------------Light Edit commit (no tags changed)---------------------------------------------
-commit_update_light(#object{oid = OID, db = DB}, Changes, ByStorageTypes, Storages )->
+commit_update_light(#object{oid = OID, db = DB} = Object, Changes, ByStorageTypes, Storages )->
 
   %-----Commit changes---------------------------
   maps:foreach(fun(Type, Fields)->
@@ -1116,10 +1117,13 @@ commit_update_light(#object{oid = OID, db = DB}, Changes, ByStorageTypes, Storag
     } )
   end, ByStorageTypes),
 
+  ObjectMap = maps:map(fun(_F,{_,V}) -> V end, Changes ),
+
   % This is to trigger only sticky subscriptions
   #{
-    action => update,
+    action => light_update,
     oid => OID,
+    object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, ObjectMap),
     changes => maps:map(fun(_F,{V,_}) -> V end, Changes )
   }.
 %-------------------------Full Edit commit (tags changed)---------------------------------------------
@@ -1137,7 +1141,6 @@ commit_update_full( #object{ oid = OID, pattern = P, db = DB } = Object, Changes
   { Index, Tags } = ecomet_index:build_index(OID, IndexedFields, Index0 ),
 
   %-----Commit changes---------------------------
-  EmptySet = ecomet_subscription:new_bit_set(),
   CommitAcc =  maps:fold(fun(Type, Fields, Acc)->
     commit_storage_update(#s_data{
       oid = OID,
@@ -1149,9 +1152,9 @@ commit_update_full( #object{ oid = OID, pattern = P, db = DB } = Object, Changes
       tags = maps:get( Type, Tags, none)
     }, Acc )
   end, #full_update_acc{
-    add_tags = EmptySet,
-    other_tags = EmptySet,
-    del_tags = EmptySet,
+    add_tags = ?EMPTY_SET,
+    other_tags = ?EMPTY_SET,
+    del_tags = ?EMPTY_SET,
     object = #{}
   }, ByStorageTypes),
 
@@ -1168,6 +1171,7 @@ commit_update_full( #object{ oid = OID, pattern = P, db = DB } = Object, Changes
 
   #{
     action => update,
+    oid => OID,
     object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, ObjectMap),
     db => DB,
     ts => TS,
@@ -1200,8 +1204,7 @@ commit_storage_create(#s_data{
 
   ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields, index => Index },  none),
 
-  TagsHash = ecomet_subscription:build_tag_hash( Tags ),
-  ecomet_subscription:bit_or(Acc,  TagsHash).
+  ?SET_OR( Acc, ?NEW_SET( Tags ) ).
 
 %=============================Light update===================================
 % Light update storage with index
@@ -1291,10 +1294,10 @@ commit_storage_update(#s_data{
       ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none)
   end,
 
-  DelTagsHash = ecomet_subscription:build_tag_hash( DelTags ),
+  DelTagsSet = ?NEW_SET( DelTags ),
 
   Acc#full_update_acc{
-    del_tags = ecomet_subscription:bit_or(DelTagsAcc,  DelTagsHash),
+    del_tags = ?SET_OR(DelTagsAcc,  DelTagsSet),
     object = maps:merge(ObjectAcc, Fields0 )
   };
 
@@ -1316,14 +1319,14 @@ commit_storage_update(#s_data{
 
   ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => merge_fields( Fields0, Fields ), index => Index },  none),
 
-  AddTagsHash = ecomet_subscription:build_tag_hash( AddTags ),
-  OtherTagsHash = ecomet_subscription:build_tag_hash( OtherTags ),
-  DelTagsHash = ecomet_subscription:build_tag_hash( DelTags ),
+  AddTagsSet = ?NEW_SET( AddTags ),
+  OtherTagsSet = ?NEW_SET( OtherTags ),
+  DelTagsSet = ?NEW_SET( DelTags ),
 
   Acc#full_update_acc{
-    add_tags = ecomet_subscription:bit_or(AddTagsAcc,  AddTagsHash),
-    other_tags = ecomet_subscription:bit_or(OtherTagsAcc,  OtherTagsHash),
-    del_tags = ecomet_subscription:bit_or(DelTagsAcc,  DelTagsHash),
+    add_tags = ?SET_OR(AddTagsAcc,  AddTagsSet),
+    other_tags = ?SET_OR(OtherTagsAcc,  OtherTagsSet),
+    del_tags = ?SET_OR(DelTagsAcc,  DelTagsSet),
     object = maps:merge(ObjectAcc, Fields0 )
   };
 
@@ -1353,10 +1356,8 @@ commit_storage_update(#s_data{
 
   ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => Fields, index => Index },  none),
 
-  AddTagsHash = ecomet_subscription:build_tag_hash( AddTags ),
-
   Acc#full_update_acc{
-    add_tags = ecomet_subscription:bit_or(AddTagsAcc,  AddTagsHash)
+    add_tags = ?SET_OR( AddTagsAcc, ?NEW_SET(AddTags) )
   }.
 
 
@@ -1368,112 +1369,111 @@ rebuild_index(OID)->
   Fields = ecomet_pattern:get_fields( PatternOID ),
   rebuild_index( OID, maps:keys(Fields) ).
 
-rebuild_index(OID, Fields)->
-
-  ?TRANSACTION(fun()->
-
-    Object = open(OID),
-
-    #object{ pattern = P, db=DB } = Object,
-    Map = ?map(P),
-    StorageTypes =
-      maps:keys(lists:foldl(fun(F,Acc)->
-        case ecomet_field:get_storage(Map,F) of
-          {ok, Type}-> Acc#{Type => true};
-          _-> Acc
-        end
-      end,#{},Fields)),
-    Storages=
-      lists:foldl(fun(Type,Acc)->
-        case ecomet_transaction:read(DB, ?DATA, Type, OID,  none) of
-          Data when is_map(Data)->
-            ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
-            %ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Data),
-            Acc#{ Type => Data };
-          _->
-            Acc
-        end
-      end,#{}, StorageTypes ),
-
-    FieldsChanges =
-      lists:foldl(fun(F,Acc)->
-        case ecomet_field:get_storage(Map,F) of
-          {ok,Type}->
-            case Storages of
-              #{ Type := #{ fields:= #{ F:=V }} }->
-                Acc#{F => {none,V}};
-              _->
-                Acc#{ F => {none,none} }
-            end;
-          _->
-            Acc
-        end
-      end, #{}, Fields),
-
-    StorageType = ecomet_pattern:get_storage(?map(P)),
-    Tags1 = ecomet_index:build_index(FieldsChanges, Map),
-    Tags =
-      if
-        StorageType =:= ram -> Tags1;
-        StorageType =:= ramdisc ->
-          case Tags1 of
-            #{ disc := {DiscAdd, DiscDel}, ramdisc := {RamDiscAdd, RamDiscDel} }->
-              maps:remove(disc, Tags1#{ ramdisc => {DiscAdd ++ RamDiscAdd, DiscDel ++ RamDiscDel} });
-            #{ disc := DiscTags } ->
-              maps:remove(disc, Tags1#{ ramdisc => DiscTags });
-            _->
-              Tags1
-          end;
-        StorageType=:=disc->
-          case Tags1 of
-            #{ disc := {DiscAdd, DiscDel}, ramdisc := {RamDiscAdd, RamDiscDel} }->
-              maps:remove(ramdisc, Tags1#{ disc => {DiscAdd ++ RamDiscAdd, DiscDel ++ RamDiscDel} });
-            #{ ramdisc := RamDiscTags } ->
-              maps:remove(ramdisc, Tags1#{ disc => RamDiscTags });
-            _->
-              Tags1
-          end
-      end,
-
-    EmptySet = ecomet_subscription:new_bit_set(),
-    maps:foreach(fun(Type, TData) ->
-      TFields = maps:get(fields, TData, #{}),
-      TypeTags0 = maps:get(tags, maps:get(StorageType, Storages,#{}), EmptySet),
-      case Tags of
-        #{ Type:= {TAddTags0,TDelTags0} }->
-          TAddTags = ecomet_subscription:build_tag_hash( TAddTags0 ),
-          TDelTags = ecomet_subscription:build_tag_hash( TDelTags0 ),
-          if
-            TypeTags0=:=EmptySet->
-              Data = TData#{ tags => TAddTags },
-              ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
-            true->
-              % TODO. We subtract tag hashes (not tags themselves), so there can be hash clashes and so we
-              % can remove tags (hashes) that object actually still has if actual tag and deleted tag have the same hash
-              ObjectTags = ecomet_subscription:bit_or( ecomet_subscription:bit_subtract(TypeTags0,TDelTags), TAddTags),
-              if
-                ObjectTags =:= EmptySet, map_size(TFields) =:= 0->
-                  ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none);
-                ObjectTags =:= EmptySet->
-                  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, TData,  none);
-                true->
-                  Data = TData#{ tags => ObjectTags },
-                  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none)
-              end
-          end;
-        _ when TypeTags0 =:=EmptySet, map_size( TFields )=:=0->
-          ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none);
-        _ when TypeTags0 =:=EmptySet->
-          Data = maps:remove( tags, TData ),
-          ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
-        _->
-          Data = TData#{ tags => TypeTags0 },
-          ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none)
-      end
-    end, Storages),
-    ecomet_index:commit([ #{db => DB, object => #{ <<".oid">>=>OID, object => Object }, index_log => Tags1} ]),
-    ok
-  end).
+rebuild_index(_OID, _Fields)->
+  todo.
+%%  ?TRANSACTION(fun()->
+%%
+%%    Object = open(OID),
+%%
+%%    #object{ pattern = P, db=DB } = Object,
+%%    Map = ?map(P),
+%%    StorageTypes =
+%%      maps:keys(lists:foldl(fun(F,Acc)->
+%%        case ecomet_field:get_storage(Map,F) of
+%%          {ok, Type}-> Acc#{Type => true};
+%%          _-> Acc
+%%        end
+%%      end,#{},Fields)),
+%%    Storages=
+%%      lists:foldl(fun(Type,Acc)->
+%%        case ecomet_transaction:read(DB, ?DATA, Type, OID,  none) of
+%%          Data when is_map(Data)->
+%%            ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none),
+%%            %ecomet_transaction:on_abort(DB, ?DATA, Type, OID, Data),
+%%            Acc#{ Type => Data };
+%%          _->
+%%            Acc
+%%        end
+%%      end,#{}, StorageTypes ),
+%%
+%%    FieldsChanges =
+%%      lists:foldl(fun(F,Acc)->
+%%        case ecomet_field:get_storage(Map,F) of
+%%          {ok,Type}->
+%%            case Storages of
+%%              #{ Type := #{ fields:= #{ F:=V }} }->
+%%                Acc#{F => {none,V}};
+%%              _->
+%%                Acc#{ F => {none,none} }
+%%            end;
+%%          _->
+%%            Acc
+%%        end
+%%      end, #{}, Fields),
+%%
+%%    StorageType = ecomet_pattern:get_storage(?map(P)),
+%%    Tags1 = ecomet_index:build_index(FieldsChanges, Map),
+%%    Tags =
+%%      if
+%%        StorageType =:= ram -> Tags1;
+%%        StorageType =:= ramdisc ->
+%%          case Tags1 of
+%%            #{ disc := {DiscAdd, DiscDel}, ramdisc := {RamDiscAdd, RamDiscDel} }->
+%%              maps:remove(disc, Tags1#{ ramdisc => {DiscAdd ++ RamDiscAdd, DiscDel ++ RamDiscDel} });
+%%            #{ disc := DiscTags } ->
+%%              maps:remove(disc, Tags1#{ ramdisc => DiscTags });
+%%            _->
+%%              Tags1
+%%          end;
+%%        StorageType=:=disc->
+%%          case Tags1 of
+%%            #{ disc := {DiscAdd, DiscDel}, ramdisc := {RamDiscAdd, RamDiscDel} }->
+%%              maps:remove(ramdisc, Tags1#{ disc => {DiscAdd ++ RamDiscAdd, DiscDel ++ RamDiscDel} });
+%%            #{ ramdisc := RamDiscTags } ->
+%%              maps:remove(ramdisc, Tags1#{ disc => RamDiscTags });
+%%            _->
+%%              Tags1
+%%          end
+%%      end,
+%%
+%%    maps:foreach(fun(Type, TData) ->
+%%      TFields = maps:get(fields, TData, #{}),
+%%      TypeTags0 = maps:get(tags, maps:get(StorageType, Storages,#{}), EmptySet),
+%%      case Tags of
+%%        #{ Type:= {TAddTags0,TDelTags0} }->
+%%          TAddTags = ecomet_subscription:build_tag_hash( TAddTags0 ),
+%%          TDelTags = ecomet_subscription:build_tag_hash( TDelTags0 ),
+%%          if
+%%            TypeTags0=:=EmptySet->
+%%              Data = TData#{ tags => TAddTags },
+%%              ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
+%%            true->
+%%              % TODO. We subtract tag hashes (not tags themselves), so there can be hash clashes and so we
+%%              % can remove tags (hashes) that object actually still has if actual tag and deleted tag have the same hash
+%%              ObjectTags = ecomet_subscription:bit_or( ecomet_subscription:bit_subtract(TypeTags0,TDelTags), TAddTags),
+%%              if
+%%                ObjectTags =:= EmptySet, map_size(TFields) =:= 0->
+%%                  ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none);
+%%                ObjectTags =:= EmptySet->
+%%                  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, TData,  none);
+%%                true->
+%%                  Data = TData#{ tags => ObjectTags },
+%%                  ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none)
+%%              end
+%%          end;
+%%        _ when TypeTags0 =:=EmptySet, map_size( TFields )=:=0->
+%%          ok = ecomet_transaction:delete(DB, ?DATA, Type, OID,  none);
+%%        _ when TypeTags0 =:=EmptySet->
+%%          Data = maps:remove( tags, TData ),
+%%          ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none);
+%%        _->
+%%          Data = TData#{ tags => TypeTags0 },
+%%          ok = ecomet_transaction:write(DB, ?DATA, Type, OID, Data,  none)
+%%      end
+%%    end, Storages),
+%%    ecomet_index:commit([ #{db => DB, object => #{ <<".oid">>=>OID, object => Object }, index_log => Tags1} ]),
+%%    ok
+%%  end).
 
 debug(Folder, Count, Batch)->
   ecomet:dirty_login(<<"system">>),
