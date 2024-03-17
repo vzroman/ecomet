@@ -178,12 +178,12 @@ update_index(#index{
   storage = Storage
 }, #acc{
   log = LogAcc,
-  index = IndexAcc
+  index = IndexAcc0
 } = Acc)->
 
   SLogAcc = maps:get( Storage, LogAcc, {[],[],[]}),
-  SIndexAcc = maps:get( Storage, IndexAcc, #{} ),
-  Index0 = maps:get( Field, SIndexAcc, #{} ),
+  SIndexAcc0 = maps:get( Storage, IndexAcc0, #{} ),
+  Index0 = maps:get( Field, SIndexAcc0, #{} ),
 
   {Index, Log} =
     lists:foldl(fun(T, FieldAcc)->
@@ -191,8 +191,20 @@ update_index(#index{
       update_field_index(TValues, T, Field, FieldAcc )
     end, {Index0, SLogAcc}, Types),
 
+  SIndexAcc =
+    if
+      map_size( Index ) =:= 0 -> maps:remove( Field, SIndexAcc0 );
+      true -> SIndexAcc0#{ Field => Index }
+    end,
+
+  IndexAcc =
+    if
+      map_size( SIndexAcc ) =:= 0 -> maps:remove( Storage, IndexAcc0 );
+      true -> IndexAcc0#{ Storage => SIndexAcc }
+    end,
+
   Acc#acc{
-    index = IndexAcc#{ Storage => SIndexAcc#{ Field => Index } },
+    index = IndexAcc,
     log = LogAcc#{ Storage => Log }
   }.
 
