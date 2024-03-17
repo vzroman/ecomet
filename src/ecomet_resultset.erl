@@ -28,6 +28,8 @@
 	prepare/1,
 	normalize/1,
 	new/0,
+	add_oid/2,
+	remove_oid/2,
 	new_branch/0,
 	execute/5,
 	no_transaction/5,
@@ -461,6 +463,94 @@ optimize({'OR',Normalized,Config})->
 %%=====================================================================
 new()->[].
 new_branch()->{none,maps:new()}.
+
+%% [
+%% 	{DB,
+%% 	{
+%% 		PatternsBitMap,
+%% 		PatternMap = #{
+%%			PatternBit => {
+%% 				IDHBits,
+%%				IDHMap = #{
+%%					IDHBit => IDLBits
+%% 				}
+%% 			}
+%% 		}
+%% 	}
+%% }]
+
+
+
+add_oid( OID, RS )->
+
+	DB = ecomet_object:get_db_name( OID ),
+	P=ecomet_object:get_pattern(OID),
+	ObjectID=ecomet_object:get_id(OID),
+	H=ObjectID div ?BITSTRING_LENGTH,
+	L=ObjectID rem ?BITSTRING_LENGTH,
+
+	Empty = ecomet_bitmap:create(),
+
+	{ {_,{PBits0, PMap0}}, RestDBs} =
+		case lists:keytake(DB,1,RS) of
+			{value, DB_RS0, Rest }-> {DB_RS0, Rest};
+			false -> { {DB,new_branch()}, []}
+		end,
+
+	PBits= ecomet_bitmap:set_bit(PBits0, P),
+
+	{HBits0, HMap0 } = maps:get( P, PMap0, { Empty, #{} } ),
+	HBits= ecomet_bitmap:set_bit(HBits0, H),
+
+	LBits0 = maps:get(H, HMap0, Empty ),
+	LBits= ecomet_bitmap:set_bit(LBits0, L),
+
+	HMap = HMap0#{ H => LBits },
+	PMap = PMap0#{ P => {HBits, HMap} },
+
+	DB_RS = {DB, {PBits, PMap}},
+	[DB_RS|RestDBs].
+
+remove_oid( OID, RS )->
+
+	DB = ecomet_object:get_db_name( OID ),
+	P=ecomet_object:get_pattern(OID),
+	ObjectID=ecomet_object:get_id(OID),
+	H=ObjectID div ?BITSTRING_LENGTH,
+	L=ObjectID rem ?BITSTRING_LENGTH,
+
+	Empty = ecomet_bitmap:create(),
+
+	{ {_,{PBits0, PMap0}}, RestDBs} =
+		case lists:keytake(DB,1,RS) of
+			{value, DB_RS0, Rest }-> {DB_RS0, Rest};
+			false -> { {DB,new_branch()}, []}
+		end,
+
+	PBits= ecomet_bitmap:reset_bit(PBits0, P),
+
+	{HBits0, HMap0 } = maps:get( P, PMap0, { Empty, #{} } ),
+	HBits= ecomet_bitmap:reset_bit(HBits0, H),
+
+	LBits0 = maps:get(H, HMap0, Empty ),
+	LBits= ecomet_bitmap:reset_bit(LBits0, L),
+
+	HMap =
+		if
+			LBits =:= Empty -> maps:remove(H, HMap0);
+			true -> HMap0#{ H => LBits }
+		end,
+	PMap =
+		if
+			HBits =:= Empty-> maps:remove( P, PMap0 );
+			true -> PMap0#{ P => {HBits, HMap} }
+		end,
+
+	if
+		PBits =:= Empty -> RestDBs;
+		true ->
+			[ {DB, {PBits, PMap}} |RestDBs ]
+	end.
 
 %%=====================================================================
 %%	QUERY EXECUTION
