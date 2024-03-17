@@ -443,8 +443,6 @@ commit(Ref, Data, Delete, IndexLog)->
       commit( TRef, Module, TData, TDelete, TIndexLog )
     end || T <- Ordered],
 
-  ecomet_index ! { unlock , self() },
-
   ok.
 
 %%-----------------Only write commit (no index, no delete)----------------------------------
@@ -462,34 +460,48 @@ commit(Ref, Module, Data , Delete , _IndexLog = none) ->
 %%-----------------Write commit with index (no delete)----------------------------------
 commit(Ref, Module, Data, _Delete = none, IndexLog) ->
 
-  case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
-    { IndexWrite, IndexDel } when length( IndexDel ) > 0 ->
-      Module:commit( Ref, Data ++ IndexWrite, IndexDel);
-    { IndexWrite, _ }->
-      Module:write( Ref, Data ++ IndexWrite)
+  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
+  try
+    case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
+      { IndexWrite, IndexDel } when length( IndexDel ) > 0 ->
+        Module:commit( Ref, Data ++ IndexWrite, IndexDel);
+      { IndexWrite, _IndexDel }->
+        Module:write( Ref, Data ++ IndexWrite)
+    end
+  after
+    Unlock()
   end;
 
 %%-----------------Delete commit with index (no write)----------------------------------
 commit(Ref, Module, _Data = none, Delete, IndexLog) ->
 
-  case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
-    { IndexWrite, IndexDel } when length( IndexWrite ) > 0 ->
-      Module:commit( Ref, IndexWrite, Delete ++ IndexDel);
-    { _IndexWrite, IndexDel }->
-      Module:delete( Ref, Delete ++ IndexDel)
+  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
+  try
+    case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
+      { IndexWrite, IndexDel } when length( IndexWrite ) > 0 ->
+        Module:commit( Ref, IndexWrite, Delete ++ IndexDel);
+      { _IndexWrite, IndexDel }->
+        Module:delete( Ref, Delete ++ IndexDel)
+    end
+  after
+    Unlock()
   end;
 
 commit(Ref, Module, Data, Delete, IndexLog)->
+  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
 
-  { IndexWrite, IndexDel } = ecomet_index:prepare_write(Module, Ref, IndexLog ),
-
-  if
-    length( IndexDel ) =:= 0->
-      Module:commit( Ref, Data ++ IndexWrite, Delete);
-    length( IndexWrite ) =:= 0->
-      Module:commit( Ref, Data, Delete ++ IndexDel);
-    true ->
-      Module:commit( Ref, Data ++ IndexWrite, Delete ++ IndexDel)
+  try
+    { IndexWrite, IndexDel } = ecomet_index:prepare_write(Module, Ref, IndexLog ),
+    if
+      length( IndexDel ) =:= 0->
+        Module:commit( Ref, Data ++ IndexWrite, Delete);
+      length( IndexWrite ) =:= 0->
+        Module:commit( Ref, Data, Delete ++ IndexDel);
+      true ->
+        Module:commit( Ref, Data ++ IndexWrite, Delete ++ IndexDel)
+    end
+  after
+    Unlock()
   end.
 
 two_phase_commit( Ref, Data, Delete, IndexLog )->

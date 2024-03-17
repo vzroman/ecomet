@@ -1520,6 +1520,6 @@ fill(Fields,C, Batch, Stop) when C < Stop ->
 fill(_F,_C,_B,_S)->
   ok.
 
-% ecomet_object:debug(<<"F1">>, 1000000, 10).
-% ecomet_object:debug(<<"F2">>, 1000000, 10).
-% ecomet_object:debug(<<"F3">>, 1000000, 10).
+% ecomet_object:debug(<<"F1">>, 1000000, 1).
+% ecomet_object:debug(<<"F2">>, 1000000, 1).
+% ecomet_object:debug(<<"F3">>, 1000000, 1).
