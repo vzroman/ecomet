@@ -32,7 +32,8 @@
 -export([
   build_index/3,
   destroy_index/2,
-  prepare_write/3
+  prepare_write/3,
+  unlock/1
 ]).
 
 %% ====================================================================
@@ -64,9 +65,6 @@
 -define(AS_LIST( V ), if is_list(V) -> V; true -> [V] end).
 
 -define(EMPTY, persistent_term:get({ ?MODULE, empty })).
--define(CACHE_DUR, 10000).  % 10 sec
--define(CACHE_WAIT, 10000). % 10 sec
--define(CACHE_MAX_SIZE, 10000).
 
 %% ====================================================================
 %% Indexing
@@ -408,8 +406,11 @@ update_index( #update_index{ tag = Tag } = Index )->
     { tag, Tag, Value, Value0 }-> { Value, Value0 }
   end.
 
--define(TAG_KEY(M,R,T),{ M, R, T }).
--record(cache,{ lock, cache, locker_tags, locker_ref, dur, wait, empty }).
+unlock( Ref )->
+  ?MODULE ! {unlock, Ref, self()},
+  ok.
+
+-record(lock,{lock, lockers, monitor, empty }).
 start_link()->
   {ok, spawn_link(fun cache_init/0)}.
 
@@ -420,22 +421,16 @@ cache_init()->
   Empty = ecomet_bitmap:create(),
   persistent_term:put( {?MODULE, empty}, Empty ),
 
-  cache_loop( #cache{
-    dur = ?CACHE_DUR,
-    wait = ?CACHE_WAIT,
+  cache_loop( #lock{
     lock = #{},
-    cache = #{},
-    locker_tags = #{},
-    locker_ref = #{},
+    lockers = #{},
+    monitor = #{},
     empty = Empty
   }).
 
-cache_loop( #cache{ cache = Tags } = State ) when map_size( Tags ) > ?CACHE_MAX_SIZE ->
-  State1 = decrease_cache( State ),
-  cache_loop( State1 );
-cache_loop(#cache{
-  wait = Wait,
-  empty = Empty
+cache_loop(#lock{
+  empty = Empty,
+  lockers = Lockers
 } = State )->
   receive
     #update_index{
@@ -447,133 +442,163 @@ cache_loop(#cache{
       del = Del
     } ->
 
-      TKey = ?TAG_KEY( Module, Ref, Tag ),
-      Value0 = get_tag_value( TKey, State ),
+      Value0 = get_tag_value( Tag, Module, Ref , State ),
       Value = udpate_value( Add, Del, Value0, Empty ),
 
       catch Locker ! { tag, Tag,  Value, Value0 },
 
-      State1 = lock_tag( TKey, Value, Locker, State ),
+      State1 = lock_tag( Ref, Tag, Value, Locker, State ),
 
       cache_loop( State1 );
 
-    {unlock, Locker}->
-      State1 = unlock_tags( Locker, State ),
+    {unlock, Ref, Locker}->
+      State1 = unlock_tags(Ref, Locker, State ),
       cache_loop( State1 );
     {'DOWN', _Ref, process, Locker, _Reason}->
-      State1 = unlock_tags( Locker, State ),
+      LockerRefs = maps:get( Locker, Lockers, #{} ),
+      State1 =
+        lists:foldl(fun(Ref, Acc) ->
+          unlock_tags( Ref, Locker, Acc )
+        end, State, maps:keys( LockerRefs ) ),
       cache_loop( State1 );
     _->
       cache_loop( State )
-  after
-    Wait ->
-      State1 = increase_cache( State ),
-      cache_loop( State1 )
   end.
 
-get_tag_value(TagKey, #cache{
+get_tag_value(Tag, Module, Ref, #lock{
   lock = Lock,
-  cache = Cache,
   empty = Empty
 } )->
   case Lock of
-    #{ TagKey := { Value, _Lockers } }->
+    #{ Ref:= #{ Tag := { Value, _Lockers } } }->
       Value;
     _->
-      case Cache of
-        #{ TagKey := { Value, _TS } } ->
-          Value;
-        _->
-          ?TAG_KEY( Module, Ref, Tag ) = TagKey,
-          case Module:read(Ref,[Tag]) of
-            []-> Empty;
-            [{_,Value}]-> Value
-          end
+      case Module:read(Ref,[Tag]) of
+        []-> Empty;
+        [{_,Value}]-> Value
       end
   end.
 
-lock_tag(TKey, Value, Locker, #cache{
-  lock = Lock,
-  cache = Cache,
-  locker_tags = Lockers,
-  locker_ref = LockerRef
-} = State )->
-
-  LockRef = erlang:monitor(process, Locker ),
-
-  TLockers =
-    case Lock of
-      #{ TKey := { _Value, TLockers0 } } ->
-        TLockers0;
-      _->
-        #{}
-    end,
-
-  LockerTags = maps:get( Locker, Lockers, #{} ),
-
-  State#cache{
-    lock = Lock#{ TKey => { Value, TLockers#{ Locker => true } } },
-    locker_tags = Lockers#{ Locker=> LockerTags#{ TKey=> true } },
-    locker_ref = LockerRef#{ Locker => LockRef },
-    cache = maps:remove( TKey, Cache )
-  }.
-
-unlock_tags( Locker, #cache{
-  locker_tags = Lockers,
-  locker_ref = LockerRef
+lock_tag(Ref, Tag, Value, Locker, #lock{
+  lock = Lock0,
+  lockers = Lockers0,
+  monitor = Monitor0
 } = State0 )->
 
-  case LockerRef of
-    #{ Locker := MonitorRef }->
-      catch erlang:demonitor( MonitorRef );
-    _->
-      ignore
-  end,
-
-  State =
-    case Lockers of
-      #{ Locker := LockerTags }->
-        unlock_tags( LockerTags, Locker, State0 );
-      _->
-        State0
+  % Update monitor
+  Monitor =
+    case maps:is_key( Locker, Monitor0 ) of
+      true -> Monitor0;
+      false ->
+        Monitor0#{ Locker => erlang:monitor(process, Locker ) }
     end,
 
-  State#cache{
-    locker_tags = maps:remove( Locker, Lockers ),
-    locker_ref = maps:remove( Locker, LockerRef )
-  }.
+  %% Lockers:
+  %%  #{
+  %%    Locker => #{
+  %%      Ref => #{
+  %%        Tag => true
+  %%      }
+  %%    }
+  %%  }
 
-unlock_tags( Tags, Locker, #cache{
-  lock = Lock0,
-  cache = Cache0
-} = State)->
-  {Lock, Cache} =
-    maps:fold(fun(T,_, {LockAcc, CacheAcc})->
-      case LockAcc of
-        #{ T := { V, TLockers } }->
-          RestLockers = maps:remove( Locker, TLockers ),
-          if
-            map_size( RestLockers ) =:= 0->
-              % Unlock the tag
-              {
-                maps:remove( T, LockAcc ),
-                CacheAcc#{ T => { V, ecomet_lib:ts() } }
-              };
-            true ->
-              {
-                LockAcc#{ T => RestLockers },
-                CacheAcc
-              }
-          end;
-        _->
-          { LockAcc, CacheAcc }
-      end
-    end, { Lock0, Cache0 }, Tags ),
+  % Update locker tags
+  LockerRefs0 = maps:get( Locker, Lockers0, #{} ),
+  LockerTags0 = maps:get( Ref, LockerRefs0, #{} ),
 
-  State#cache{
+  LockerTags = LockerTags0#{ Tag => true },
+  LockerRefs = LockerRefs0#{ Ref => LockerTags },
+
+  % Update lockers
+  Lockers = Lockers0#{ Locker => LockerRefs },
+
+  %% Lock:
+  %%  #{
+  %%    Ref => #{
+  %%      Tag => { Value, Lockers = #{ Locker => true } }
+  %%    }
+  %%  }
+
+  % update the lock
+  RefTags0 = maps:get( Ref, Lock0, #{} ),
+  {_, TagLockers0} = maps:get( Tag, RefTags0, {ignore, #{}} ),
+
+  TagLockers = TagLockers0#{ Locker => true },
+  RefTags = RefTags0#{ Tag => { Value, TagLockers } },
+
+  Lock = Lock0#{ Ref => RefTags },
+
+  State0#lock{
     lock = Lock,
-    cache = Cache
+    lockers = Lockers,
+    monitor = Monitor
   }.
+
+unlock_tags(Ref, Locker, #lock{
+  monitor = Monitor0,
+  lockers = Lockers0,
+  lock = Lock0
+} = State0 )->
+
+  RefTags0 = maps:get( Ref, Lock0, #{} ),
+  RefTags = do_unlock_tags( Locker, RefTags0 ),
+
+  Lock =
+    if
+      map_size( RefTags ) =:= 0 -> maps:remove( Ref, Lock0 );
+      true -> Lock0#{ Ref => RefTags }
+    end,
+
+  %% Lockers:
+  %%  #{
+  %%    Locker => #{
+  %%      Ref => #{
+  %%        Tag => true
+  %%      }
+  %%    }
+  %%  }
+
+  LockerRefs0 = maps:get( Locker, Lockers0, #{}),
+  LockerRefs = maps:remove( Ref, LockerRefs0 ),
+  Lockers =
+    if
+      map_size( LockerRefs ) =:= 0 ->  maps:remove(Locker, Lockers0);
+      true -> Lockers0#{ Locker => LockerRefs }
+    end,
+
+  Monitor =
+    case maps:is_key( Locker, Lockers ) of
+      true -> Monitor0;
+      false ->
+        case Monitor0 of
+          #{ Locker := MonRef }->
+            catch erlang:demonitor( MonRef ),
+            maps:remove( Locker, Monitor0 )
+        end
+    end,
+
+  State0#lock{
+    monitor = Monitor,
+    lockers = Lockers,
+    lock = Lock
+  }.
+
+do_unlock_tags(Locker, RefTags)->
+
+  %% RefTags:
+  %%  #{
+  %% #{
+  %%    Tag => { Value, Lockers = #{ Locker => true } }
+  %%  }
+  maps:fold(fun( Tag, { Value, Lockers0 }, Acc )->
+    Lockers = maps:remove( Locker, Lockers0 ),
+    if
+      map_size( Lockers ) =:= 0 ->
+        Acc;
+      true ->
+        Acc#{ Tag => { Value, Lockers } }
+    end
+  end, #{}, RefTags ).
 
 
 udpate_value( Add, Del, Value0, Empty )->
@@ -590,53 +615,6 @@ udpate_value( Add, Del, Value0, Empty )->
       Value1 = ecomet_bitmap:bit_or( Value0, Add ),
       ecomet_bitmap:bit_andnot(Value1, Del)
   end.
-
-decrease_cache(#cache{
-  cache = Cache0,
-  dur = Dur0,
-  wait = Wait0
-} = State)->
-
-  Dur =
-    if
-      Dur0 > 2 -> Dur0 bsr 1;
-      true -> Dur0
-    end,
-
-  Wait =
-    if
-      Wait0 > 2 -> Wait0 bsr 1;
-      true -> Wait0
-    end,
-
-  Cache = clear_cache( Cache0, ecomet_lib:ts() - Dur ),
-
-  State#cache{ cache = Cache, dur = Dur, wait = Wait }.
-
-increase_cache(#cache{
-  cache = Cache0,
-  dur = Dur0,
-  wait = Wait0
-} = State)->
-
-  Dur =
-    if
-      Dur0 < ?CACHE_DUR -> Dur0 bsl 1;
-      true -> Dur0
-    end,
-
-  Wait =
-    if
-      Wait0 < ?CACHE_WAIT -> Wait0 bsl 1;
-      true -> Wait0
-    end,
-
-  Cache = clear_cache( Cache0, ecomet_lib:ts() - Dur ),
-
-  State#cache{ cache = Cache, dur = Dur, wait = Wait }.
-
-clear_cache( Cache, TS )->
-  maps:filter(fun(_K, {_, TagTS}) -> TS > TagTS end, Cache).
 
 %%==============================================================================================
 %%	Search

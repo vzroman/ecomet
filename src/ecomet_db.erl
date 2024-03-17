@@ -443,8 +443,6 @@ commit(Ref, Data, Delete, IndexLog)->
       commit( TRef, Module, TData, TDelete, TIndexLog )
     end || T <- Ordered],
 
-  ecomet_index ! { unlock , self() },
-
   ok.
 
 %%-----------------Only write commit (no index, no delete)----------------------------------
@@ -467,7 +465,10 @@ commit(Ref, Module, Data, _Delete = none, IndexLog) ->
       Module:commit( Ref, Data ++ IndexWrite, IndexDel);
     { IndexWrite, _ }->
       Module:write( Ref, Data ++ IndexWrite)
-  end;
+  end,
+
+  ok = ecomet_index:unlock( Ref );
+
 
 %%-----------------Delete commit with index (no write)----------------------------------
 commit(Ref, Module, _Data = none, Delete, IndexLog) ->
@@ -477,7 +478,9 @@ commit(Ref, Module, _Data = none, Delete, IndexLog) ->
       Module:commit( Ref, IndexWrite, Delete ++ IndexDel);
     { _IndexWrite, IndexDel }->
       Module:delete( Ref, Delete ++ IndexDel)
-  end;
+  end,
+
+  ok = ecomet_index:unlock( Ref );
 
 commit(Ref, Module, Data, Delete, IndexLog)->
 
@@ -490,7 +493,9 @@ commit(Ref, Module, Data, Delete, IndexLog)->
       Module:commit( Ref, Data, Delete ++ IndexDel);
     true ->
       Module:commit( Ref, Data ++ IndexWrite, Delete ++ IndexDel)
-  end.
+  end,
+
+  ok = ecomet_index:unlock( Ref ).
 
 two_phase_commit( Ref, Data, Delete, IndexLog )->
   % TODO

@@ -38,7 +38,7 @@
 -define(PROCESS_MEMORY_LIMIT, 100). %MB
 
 -define(LOCKS,'$ecomet_locks$').
--define(INDEX_CACHE,'$ecomet_index_cache$').
+-define(INDEX_LOCK,'$ecomet_index_lock$').
 
 -define(ESUBSCRIPTIONS,'$ecomet_esubscriptions$').
 
