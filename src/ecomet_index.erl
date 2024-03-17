@@ -20,20 +20,12 @@
 -include("ecomet.hrl").
 
 %% ====================================================================
-%% Service API
-%% ====================================================================
--export([
-  start_link/0
-]).
-
-%% ====================================================================
 %% Indexing API
 %% ====================================================================
 -export([
   build_index/3,
   destroy_index/2,
-  prepare_write/3,
-  unlock/1
+  prepare_write/3
 ]).
 
 %% ====================================================================
@@ -64,7 +56,7 @@
 
 -define(AS_LIST( V ), if is_list(V) -> V; true -> [V] end).
 
--define(EMPTY, persistent_term:get({ ?MODULE, empty })).
+-define(EMPTY, <<0,0,0,0,0,0,0,0>>).
 
 %% ====================================================================
 %% Indexing
@@ -315,306 +307,42 @@ dt_index(DT)->
 %------------------PHASE 2---------------------------------------------
 %               Write changes to the real database
 %----------------------------------------------------------------------
--record(update_index,{ from, module, ref, tag, add, del }).
 prepare_write(Module, Ref, Updates)->
-  ByTags = group_by_tags( Updates ),
-  maps:fold(fun(Tag, Patterns, Acc)->
-    update_tag(Module, Ref, Tag, Patterns, Acc)
-  end, {[],[]} , ByTags).
+  lists:foldl(fun({{Tag,[idl,P,H,L]}, Bit}, Acc)->
+    update_tag({Tag,[idl,P,H]}, L, Bit , Module, Ref, Acc )
+  end,{[],[]}, Updates ).
 
-group_by_tags( Updates )->
-  % #{
-  %   Tag => #{
-  %     Pattern => #{
-  %       IDH => #{
-  %         IDL => true | false
-  %       }
-  %     }
-  %   }
-  % }
-  lists:foldl(fun({{Tag,[idl,PatternID,IDH,IDL]}, Value},Acc)->
-      TAcc = maps:get(Tag,Acc,#{}),
-      PAcc = maps:get(PatternID,TAcc,#{}),
-      IDHAcc = maps:get(IDH,PAcc,#{}),
-      Acc#{ Tag => TAcc#{ PatternID=> PAcc#{ IDH =>IDHAcc#{ IDL => Value }}}}
-  end, #{} ,Updates).
+update_tag(Tag, BitID, Bit, Module, Ref, {LogAddAcc, LogDelAcc})->
+  Value0 =
+    case Module:read(Ref,[{?INDEX,[ Tag ]}]) of
+      []-> ?EMPTY;
+      [{_,V}]-> V
+    end,
 
-update_tag( Module, Ref, Tag, Patterns, LogAcc )->
-  {Ps, LogAcc1} =
-    %----------pattern loop------------------------
-    maps:fold(fun(P, IDHs, {PAcc, PAccLog})->
+  Value1 =
+    if
+      Bit -> ecomet_bitmap:set_bit(Value0, BitID);
+      true -> ecomet_bitmap:reset_bit( Value0, BitID )
+    end,
 
-      %----------IDHs loop------------------------
-      {Hs, PAccLog1} = maps:fold(fun(H, Ls, {HAcc, HAccLog})->
-        % Update IDL bitmap
-        case build_bitmap(Module, Ref, {Tag,[idl,P,H]}, Ls, HAccLog) of
-          {stop, HAccLog1}->  % The bitmap was just updated, no need to update IDH bitmap
-            { HAcc, HAccLog1 };
-          {Value, HAccLog1} ->  % The bitmap was either created or deleted, we have to update IDH bitmap
-            {HAcc#{ H => Value }, HAccLog1 }
-        end
-      end,{#{}, PAccLog}, IDHs),
-
-      % Update IDH bitmap that need to be modified
-      case build_bitmap(Module, Ref, {Tag,[idh,P]}, Hs, PAccLog1) of
-        {stop, PAccLog2}->  % The bitmap was just updated, no need to update pattern bitmap
-          {PAcc, PAccLog2};
-        {Value, PAccLog2} -> % The bitmap was either created or deleted, we have to update pattern bitmap
-          { PAcc#{ P => Value }, PAccLog2}
-      end
-
-    end,{#{}, LogAcc }, Patterns),
-
-  % Update pattern bitmap that need to be modified
-  {_, LogAcc2} = build_bitmap(Module, Ref, {Tag,patterns}, Ps, LogAcc1),
-  LogAcc2.
-
-build_bitmap(_Module, _Ref, _Tag, Update, Acc) when map_size(Update) =:= 0->
-  {stop, Acc};
-build_bitmap(Module, Ref, Tag, Update, { LogAddAcc, LogDelAcc })->
-
-  Empty = ?EMPTY,
-  {Add, Del}=
-    maps:fold(fun(ID,Value,{AddAcc, DelAcc})->
-      if
-        Value -> { ecomet_bitmap:set_bit(AddAcc,ID), DelAcc };
-        true-> { AddAcc, ecomet_bitmap:set_bit(DelAcc,ID) }
-      end
-    end,{Empty,Empty}, Update),
-
-  case update_index(#update_index{
-    from = self(),
-    module = Module,
-    ref = Ref,
-    tag = {?INDEX,[Tag]},
-    add = Add,
-    del = Del
-  }) of
-    { Empty, Empty } ->
-      { stop, { LogAddAcc, LogDelAcc } };
-    { Empty, _Value0 }->
-      { false, { LogAddAcc, [ {?INDEX,[Tag]} | LogDelAcc ] }};
-    { Value, Empty } ->
-      { true, { [ {{?INDEX,[Tag]}, Value} |  LogAddAcc ], LogDelAcc } };
+  case { Value1, Value0 } of
+    { ?EMPTY, ?EMPTY } ->
+      { LogAddAcc, LogDelAcc };
+    { ?EMPTY, _Value0 }->
+      level_up( Tag, false, Module, Ref, {LogAddAcc, [{?INDEX,[Tag]} | LogDelAcc ]} );
+    { Value, ?EMPTY } ->
+      level_up( Tag, true, Module, Ref, { [ {{?INDEX,[Tag]}, Value} |  LogAddAcc ], LogDelAcc } );
     { Value, _Value0 }->
-      { stop, { [ {{?INDEX,[Tag]}, Value} |  LogAddAcc ], LogDelAcc } }
+      { [ {{?INDEX,[Tag]}, Value} |  LogAddAcc ], LogDelAcc }
   end.
 
-update_index( #update_index{ tag = Tag } = Index )->
-  ?MODULE ! Index,
-  receive
-    { tag, Tag, Value, Value0 }-> { Value, Value0 }
-  end.
+level_up({Tag,[idl,P,H]}, Bit, Module, Ref, Acc )->
+  update_tag({Tag,[idh,P]}, H, Bit, Module, Ref, Acc);
+level_up({Tag,[idh,P]}, Bit, Module, Ref, Acc )->
+  update_tag({Tag,patterns}, P, Bit, Module, Ref, Acc);
+level_up(_, _Bit, _Module, _Ref, Acc )->
+  Acc.
 
-unlock( Ref )->
-  ?MODULE ! {unlock, Ref, self()},
-  ok.
-
--record(lock,{lock, lockers, monitor, empty }).
-start_link()->
-  {ok, spawn_link(fun cache_init/0)}.
-
-% TODO, Implement a pool of index lockers based on tag hash
-cache_init()->
-
-  register( ?MODULE, self() ),
-  Empty = ecomet_bitmap:create(),
-  persistent_term:put( {?MODULE, empty}, Empty ),
-
-  cache_loop( #lock{
-    lock = #{},
-    lockers = #{},
-    monitor = #{},
-    empty = Empty
-  }).
-
-cache_loop(#lock{
-  empty = Empty,
-  lockers = Lockers
-} = State )->
-  receive
-    #update_index{
-      from = Locker,
-      module = Module,
-      ref = Ref,
-      tag = Tag,
-      add = Add,
-      del = Del
-    } ->
-
-      Value0 = get_tag_value( Tag, Module, Ref , State ),
-      Value = udpate_value( Add, Del, Value0, Empty ),
-
-      catch Locker ! { tag, Tag,  Value, Value0 },
-
-      State1 = lock_tag( Ref, Tag, Value, Locker, State ),
-
-      cache_loop( State1 );
-
-    {unlock, Ref, Locker}->
-      State1 = unlock_tags(Ref, Locker, State ),
-      cache_loop( State1 );
-    {'DOWN', _Ref, process, Locker, _Reason}->
-      LockerRefs = maps:get( Locker, Lockers, #{} ),
-      State1 =
-        lists:foldl(fun(Ref, Acc) ->
-          unlock_tags( Ref, Locker, Acc )
-        end, State, maps:keys( LockerRefs ) ),
-      cache_loop( State1 );
-    _->
-      cache_loop( State )
-  end.
-
-get_tag_value(Tag, Module, Ref, #lock{
-  lock = Lock,
-  empty = Empty
-} )->
-  case Lock of
-    #{ Ref:= #{ Tag := { Value, _Lockers } } }->
-      Value;
-    _->
-      case Module:read(Ref,[Tag]) of
-        []-> Empty;
-        [{_,Value}]-> Value
-      end
-  end.
-
-lock_tag(Ref, Tag, Value, Locker, #lock{
-  lock = Lock0,
-  lockers = Lockers0,
-  monitor = Monitor0
-} = State0 )->
-
-  % Update monitor
-  Monitor =
-    case maps:is_key( Locker, Monitor0 ) of
-      true -> Monitor0;
-      false ->
-        Monitor0#{ Locker => erlang:monitor(process, Locker ) }
-    end,
-
-  %% Lockers:
-  %%  #{
-  %%    Locker => #{
-  %%      Ref => #{
-  %%        Tag => true
-  %%      }
-  %%    }
-  %%  }
-
-  % Update locker tags
-  LockerRefs0 = maps:get( Locker, Lockers0, #{} ),
-  LockerTags0 = maps:get( Ref, LockerRefs0, #{} ),
-
-  LockerTags = LockerTags0#{ Tag => true },
-  LockerRefs = LockerRefs0#{ Ref => LockerTags },
-
-  % Update lockers
-  Lockers = Lockers0#{ Locker => LockerRefs },
-
-  %% Lock:
-  %%  #{
-  %%    Ref => #{
-  %%      Tag => { Value, Lockers = #{ Locker => true } }
-  %%    }
-  %%  }
-
-  % update the lock
-  RefTags0 = maps:get( Ref, Lock0, #{} ),
-  {_, TagLockers0} = maps:get( Tag, RefTags0, {ignore, #{}} ),
-
-  TagLockers = TagLockers0#{ Locker => true },
-  RefTags = RefTags0#{ Tag => { Value, TagLockers } },
-
-  Lock = Lock0#{ Ref => RefTags },
-
-  State0#lock{
-    lock = Lock,
-    lockers = Lockers,
-    monitor = Monitor
-  }.
-
-unlock_tags(Ref, Locker, #lock{
-  monitor = Monitor0,
-  lockers = Lockers0,
-  lock = Lock0
-} = State0 )->
-
-  RefTags0 = maps:get( Ref, Lock0, #{} ),
-  RefTags = do_unlock_tags( Locker, RefTags0 ),
-
-  Lock =
-    if
-      map_size( RefTags ) =:= 0 -> maps:remove( Ref, Lock0 );
-      true -> Lock0#{ Ref => RefTags }
-    end,
-
-  %% Lockers:
-  %%  #{
-  %%    Locker => #{
-  %%      Ref => #{
-  %%        Tag => true
-  %%      }
-  %%    }
-  %%  }
-
-  LockerRefs0 = maps:get( Locker, Lockers0, #{}),
-  LockerRefs = maps:remove( Ref, LockerRefs0 ),
-  Lockers =
-    if
-      map_size( LockerRefs ) =:= 0 ->  maps:remove(Locker, Lockers0);
-      true -> Lockers0#{ Locker => LockerRefs }
-    end,
-
-  Monitor =
-    case maps:is_key( Locker, Lockers ) of
-      true -> Monitor0;
-      false ->
-        case Monitor0 of
-          #{ Locker := MonRef }->
-            catch erlang:demonitor( MonRef ),
-            maps:remove( Locker, Monitor0 )
-        end
-    end,
-
-  State0#lock{
-    monitor = Monitor,
-    lockers = Lockers,
-    lock = Lock
-  }.
-
-do_unlock_tags(Locker, RefTags)->
-
-  %% RefTags:
-  %%  #{
-  %% #{
-  %%    Tag => { Value, Lockers = #{ Locker => true } }
-  %%  }
-  maps:fold(fun( Tag, { Value, Lockers0 }, Acc )->
-    Lockers = maps:remove( Locker, Lockers0 ),
-    if
-      map_size( Lockers ) =:= 0 ->
-        Acc;
-      true ->
-        Acc#{ Tag => { Value, Lockers } }
-    end
-  end, #{}, RefTags ).
-
-
-udpate_value( Add, Del, Value0, Empty )->
-  if
-    Value0 =:= Empty, Del =:= Empty -> Add;
-    Value0 =:= Empty, Add =:= Empty -> Empty;
-    Value0 =:= Empty->
-      ecomet_bitmap:bit_andnot(Add, Del);
-    Del =:= Empty ->
-      ecomet_bitmap:bit_or( Value0, Add );
-    Add =:= Empty->
-      ecomet_bitmap:bit_andnot(Value0, Del);
-    true ->
-      Value1 = ecomet_bitmap:bit_or( Value0, Add ),
-      ecomet_bitmap:bit_andnot(Value1, Del)
-  end.
 
 %%==============================================================================================
 %%	Search
