@@ -47,6 +47,15 @@ init([]) ->
     modules=>[elock]
   },
 
+  QueueServer = #{
+    id=>ecomet_queue,
+    start=>{ecomet_queue, start_link,[]},
+    restart=>permanent,
+    shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+    type=>worker,
+    modules=>[ecomet_queue]
+  },
+
   IndexLockServer = #{
     id=>?INDEX_LOCK,
     start=>{ecomet_index, start_link,[]},
@@ -88,6 +97,7 @@ init([]) ->
   {ok, {Supervisor,
     [
       LockServer,
+      QueueServer,
       IndexLockServer,
       ESubsriptionsServer,
       SchemaSrv

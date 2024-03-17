@@ -50,7 +50,7 @@ init()->
 
   register( ?MODULE, self() ),
 
-  Queue = ets:new(queue,[ private, set ]),
+  Queue = ets:new(?MODULE,[ private, ordered_set ]),
 
   loop(#state{
     queue = Queue,
@@ -60,8 +60,14 @@ init()->
   }).
 
 loop( #state{
-  actors = Actors
+  actors = Actors,
+  queue = Queue
 } = State0 )->
+  try ets:first( Queue )
+  catch
+    _:E->
+      ?LOGERROR("BAD QUEUE ~p",[E])
+  end,
   receive
     #queue{ term = Term, ref = Ref, actor = Actor } ->
       
@@ -207,20 +213,23 @@ trigger_queue(Term, Ref, #state{
     true ->
       case ets:prev( Queue, { Term, Ref } ) of
         { Term, _PrevRef }->
-          % The ref was not first in the queue
+          % The ref is not first in the queue
           State;
         _->
-          % The ref was first
-          % Strict match to Term!!! If somebody is waiting then it must be in the queue
-          {Term, NextRef} = ets:next( Queue, { Term, Ref } ),
-          [{_, NextActor}] = ets:lookup( Queue, {Term, NextRef} ),
-          case Waiting of
-            #{ Term := #{ NextActor := _ } }->
-              % The next actor is already waiting
-              catch NextActor ! { your_turn, NextRef },
-              dequeue( Term, NextRef, NextActor, State );
+          case ets:lookup( Queue, {Term, Ref} ) of
+            [{_, Actor}] ->
+              % The actor is first in the queue
+              catch Actor ! { your_turn, Ref },
+              dequeue( Term, Ref, Actor, State );
             _->
-              State
+              % The Actor is already dequeued
+              case ets:next( Queue, { Term, Ref } ) of
+                {Term, NextRef}->
+                  trigger_queue( Term, NextRef, State );
+                _->
+                  % Nobody is in the queue for the Term
+                  State
+              end
           end
       end
   end.

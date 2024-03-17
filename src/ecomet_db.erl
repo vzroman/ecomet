@@ -460,10 +460,14 @@ commit(Ref, Module, Data , Delete , _IndexLog = none) ->
 %%-----------------Write commit with index (no delete)----------------------------------
 commit(Ref, Module, Data, _Delete = none, IndexLog) ->
 
-  case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
-    { IndexWrite, IndexDel } when length( IndexDel ) > 0 ->
+  QueueRef = ecomet_queue:enqueue( Ref ),
+  { IndexWrite, IndexDel } =ecomet_index:prepare_write(Module, Ref, IndexLog ),
+  ok =ecomet_queue:waiting( QueueRef ),
+
+  if
+    length( IndexDel ) > 0 ->
       Module:commit( Ref, Data ++ IndexWrite, IndexDel);
-    { IndexWrite, _ }->
+    true->
       Module:write( Ref, Data ++ IndexWrite)
   end,
 
