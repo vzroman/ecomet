@@ -987,6 +987,7 @@ read_up(Lock, _Any)->
   end.
 
 object_map(Object,Fields)->
+  % TODO. We need to avoid this
   Fields#{
     <<".oid">>=>ecomet_object:get_oid(Object),
     object=>Object

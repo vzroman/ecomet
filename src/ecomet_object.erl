@@ -1103,7 +1103,7 @@ commit_object(on_delete, #object{oid = OID, pattern = P, db = DB}, _Changes )->
   }.
 
 %-------------------------Light Edit commit (no tags changed)---------------------------------------------
-commit_update_light(#object{oid = OID, db = DB}, Changes, ByStorageTypes, Storages )->
+commit_update_light(#object{oid = OID, db = DB}=Object, Changes, ByStorageTypes, Storages )->
 
   %-----Commit changes---------------------------
   maps:foreach(fun(Type, Fields)->
@@ -1116,11 +1116,12 @@ commit_update_light(#object{oid = OID, db = DB}, Changes, ByStorageTypes, Storag
     } )
   end, ByStorageTypes),
 
+  Object1 = maps:map(fun(_F,{V,_}) -> V end, Changes ),
   % This is to trigger only sticky subscriptions
   #{
     action => light_update,
     oid => OID,
-    object => maps:map(fun(_F,{V,_}) -> V end, Changes )
+    object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, Object1),
   }.
 %-------------------------Full Edit commit (tags changed)---------------------------------------------
 % The heaviest version of commit, because we need to build full object with it's tags to properly trigger query subscriptions
