@@ -139,7 +139,26 @@ build_index(OID, Changes, Index0)->
 
   end, Log ),
 
-  { Index, Log }.
+  %------------------Add tags from vot changed storages------------
+  FullLog =
+    maps:fold(fun(S, SFields, SAcc)->
+      maps:fold(fun(F, Types, FAcc)->
+        case maps:is_key(F,Changes) of
+          true ->
+            % Skip the field if it's in the Changes because it's log is ready
+            FAcc;
+          false ->
+            maps:fold(fun(T, Values, Acc) ->
+              {Add,STags0,Del} = maps:get( S, Acc, {[],[],[]} ),
+              Tags = [{F,V,T} || V <- Values],
+              STags = Tags ++ STags0,
+              Acc#{ S => {Add,STags,Del} }
+            end, FAcc, Types )
+        end
+      end, SAcc, SFields )
+    end, Log, Index0 ),
+
+  { Index, FullLog }.
 
 
 create_index(#index{
