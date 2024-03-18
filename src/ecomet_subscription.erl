@@ -33,7 +33,7 @@
 %%	API
 %%=================================================================
 -export([
-  subscribe/5,
+  subscribe/1,
   unsubscribe/1
 ]).
 
@@ -45,12 +45,13 @@
   query_monitor/2
 ]).
 
--record(subscription,{id, pid, ts, owner }).
+-record(sub,{id, pid, ts, owner }).
 -record(index,{tag,'&','!',db}).
 
 
 -define(SUBSCRIPTIONS,ecomet_subscriptions).
 -define(S_OBJECT,ecomet_subscriptions_object).
+-define(S_OBJECT_INDEX,ecomet_subscriptions_object_index).
 -define(S_QUERY,ecomet_subscriptions_query).
 -define(S_INDEX,ecomet_subscriptions_index).
 -define(M_KEY(OID,ID,Owner),{OID, ID, Owner}).
@@ -68,7 +69,7 @@ on_init()->
     named_table,
     public,
     set,
-    {keypos, #subscription.id},
+    {keypos, #sub.id},
     {read_concurrency, true},
     {write_concurrency,auto}
   ]),
@@ -77,7 +78,16 @@ on_init()->
   ets:new(?S_OBJECT,[
     named_table,
     public,
-    ordered_set,
+    set,
+    {read_concurrency, true},
+    {write_concurrency,auto}
+  ]),
+
+  % Prepare the storage for object subscriptions
+  ets:new(?S_OBJECT_INDEX,[
+    named_table,
+    public,
+    bag,
     {read_concurrency, true},
     {write_concurrency,auto}
   ]),
@@ -105,11 +115,13 @@ on_init()->
 %%=================================================================
 %%	API
 %%=================================================================
-subscribe( ID, DBs, Read, Conditions, Params)->
-  Owner = self(),
+subscribe(#subscription{
+  id = ID,
+  owner = Owner
+} = Subscription)->
   PID =
     ecomet_user:spawn_session(fun()->
-      case ets:insert_new(?SUBSCRIPTIONS,#subscription{
+      case ets:insert_new(?SUBSCRIPTIONS,#sub{
         id = {Owner,ID},
         ts = ecomet_lib:ts(),
         pid = self(),
@@ -120,7 +132,7 @@ subscribe( ID, DBs, Read, Conditions, Params)->
 
           Owner ! {ok, self()},
 
-          try do_subscribe(Conditions, Owner, ID, DBs, Read, Params )
+          try do_subscribe( Subscription )
           after
             ets:delete(?SUBSCRIPTIONS,{Owner,ID})
           end;
@@ -134,9 +146,15 @@ subscribe( ID, DBs, Read, Conditions, Params)->
     {error,PID,Error}->throw(Error)
   end.
 
-do_subscribe({<<".path">>,'=',Path}, Owner, ID, DBs, Read, Params )->
-  do_subscribe({<<".oid">>,'=',?OID(Path)}, Owner, ID, DBs, Read, Params );
-do_subscribe({<<".oid">>,'=',OID}, Owner, ID, _DBs, Read, Params )->
+do_subscribe(#subscription{
+  conditions = {<<".path">>,'=',Path}
+} = S )->
+  do_subscribe(S#subscription{
+    conditions = {<<".oid">>,'=',?OID(Path)}
+  });
+do_subscribe(#subscription{
+  conditions = {<<".oid">>,'=',OID}
+} = S)->
   % Object subscription
   case ecomet_object:open(OID) of
     not_exists->
@@ -144,14 +162,14 @@ do_subscribe({<<".oid">>,'=',OID}, Owner, ID, _DBs, Read, Params )->
     {error,Error}->
       throw(Error);
     Object->
-      subscribe_object(ID,Object,Owner,Read,Params)
+      subscribe_object(Object, S)
   end;
-do_subscribe(Conditions, Owner, ID, DBs, Read, Params )->
-  subscribe_query(ID, Conditions, Owner, DBs, Read, Params ).
+do_subscribe( Subscription )->
+  subscribe_query( Subscription ).
 
 unsubscribe(ID)->
   case ets:lookup(?SUBSCRIPTIONS,{self(),ID}) of
-    [#subscription{pid = PID,owner = Owner}]->
+    [#sub{pid = PID,owner = Owner}]->
       PID ! {unsubscribe,Owner};
     _->
       ignore
@@ -159,53 +177,31 @@ unsubscribe(ID)->
   ok.
 
 %%=================================================================
-%%	Single Object subscription
+%%	SINGLE OBJECT SUBSCRIPTION
 %%=================================================================
--record(monitor,{id,oid,object,read,owner,no_feedback,self}).
-subscribe_object(ID,Object,Owner,Read,Params)->
+-record(monitor,{
+  id,
+  oid,
+  object,
+  read,
+  deps,
+  owner,
+  no_feedback,
+  self
+}).
+subscribe_object(Object, S)->
 
-  OID = ?OID(Object),
-  Monitor = create_monitor( ID, OID, Object, Owner, Read, Params ),
+  Monitor = create_monitor(Object, S ),
 
   object_monitor(Monitor).
 
-create_monitor( ID, OID, Object, Owner, Read, #{
-  no_feedback := NoFeedback,
-  stateless := Stateless
-} )->
-
-  Monitor = #monitor{
-    id = ID,
-    oid = OID,
-    object = Object,
-    owner = Owner,
-    read = Read,
-    no_feedback = NoFeedback,
-    self = self()
-  },
-
-  ets:insert(?S_OBJECT, {?M_KEY(OID,ID,Owner), Monitor}),
-
-  if
-    Stateless -> ignore;
-    true ->
-      Fields = ecomet_object:read_all(Object),
-      Update = Read( Fields, ecomet_query:object_map(Object,Fields) ),
-      Owner ! ?SUBSCRIPTION(ID,create,OID, Update)
-  end,
-
-  Monitor.
-
-destroy_monitor(#monitor{
-  id = ID,
-  oid = OID,
-  owner = Owner
-})->
-  ets:delete(?S_OBJECT, ?M_KEY(OID,ID,Owner)).
-
 object_monitor(#monitor{id = ID, oid = OID, owner = Owner } = Monitor )->
   receive
-    {delete, OID}->
+    {delete, OID, Ignore}->
+      if
+        Ignore-> ignore;
+        true -> catch Owner ! ?SUBSCRIPTION(ID,delete,OID,#{})
+      end,
       ets:delete(?SUBSCRIPTIONS,{Owner,ID});
     {unsubscribe, Owner}->
       destroy_monitor( Monitor ),
@@ -219,6 +215,56 @@ object_monitor(#monitor{id = ID, oid = OID, owner = Owner } = Monitor )->
     5->erlang:hibernate(?MODULE,?FUNCTION_NAME,[ Monitor ])
   end.
 
+%%=================================================================
+%%	OBJECT MONITOR ENGINE
+%%=================================================================
+create_monitor( Object, #subscription{
+  id = ID,
+  owner = Owner,
+  read = Read,
+  deps = Deps,
+  params = #{
+    no_feedback := NoFeedback,
+    stateless := Stateless
+  }
+})->
+  OID = ?OID(Object),
+  Monitor = #monitor{
+    id = ID,
+    oid = OID,
+    object = Object,
+    owner = Owner,
+    read = Read,
+    deps = Deps,
+    no_feedback = NoFeedback,
+    self = self()
+  },
+
+  Key = ?M_KEY(OID,ID,Owner),
+  ets:insert(?S_OBJECT, {Key, Monitor}),
+  ets:insert(?S_OBJECT_INDEX, [{OID,Key} | [{{OID, F}, Key} || F <- Deps ]]),
+
+  if
+    Stateless -> ignore;
+    true ->
+      Fields = ecomet_object:read_all(Object),
+      Update = Read( ecomet_query:object_map(Object,Fields) ),
+      Owner ! ?SUBSCRIPTION(ID,create,OID, Update)
+  end,
+
+  Monitor.
+
+destroy_monitor(#monitor{
+  id = ID,
+  oid = OID,
+  owner = Owner,
+  deps = Deps
+})->
+  Key = ?M_KEY(OID,ID,Owner),
+  ets:delete_object (?S_OBJECT_INDEX, {OID, Key} ),
+  [ ets:delete_object(?S_OBJECT_INDEX, {{OID, F}, Key} ) || F <- Deps],
+  ets:delete(?S_OBJECT, Key).
+
 %%---------light update commit--------------------
 check_object(#monitor{
   id = ID,
@@ -227,14 +273,10 @@ check_object(#monitor{
   read = Read
 }, #{
   action := light_update,
-  object := Object,
-  changes := Changes
+  object := Object
 })->
-  Updates = Read( Changes, maps:merge(Object, Changes) ),
-  case maps:size(Updates) of
-    0-> ignore;
-    _-> catch Owner ! ?SUBSCRIPTION(ID,update,OID,Updates)
-  end,
+  Updates = Read( Object ),
+  catch Owner ! ?SUBSCRIPTION(ID,update,OID,Updates),
   ok;
 
 %%---------full update commit--------------------
@@ -254,18 +296,13 @@ check_object(#monitor{
   read = Read
 }, #{
   action := update,
-  object := Object,
-  changes := Changes
+  object := Object
 })->
-  Updates = Read( Changes, maps:merge(Object, Changes) ),
-  case maps:size(Updates) of
-    0-> ignore;
-    _-> catch Owner ! ?SUBSCRIPTION(ID,update,OID,Updates)
-  end,
+  Updates = Read( Object ),
+  catch Owner ! ?SUBSCRIPTION(ID,update,OID,Updates),
   ok;
 
 check_object(#monitor{
-  id = ID,
   owner = Owner,
   self = Self,
   oid = OID,
@@ -276,32 +313,35 @@ check_object(#monitor{
 })->
 
   destroy_monitor( Monitor ),
-  if
-    NoFeedback =:= true, Actor=:=Owner-> ignore;
-    true -> catch Owner ! ?SUBSCRIPTION(ID,delete,OID,#{})
-  end,
+  Ignore = NoFeedback =:= true andalso Actor=:=Owner,
 
-  catch Self ! { delete, OID },
+  catch Self ! { delete, OID, Ignore },
 
   ok.
 
 %%=================================================================
 %%	Query subscription
 %%=================================================================
--record(query,{id, conditions, rs, read, params, owner, no_feedback, start_ts, self}).
-subscribe_query(ID, InConditions, Owner, DBs, Read, #{
-  stateless := Stateless,     % No initial query, only updates
-  no_feedback := NoFeedback    % Do not send updates back to the author process
-} = Params)->
+-record(query,{rs, start_ts, self, subscription}).
+subscribe_query( #subscription{
+  id = ID,
+  conditions = Conditions0,
+  owner = Owner,
+  dbs = DBs,
+  params = #{
+    stateless := Stateless,     % No initial query, only updates
+    no_feedback := _NoFeedback    % Do not send updates back to the author process
+  } = Params
+} = S)->
 
   Conditions =
     case ecomet_user:is_admin() of
-      {ok,true}->compile_conditions( InConditions );
+      {ok,true}->compile_conditions( Conditions0 );
       {error,Error}->throw(Error);
       _->
         {ok,UserGroups}=ecomet_user:get_usergroups(),
         {'AND',[
-          compile_conditions( InConditions ),
+          compile_conditions( Conditions0 ),
           {'OR',[{<<".readgroups">>,'=',GID}||GID<-UserGroups]}
         ]}
     end,
@@ -316,12 +356,12 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
     if
       Stateless -> {-1, ecomet_resultset:new()};
       true ->
-        RS = ecomet_query:get(IndexDBs,rs,InConditions),
+        RS = ecomet_query:get(IndexDBs,rs,Conditions0),
 
         TS = ecomet_resultset:foldl(fun(OID, TS)->
           Object = ecomet_object:construct( OID ),
           { ok, ObjectTS } = ecomet_object:read_field( Object, <<".ts">> ),
-          create_monitor( ID, OID, Object, Owner, Read, Params ),
+          create_monitor( Object, S ),
           if
             ObjectTS > TS-> ObjectTS;
             true -> TS
@@ -332,12 +372,10 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
     end,
 
   Query = #query{
-    id = ID,
-    conditions = Conditions,
-    read = Read,
-    params = Params#{ stateless => true },
-    owner = Owner,
-    no_feedback = NoFeedback,
+    subscription = S#subscription{
+      conditions = Conditions,
+      params = Params#{ stateless => true }
+    },
     start_ts = StartTS,
     rs = ResultSet,
     self = self()
@@ -347,6 +385,136 @@ subscribe_query(ID, InConditions, Owner, DBs, Read, #{
 
   query_monitor(Query, Index).
 
+% SUBSCRIBE CID=test GET .name, f1 from * where and(.folder=$oid('/root/f1'), .name='o12')
+query_monitor(#query{
+  subscription = #subscription{
+    id = ID,
+    owner = Owner
+  } = S,
+  rs = RS
+} = Query, Index )->
+  receive
+    {add, OID, Object}->
+      if
+        Object =:= ignore -> ignore;
+        true -> catch Owner ! ?SUBSCRIPTION(ID, create, OID, Object )
+      end,
+      create_monitor( ecomet_object:construct(OID), S ),
+      query_monitor( Query#query{ rs = ecomet_resultset:add_oid( OID, RS ) }, Index );
+    {delete, OID, Ignore}->
+      if
+        Ignore -> ignore;
+        true -> catch Owner ! ?SUBSCRIPTION(ID, delete, OID, #{})
+      end,
+      query_monitor( Query#query{ rs = ecomet_resultset:remove_oid( OID, RS ) }, Index );
+    {unsubscribe, Owner}->
+      destroy_query( Query, Index );
+    {'DOWN', _Ref, process, Owner, _Reason}->
+      destroy_query( Query, Index );
+    _->
+      query_monitor( Query, Index )
+  after
+    5->erlang:hibernate(?MODULE,?FUNCTION_NAME,[ Query, Index ])
+  end.
+
+destroy_query(#query{
+  subscription = #subscription{
+    id = ID,
+    owner = Owner
+  },
+  rs = RS
+}, Index )->
+  ecomet_resultset:foldl(fun(OID, _)->
+    [ destroy_monitor( M ) || {_,M} <- ets:lookup(?S_OBJECT, ?M_KEY(OID, ID, Owner)) ],
+    ok
+  end, ignore, RS ),
+  catch destroy_index(Index, {Owner, ID}),
+  ets:delete(?S_QUERY, {Owner, ID} ),
+  ets:delete(?SUBSCRIPTIONS,{Owner,ID}).
+
+%%=================================================================
+%%	QUERY MONITOR ENGINE
+%%=================================================================
+%------------------New object created--------------------------------
+check_query(#query{
+  start_ts = StartTS
+}, #{
+  action := create,
+  ts := TS
+}) when TS =< StartTS ->
+  % Don't send objects that were sent on subscription initialization
+  ignore;
+
+check_query(#query{
+  subscription = #subscription{
+    owner = Owner,
+    conditions = Conditions,
+    read = Read,
+    params = #{ no_feedback := NoFeedback }
+  },
+  self = Self
+}, #{
+  action := create,
+  self := Actor,
+  oid := OID,
+  object := Object
+})->
+
+  case ecomet_resultset:direct(Conditions, Object) of
+    true->
+      Updates =
+        if
+          NoFeedback =:= true, Actor =:= Owner ->  ignore;
+          true -> Read( Object )
+        end,
+      catch Self ! { add, OID, Updates };
+    _->
+      ignore
+  end;
+
+check_query(#query{
+  subscription = #subscription{
+    id = ID,
+    owner = Owner,
+    conditions = Conditions,
+    read = Read,
+    params = #{ no_feedback := NoFeedback }
+  },
+  self = Self
+}, #{
+  action := update,
+  self := Actor,
+  oid := OID,
+  object := Object,
+  object0 := Object0
+})->
+  FullObject = maps:merge(Object0, Object),
+  case { ecomet_resultset:direct(Conditions, FullObject), ecomet_resultset:direct(Conditions, Object0) } of
+    {true,true}->
+      % Object monitor is working
+      ignore;
+    { true, false }->
+      Updates =
+        if
+          NoFeedback =:= true, Actor =:= Owner ->  ignore;
+          true -> Read( FullObject )
+        end,
+      % The subscription process should create monitor itself.
+      % Because if I create it and the subscription is already dead
+      % the the monitor will never be destroyed
+      catch Self ! { add, OID, Updates };
+    {false, true}->
+      % Remove the monitor
+      [ destroy_monitor( M ) || {_,M} <- ets:lookup(?S_OBJECT, ?M_KEY(OID, ID, Owner)) ],
+      Ignore = NoFeedback =:= true andalso Actor =:= Owner,
+      catch Self ! { delete, OID, Ignore };
+    _->
+      ignore
+  end.
+
+%%------------------------------------------------------------
+%%  Search engine
+%%------------------------------------------------------------
 compile_conditions({<<".pattern">>,'=',PatternID})->
   Patterns = [PatternID|ecomet_pattern:get_children_recursive(PatternID)],
   {'OR',[{<<".pattern">>,':=',P}||P<-Patterns]};
@@ -371,7 +539,7 @@ compile_index([], _DBs)->
   [].
 
 get_subscriptions( Session )->
-  [ #{id => Id, ts => TS, pid => PID} || [Id,TS,PID] <-ets:match(?SUBSCRIPTIONS, #subscription{id = {Session,'$1'}, ts ='$2', pid='$3', _ = '_'})].
+  [ #{id => Id, ts => TS, pid => PID} || [Id,TS,PID] <-ets:match(?SUBSCRIPTIONS, #sub{id = {Session,'$1'}, ts ='$2', pid='$3', _ = '_'})].
 
 index_dbs( '*' )->
   '*';
@@ -382,9 +550,6 @@ index_dbs([ DB | Rest ]) when is_atom( DB )->
 index_dbs([])->
   [].
 
-%%------------------------------------------------------------
-%%  Search engine
-%%------------------------------------------------------------
 build_index([#index{tag = Tag}=Index|Rest], ID)->
 
   {ok,TagUnlock} = elock:lock(?LOCKS,{tag,Tag}, _IsShared = false, _Timeout = infinity),
@@ -454,142 +619,43 @@ global_set(Tag)->
 global_reset(Tag)->
   ecomet_router:global_reset( Tag ).
 
-check_query(#query{
-  no_feedback = true,
-  owner = Owner
-}, #{
-   self := Self
-}) when Owner=:= Self ->
-  % Ignore own changes
-  ok;
-
-%------------------New object created--------------------------------
-check_query(#query{
-  id = ID,
-  owner = Owner,
-  conditions = Conditions,
-  read = Read,
-  start_ts = StartTS,
-  self = Self,
-  no_feedback = NoFeedback
-}, #{
-  action := create,
-  self := Actor,
-  oid := OID,
-  object := Object,
-  changes := Changes,
-  ts := TS
-})->
-  case ecomet_resultset:direct(Conditions, maps:merge(Object,Changes)) of
-    true->
-      if
-        TS =< StartTS ->
-          ignore;
-        true ->
-          if
-            NoFeedback =:= true, Actor =:= Owner ->
-              ignore;
-            true ->
-              catch Owner ! ?SUBSCRIPTION(ID,create,OID, Read( maps:merge(Object, Changes) ))
-          end,
-          catch Self ! { add, OID }
-      end;
-    _->
-      ignore
-  end;
-
-check_query(#query{
-  id = ID,
-  owner = Owner,
-  conditions = Conditions,
-  read = Read,
-  start_ts = StartTS,
-  self = Self,
-  no_feedback = NoFeedback
-}, #{
-  self := Actor,
-  oid := OID,
-  object := Object,
-  changes := Changes,
-  ts := TS
-})->
-  case { ecomet_resultset:direct(Conditions, maps:merge(Object,Changes)), ecomet_resultset:direct(Conditions, Object) } of
-    {true,true}->
-      % Object monitor is working
-      ignore;
-    { true, false }->
-      if
-        TS =< StartTS ->
-          ignore;
-        true ->
-          if
-            NoFeedback =:= true, Actor =:= Owner ->
-              ignore;
-            true ->
-              catch Owner ! ?SUBSCRIPTION(ID,create,OID, Read( Object, Object ))
-          end,
-          catch Self ! { add, OID }
-      end;
-    {false, true}->
-      if
-        NoFeedback =:= true, Actor =:= Owner ->
-          ignore;
-        true ->
-          catch Owner ! ?SUBSCRIPTION(ID,delete,OID,#{})
-      end,
-      catch Self ! { remove, OID };
-    _->
-      ignore
-  end.
-
-% SUBSCRIBE CID=test GET .name, f1 from * where and(.folder=$oid('/root/f1'), .name='o12')
-query_monitor( #query{id = ID, owner = Owner, rs = RS, read = Read, params = Params } = Query, Index )->
-  receive
-    {add, OID}->
-      create_monitor( ID, OID, ecomet_object:construct(OID), Owner, Read, Params ),
-      query_monitor( Query#query{ rs = ecomet_resultset:add_oid( OID, RS ) }, Index );
-    { remove, OID }->
-      ets:delete(?S_OBJECT, ?M_KEY(OID, ID, Owner)),
-      query_monitor( Query#query{ rs = ecomet_resultset:remove_oid( OID, RS ) }, Index );
-    {delete, OID}->
-      query_monitor( Query#query{ rs = ecomet_resultset:remove_oid( OID, RS ) }, Index );
-    {unsubscribe, Owner}->
-      destroy_query( Query, Index );
-    {'DOWN', _Ref, process, Owner, _Reason}->
-      destroy_query( Query, Index );
-    _->
-      query_monitor( Query, Index )
-  after
-    5->erlang:hibernate(?MODULE,?FUNCTION_NAME,[ Query, Index ])
-  end.
-
-destroy_query( #query{id = ID, owner = Owner, rs = RS }, Index )->
-  ecomet_resultset:foldl(fun(OID, _)->
-    ets:delete(?S_OBJECT, ?M_KEY(OID, ID, Owner))
-  end, ignore, RS ),
-  catch destroy_index(Index, {Owner, ID}),
-  ets:delete(?S_QUERY, {Owner, ID} ),
-  ets:delete(?SUBSCRIPTIONS,{Owner,ID}).
-
 %%------------------------------------------------------------
 %%  Trigger subscriptions
 %%------------------------------------------------------------
-notify_monitor( OID, Log )->
-  notify_monitor( ets:next(?S_OBJECT, ?M_KEY( OID, -1, -1 )), OID, Log ).
-notify_monitor(?M_KEY(OID,_,_)=K, OID, Log )->
-  case ets:lookup( ?S_OBJECT, K ) of
-    [{_,Monitor}]-> check_object( Monitor, Log );
-    _-> ignore
-  end,
-  notify_monitor( ets:next(?S_OBJECT, K), OID, Log );
-notify_monitor(_K, _OID, _Log )->
+notify_monitor( OID, #{ action:= delete } =  Log )->
+  Monitors = find_all_monitors( OID ),
+  [ check_object( M, Log ) || M <- Monitors ],
+  ok;
+
+notify_monitor( OID, #{ object := Object } =  Log )->
+  Monitors = find_monitors( OID, maps:keys( Object ) ),
+  [ check_object( M, Log ) || M <- Monitors ],
   ok.
 
+%% All OID monitors
+find_all_monitors( OID )->
+  MKeys = [ K || {_, K} <- ets:lookup( ?S_OBJECT_INDEX, OID )],
+  get_monitors( lists:usort( MKeys ) ).
 
+%% OID fields monitors
+find_monitors(OID, Fields)->
+  MKeys = lists:append( [ [ K || {_, K} <- ets:lookup( ?S_OBJECT_INDEX, {OID, F} )] || F <- Fields ] ),
+  get_monitors( lists:usort( MKeys ) ).
+
+get_monitors( [MKey|Rest] )->
+  case ets:lookup( ?S_OBJECT, MKey ) of
+    [{_,M}]-> [M | get_monitors( Rest ) ];
+    _-> get_monitors( Rest )
+  end;
+get_monitors([])->
+  [].
+
+%%=================================================================================
+%%  OBJECT COMMIT
+%%=================================================================================
 %%---------------Light update-----------------------
 on_commit(#{
   action := create,
-  oid := OID,
   db := DB,
   tags := Tags
 } = Log, Global)->
@@ -599,9 +665,7 @@ on_commit(#{
       ignore;
     Global->
       light_search(Global, DB, Tags, Log)
-  end,
-
-  notify_monitor( OID, Log );
+  end;
 
 %%---------------UPDATE-----------------------
 % Light
