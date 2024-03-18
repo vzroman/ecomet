@@ -60,6 +60,14 @@
   dump_batch/2
 ]).
 
+%%	TRANSACTION API
+-export([
+  commit/3,
+  commit1/3,
+  commit2/2,
+  rollback/2
+]).
+
 %%	INFO API
 -export([
   get_size/1
@@ -72,10 +80,7 @@
   read/4, read/5, bulk_read/4, bulk_read/5,
   write/5, write/6, bulk_write/4, bulk_write/5,
   delete/4, delete/5, bulk_delete/4, bulk_delete/5,
-  transaction/1,
-
-  changes/4, bulk_changes/4,
-  on_abort/5, bulk_on_abort/4
+  transaction/1
 ]).
 
 %%=================================================================
@@ -256,43 +261,26 @@ read(_Ref,[])->
   [].
 
 write(Ref, KVs)->
-  ByTypes =
-    lists:foldl(fun({#key{ type = T, storage = S, key = K }, V}, Acc)->
-      TypeAcc = maps:get(T,Acc,[]),
-      Acc#{ T => [{S,K,V} | TypeAcc]}
-    end,#{}, KVs),
-  maps:map(fun(Type, Recs)->
-    { Module, TRef } = maps:get(Type, Ref),
-    {Data, Indexes}=
-      lists:foldl(fun({S,K,V},{DAcc,IAcc})->
-        if
-          S =:= ?INDEX, is_boolean(V)->
-            % The trick.
-            % If the value of the index is a boolean it's an index update as a result of commit
-            % but not real value. This write must be done by ecomet_index module
-            {DAcc,[{K,V}|IAcc]};
-          true->
-            {[{{S,[K]}, V}|DAcc], IAcc}
-        end
-      end,{[],[]}, Recs),
-    % Write data
-    ok = Module:write( TRef, Data ),
-    % Update indexes
-    ok = ecomet_index:write(Module, TRef, Indexes )
-  end, ByTypes),
-  ok.
+
+  % Not transactional writes only used by zaya copy engine
+  % there is no need in to cross module two phase commit
+  % because is something goes wrong the copy will be destroyed and restarted
+
+  {Data, IndexLog} = prepare_write( KVs ),
+
+  commit( Ref, Data, _Delete = #{}, IndexLog ).
+
 
 delete(Ref, Keys)->
-  ByTypes =
-    lists:foldl(fun(#key{ type = T, storage = S, key = K }, Acc)->
-      TypeAcc = maps:get(T,Acc,[]),
-      Acc#{ T => [{S,[K]} | TypeAcc]}
-    end,#{}, Keys),
-  maps:map(fun(Type, TKeys)->
-    { Module, TRef } = maps:get(Type, Ref),
-    ok = Module:delete( TRef, TKeys )
-  end, ByTypes),
-  ok.
+
+  % Not transactional deletes only used by zaya copy engine
+  % there is no need in to cross module two phase commit
+  % because is something goes wrong the copy will be destroyed and restarted
+
+  Delete = prepare_delete( Keys ),
+
+  commit( Ref, _Data = #{}, Delete, _IndexLog = #{} ).
+
 
 %%	ITERATOR
 first( Ref )->
@@ -406,6 +394,147 @@ copy(Ref, Fun, InAcc)->
 dump_batch(Ref, KVs)->
   write(Ref, KVs).
 
+%%	TRANSACTION
+%-------------Commit to a single storage
+commit(Ref, KVs, Keys) when map_size( Ref ) =:= 1->
+  {Data, IndexLog} = prepare_write( KVs ),
+  Delete = prepare_delete( Keys ),
+  commit( Ref, Data, Delete, IndexLog );
+
+commit(Ref, KVs, Keys)->
+
+  {Data, IndexLog} = prepare_write( KVs ),
+  Delete = prepare_delete( Keys ),
+  case needs_log( Data, Delete ) of
+    false -> commit( Ref, Data, Delete, IndexLog );
+    true -> two_phase_commit( Ref, Data, Delete, IndexLog )
+  end.
+
+commit1(_Ref, KVs, Keys)->
+  {KVs, Keys}.
+
+commit2(Ref, {KVs, Keys})->
+  commit( Ref, KVs, Keys ).
+
+rollback( _Ref, _TRef )->
+  ok.
+
+commit(Ref, Data, Delete, IndexLog)->
+
+  Storages = get_commit_storages( Data, Delete ),
+  case Storages -- maps:keys( Ref ) of
+    [] -> ok;
+    Invalid ->
+      %% ATTENTION! If the user tries to save object with storage type
+      %% that is not in the DB then it will crash here
+      ?LOGERROR("attempt to save to not configured storage types: ~p",[ Invalid ]),
+      throw({ invalid_storage_type, Invalid })
+  end,
+
+  % Order commit the heavier types go first
+  CommitOrder = [ ramdisc, disc, ram ],
+  Ordered = CommitOrder -- ( CommitOrder -- Storages ),
+
+  [ begin
+      { Module, TRef } = maps:get(T, Ref),
+      TData = maps:get( T, Data, none ),
+      TDelete = maps:get( T, Delete, none ),
+      TIndexLog = maps:get( T, IndexLog, none ),
+      commit( TRef, Module, TData, TDelete, TIndexLog )
+    end || T <- Ordered],
+
+  ok.
+
+%%-----------------Only write commit (no index, no delete)----------------------------------
+commit(Ref, Module, Data, _Delete = none, _IndexLog = none) ->
+  Module:write( Ref, Data);
+
+%%-----------------Only delete commit (no index, no write)----------------------------------
+commit(Ref, Module, _Data = none, Delete, _IndexLog = none) ->
+  Module:delete( Ref, Delete);
+
+%%-----------------Write and delete with no index----------------------------------
+commit(Ref, Module, Data , Delete , _IndexLog = none) ->
+  Module:commit( Ref, Data, Delete);
+
+%%-----------------Write commit with index (no delete)----------------------------------
+commit(Ref, Module, Data, _Delete = none, IndexLog) ->
+
+  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
+  try
+    case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
+      { IndexWrite, IndexDel } when length( IndexDel ) > 0 ->
+        Module:commit( Ref, Data ++ IndexWrite, IndexDel);
+      { IndexWrite, _IndexDel }->
+        Module:write( Ref, Data ++ IndexWrite)
+    end
+  after
+    Unlock()
+  end;
+
+%%-----------------Delete commit with index (no write)----------------------------------
+commit(Ref, Module, _Data = none, Delete, IndexLog) ->
+
+  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
+  try
+    case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
+      { IndexWrite, IndexDel } when length( IndexWrite ) > 0 ->
+        Module:commit( Ref, IndexWrite, Delete ++ IndexDel);
+      { _IndexWrite, IndexDel }->
+        Module:delete( Ref, Delete ++ IndexDel)
+    end
+  after
+    Unlock()
+  end;
+
+commit(Ref, Module, Data, Delete, IndexLog)->
+  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
+
+  try
+    { IndexWrite, IndexDel } = ecomet_index:prepare_write(Module, Ref, IndexLog ),
+    if
+      length( IndexDel ) =:= 0->
+        Module:commit( Ref, Data ++ IndexWrite, Delete);
+      length( IndexWrite ) =:= 0->
+        Module:commit( Ref, Data, Delete ++ IndexDel);
+      true ->
+        Module:commit( Ref, Data ++ IndexWrite, Delete ++ IndexDel)
+    end
+  after
+    Unlock()
+  end.
+
+two_phase_commit( Ref, Data, Delete, IndexLog )->
+  % TODO
+  commit( Ref, Data, Delete, IndexLog ).
+
+prepare_write( Write )->
+  lists:foldl(fun( { #key{ type = T, storage = S, key = K }, V}, {DAcc, IAcc})->
+    if
+      S =:= ?INDEX, is_boolean( V )->
+        % The trick.
+        % If the value of the index is a boolean it's an index update as a result of commit
+        % but not real value. This write must be done by ecomet_index module
+        TIAcc = maps:get( T, IAcc, [] ),
+        { DAcc, IAcc#{ T => [{K,V}|TIAcc] } };
+      true ->
+        TDAcc = maps:get( T, DAcc, [] ),
+        { DAcc#{ T => [{{S,[K]}, V}|TDAcc] } , IAcc}
+    end
+  end, { #{}, #{} }, Write ).
+
+prepare_delete( Delete )->
+  lists:foldl(fun(#key{ type = T, storage = S, key = K }, Acc)->
+    TypeAcc = maps:get(T,Acc,[]),
+    Acc#{ T => [{S,[K]} | TypeAcc]}
+  end,#{}, Delete).
+
+needs_log( Data, Delete )->
+  Storages = get_commit_storages( Data, Delete ),
+  lists:member( disc, Storages ) andalso lists:member( ramdisc, Storages ).
+
+get_commit_storages( Data, Delete )->
+  lists:usort( maps:keys( Data ) ++ maps:keys( Delete )).
 
 %%=================================================================
 %%	INFO
@@ -458,21 +587,6 @@ bulk_delete(DB, Storage, Type, Keys, Lock)->
 
 transaction(Fun)->
   zaya:transaction(Fun).
-
-changes(DB, Storage, Type, Key)->
-  K = #key{type = Type, storage = Storage, key = Key},
-  case zaya:changes(DB, [K]) of
-    #{ K:= Changes }-> Changes;
-    _->none
-  end.
-bulk_changes(DB, Storage, Type, Keys)->
-  Result = zaya:changes(DB, [#key{type = Type, storage = Storage, key = K} || K <- Keys]),
-  maps:fold(fun(#key{key = K}, V, Acc)->Acc#{ K => V } end, #{}, Result).
-
-on_abort(DB, Storage, Type, Key, Value)->
-  zaya:on_abort(DB, [{#key{type = Type, storage = Storage, key = Key}, Value}] ).
-bulk_on_abort(DB, Storage, Type, KVs)->
-  zaya:on_abort(DB, [{#key{type = Type, storage = Storage, key = K}, V} || {K,V} <- KVs] ).
 
 %%=================================================================
 %%	SERVICE API

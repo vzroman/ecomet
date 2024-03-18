@@ -16,20 +16,20 @@
 %% under the License.
 %%----------------------------------------------------------------
 
+-ifndef(ECOMET_SUBSCRIPTION).
+-define(ECOMET_SUBSCRIPTION,1).
 
--module(ecomet_app).
+-define(EMPTY_SET, {0,nil} ).
+-define(NEW_SET(Es), gb_sets:from_list( Es )).
+-define(SET_ADD(E,S), gb_sets:add_element(E, S)).
+-define(SET_DEL(E,S), gb_sets:del_element(E, S)).
+-define(SET_AND(S1,S2), gb_sets:intersection( S1, S2 )).
+-define(SET_OR(S1,S2), gb_sets:union( S1, S2 )).
+-define(SET_ANDNOT(S1,S2), gb_sets:subtract( S1, S2 )).
+-define(SET_IS_SUBSET(S1,S2), gb_sets:is_subset( S1, S2 )).
+-define(SET_IS_DISJOINT(S1,S2), gb_sets:is_disjoint( S1, S2 )).
+-define(SET_FOLD(F,Acc,S), gb_sets:fold( F, Acc, S )).
 
--behaviour(application).
+-record(subscription,{ id, owner, dbs, read, deps, conditions, params }).
 
--export([start/2, stop/1]).
-
-start(_StartType, _StartArgs) ->
-
-%%    debugger:start(),
-%%    timer:sleep( 30000 ),
-
-    ecomet_sup:start_link().
-
-stop(_State) ->
-    ok.
-
+-endif.

@@ -66,7 +66,7 @@
 %%====================================================================
 init()->
   LogRef =
-    case filelib:is_file(?dir ++ "/CURRENT") of
+    case filelib:is_file(?dir) of
       false->
         log_create();
       _->

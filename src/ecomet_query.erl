@@ -19,6 +19,7 @@
 -module(ecomet_query).
 
 -include("ecomet.hrl").
+-include("ecomet_subscription.hrl").
 
 -record(compiled_query,{conditions,map,reduce}).
 -record(field,{alias,value}).
@@ -214,48 +215,69 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
     format => undefined
   },InParams),
 
-  Read = compile_subscribe_read(Fields,Formatter),
+  {Deps, Read} = compile_subscribe_read(Fields,Formatter),
 
-  ecomet_subscription:subscribe( ID, DBs, Read, Conditions, Params ).
+  ecomet_subscription:subscribe(#subscription{
+    id = ID,
+    owner = self(),
+    dbs = DBs,
+    read = Read,
+    deps = Deps,
+    conditions = Conditions,
+    params = Params
+  }).
 
 
 compile_subscribe_read([<<".oid">>],_Formatter)->
-  fun(_Changes,_Object)-> #{} end;
-compile_subscribe_read(['*'],Formatter)->
+  {
+    [<<".oid">>],
+    fun(_Object)-> #{} end
+  };
+compile_subscribe_read(['*'],Formatter) when is_function(Formatter,2)->
   ReadField =
-    if
-      is_function(Formatter,2) ->
-        fun(Object,Field)->
-          Value = maps:get(Field,Object,none),
-          {ok,Type}=ecomet_object:field_type(maps:get(object,Object),Field),
-          Formatter(Type,Value)
-        end;
-      true ->
-        fun(Object,Field)->maps:get(Field,Object,none) end
+    fun(Object,Field)->
+      Value = maps:get(Field,Object,none),
+      {ok,Type}=ecomet_object:field_type(maps:get(object,Object),Field),
+      Formatter(Type,Value)
     end,
 
-  fun(Changes,Object)->
-    maps:map(fun(Field,_)-> ReadField(Object,Field) end,Changes)
-  end;
+  Read =
+    fun(Object)->
+      maps:map(fun(Field,_)-> ReadField(Object,Field) end,Object)
+    end,
+  {['*'], Read};
+compile_subscribe_read(['*'],_Formatter)->
+  Read =
+    fun(Object)->
+      maps:map(fun(Field,_)-> maps:get(Field,Object,none) end,Object)
+    end,
+  { ['*'], Read };
 
 compile_subscribe_read(Fields,Formatter)->
 
   % Per object reading plan
   ReadMap=read_map(Fields,Formatter),
 
-  fun(Changes,Object)->
-    Changed = ordsets:from_list( maps:keys( Changes )),
-    maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
-      case ordsets:intersection(Changed,Args) of
-        []->
-          % If the changes are not among the function arguments list the field is not affected
-          Acc;
-        _->
-          % The value has to be recalculated
-          Acc#{Alias=>Fun(Object)}
-      end
-    end,#{},ReadMap)
-  end.
+  Deps =
+    maps:fold(fun(_,#field{value = #get{args = Args}},Acc)->
+      ordsets:union( Acc, Args )
+    end,[],ReadMap),
+
+  Read =
+    fun(Object)->
+      Changed = ordsets:from_list( maps:keys( Object )),
+      maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
+        case ordsets:intersection(Changed,Args) of
+          []->
+            % If the changes are not among the function arguments list the field is not affected
+            Acc;
+          _->
+            % The value has to be recalculated
+            Acc#{Alias=>Fun(Object)}
+        end
+      end,#{},ReadMap)
+    end,
+  { Deps, Read }.
 
 
 unsubscribe(ID)->
@@ -965,6 +987,7 @@ read_up(Lock, _Any)->
   end.
 
 object_map(Object,Fields)->
+  % TODO. We need to avoid this
   Fields#{
     <<".oid">>=>ecomet_object:get_oid(Object),
     object=>Object

@@ -255,9 +255,9 @@ set_context(User)->
   ok.
 
 is_admin([GID|Rest])->
-  case ecomet_field:lookup_storage(disc,GID,<<".name">>)  of
-    <<".administrators">>->true;
-    _->is_admin(Rest)
+  case ecomet:read_field( ?OBJECT( GID ), <<".name">> ) of
+    {ok, <<".administrators">>} -> true;
+    _-> is_admin(Rest)
   end;
 is_admin(_)->
   false.

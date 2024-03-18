@@ -34,8 +34,6 @@
   read/5,
   write/6,
   delete/5,
-  on_abort/5,
-  changes/4,
   log/2,
   dict_put/1,
   dict_get/1,dict_get/2,
@@ -53,8 +51,7 @@ internal(Fun)->
         Res = Fun(),
         State = #state{log = Log} = get(?transaction),
         OrderedLog = lists:usort([{Queue,Value} || {Queue, Value} <- maps:values(Log)]),
-        CommitLog0 = ecomet_object:commit([Value || {_,Value} <- OrderedLog]),
-        CommitLog = ecomet_index:commit( CommitLog0 ),
+        CommitLog = ecomet_object:commit([Value || {_,Value} <- OrderedLog]),
         put(?transaction,State#state{log = CommitLog}),
         Res
       end),
@@ -183,31 +180,6 @@ delete(DB, Storage, Type, Key, Lock)->
       throw(no_transaction)
   end.
 
-on_abort( DB, Storage, Type, Key, Value )->
-  case get(?transaction) of
-    #state{ type = internal }->
-      ecomet_db:on_abort( DB, Storage, Type, Key, Value );
-    #state{ type = External } when is_pid(External)->
-      External ! {on_abort, self(), DB, Storage, Type, Key, Value},
-      ok;
-    _->
-      throw(no_transaction)
-  end.
-
-changes( DB, Storage, Type, Key )->
-  case get(?transaction) of
-    #state{ type = internal }->
-      ecomet_db:changes( DB, Storage, Type, Key );
-    #state{ type = External } when is_pid(External)->
-      External ! {changes, self(), DB, Storage, Type, Key},
-      receive
-        {result, External, {abort,_}=Error}-> throw(Error);
-        {result, External, Result}-> Result
-      end;
-    _->
-      throw(no_transaction)
-  end.
-
 log(OID, Value)->
   case get(?transaction) of
     #state{ type = internal, log = Log } = State->
@@ -315,13 +287,6 @@ external_loop( Owner )->
       external_loop( Owner );
     {delete, Owner, DB, Storage, Type, Key, Lock}->
       ok = delete(DB, Storage, Type, Key, Lock),
-      external_loop( Owner );
-    {on_abort, Owner, DB, Storage, Type, Key, Value}->
-      ok = on_abort(DB, Storage, Type, Key, Value),
-      external_loop( Owner );
-    {changes, Owner, DB, Storage, Type, Key}->
-      Result = changes(DB, Storage, Type, Key ),
-      Owner ! {result, self(), Result},
       external_loop( Owner );
     {log, Owner, OID, Value}->
       log( OID, Value ),
