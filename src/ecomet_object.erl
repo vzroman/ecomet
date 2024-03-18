@@ -1002,7 +1002,7 @@ changes_by_storage( Changes, Schema )->
     SAcc1 = SAcc#{ S => SAcc0#{ F => V } },
 
     if
-      I =:= none ->
+      I =:= none; I=:=[] ->
         { SAcc1,  IAcc };
       true ->
         {SAcc1, IAcc#{ F => {V,I,S} }}
