@@ -109,7 +109,7 @@
 -export([
   ts/0,
   stop/0,
-  rebuild_index/1, rebuild_index/2,
+  rebuild_index/1,
   wait_dbs/1,
   wait_local_dbs/0,
   db_available_nodes/1
@@ -384,8 +384,6 @@ stop()->
 
 rebuild_index(OID)->
   ecomet_object:rebuild_index( OID ).
-rebuild_index(OID, Fields)->
-  ecomet_object:rebuild_index(OID, Fields).
 
 wait_dbs( DBs )->
   ecomet_db:wait_dbs( DBs ).
