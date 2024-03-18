@@ -1121,7 +1121,7 @@ commit_update_light(#object{oid = OID, db = DB}=Object, Changes, ByStorageTypes,
   #{
     action => light_update,
     oid => OID,
-    object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, Object1),
+    object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, Object1)
   }.
 %-------------------------Full Edit commit (tags changed)---------------------------------------------
 % The heaviest version of commit, because we need to build full object with it's tags to properly trigger query subscriptions
