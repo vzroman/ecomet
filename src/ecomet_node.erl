@@ -84,7 +84,8 @@ get_attached_nodes()->
   zaya:all_nodes().
 
 get_ready_nodes()->
-  zaya:ready_nodes().
+  AllNodes = get_configured_nodes(),
+  AllNodes -- (zaya:ready_nodes() -- AllNodes ).
 
 update_ready( Node )->
   case [N || N <- get_configured_nodes(), N=:=Node] of

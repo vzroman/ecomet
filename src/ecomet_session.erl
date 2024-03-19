@@ -56,7 +56,7 @@
 
 -record(session,{id, pid, ts, user, user_id, info }).
 -record(user,{id, name, sessions_count }).
--record(state,{ subs, user_id, user, owner }).
+-record(state,{ user_id, user, owner }).
 
 %%=================================================================
 %%	Service API
@@ -68,7 +68,10 @@ on_init()->
   ets:new(?ECOMET_SESSION_TOKENS,[named_table,public,set]),	
 
   % Initialize subscriptions
-  ecomet_subscription:on_init(),
+  case ?ENV(disable_subscriptions, false) of
+    false -> ecomet_subscription:on_init();
+    _-> ignore
+  end,
 
   ok.
 
@@ -194,8 +197,7 @@ init([Name,UserId,Info,Owner])->
   State = #state{
     user_id = UserId,
     user = Name,
-    owner = Owner,
-    subs = #{}
+    owner = Owner
   },
 
   ?LOGINFO("starting a session for user ~p",[Name]),
@@ -203,39 +205,9 @@ init([Name,UserId,Info,Owner])->
   {ok,State}.
 
 
-handle_call({register_subscription, Id, Params}, _From, #state{
-  owner = Owner,
-  user = Name ,
-  subs = Subs
-} = State) ->
-
-  case ecomet_subscription:start_link( Id, Owner, Params ) of
-    {ok,PID}->
-      ?LOGDEBUG("register subscription ~p for user ~ts, PID ~p",[Id,Name,PID]),
-      {reply,{ok,PID},State#state{subs = Subs#{Id=>PID}}};
-    {error,Error} ->
-      ?LOGDEBUG("unable to register subscription ~p for user ~ts, error ~p",[Id,Name,Error]),
-      {reply, {error,Error}, State#state{subs = Subs}}
-  end;
-
 handle_call(Request, From, State) ->
   ?LOGWARNING("ecomet session got an unexpected call resquest ~p from ~p , state ~p",[Request,From, State]),
   {noreply,State}.
-
-handle_cast({remove_subscription, Id}, #state{
-  user = User,
-  subs = Subs
-} = State) ->
-
-  case Subs of
-    #{ Id := PID }->
-      ecomet_subscription:stop( PID ),
-      ?LOGDEBUG("remove subscription ~p for user ~ts",[ Id,User ]),
-      {noreply,State#state{subs = maps:remove(Id,Subs)}};
-    _->
-      ecomet_subscription:stop( Id ),
-      {noreply,State}
-  end;
 
 handle_cast(Request,State)->
   ?LOGWARNING("ecomet session got an unexpected cast resquest ~p, state ~p",[Request, State]),
@@ -248,13 +220,9 @@ handle_info(Message,State)->
 terminate(Reason,#state{
   user_id = UserId,
   user = Name,
-  owner = Owner,
-  subs = Subs
+  owner = Owner
 })->
   ?LOGINFO("terminating session for user ~ts, reason ~p",[Name ,Reason]),
-
-  % Deactivate all the subscriptions
-  [ ecomet_subscription:stop(PID) || {_,PID} <- maps:to_list(Subs)],
 
   % Unregister session
   ets:delete(?SESSIONS, self()),

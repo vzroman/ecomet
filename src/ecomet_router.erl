@@ -37,6 +37,13 @@
 
 on_init( PoolSize )->
 
+  case pg:start_link( ?MODULE ) of
+    {ok,_} -> ok;
+    {error,{already_started,_}}->ok;
+    {error,Error}-> throw({pg_error, Error})
+  end,
+  pg:join( ?MODULE , {?MODULE,'$members$'}, self() ),
+
   spawn_link(fun ready_nodes/0),
 
   [ persistent_term:put({?MODULE, I }, spawn_link(fun()->worker_loop( ?EMPTY_SET ) end)) || I <- lists:seq(0, PoolSize-1) ],
@@ -67,7 +74,7 @@ worker_loop( Global )->
   end.
 
 on_commit( Log )->
-  ecall:cast_all(persistent_term:get({?MODULE,ready_nodes}), ?MODULE , notify,[ Log ] ),
+  ecall:cast_all(persistent_term:get({?MODULE,ready_nodes},[]), ?MODULE , notify,[ Log ] ),
   notify( Log ).
 
 notify( Log )->
@@ -109,6 +116,7 @@ wait_confirm(Workers, Ref)->
 
 
 ready_nodes()->
-  catch persistent_term:put({?MODULE, ready_nodes }, ecomet_node:get_ready_nodes() -- [node()]),
+  Nodes = [ node(P) || P <- pg:get_members( ?MODULE, {?MODULE,'$members$'} )],
+  catch persistent_term:put({?MODULE, ready_nodes }, Nodes -- [node()]),
   timer:sleep(100),
   ready_nodes().
