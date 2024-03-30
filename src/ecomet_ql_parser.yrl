@@ -157,8 +157,7 @@ Databases -> Database : ['$1'].
 Databases -> Database ',' Databases: ['$1'|'$3'].
 
 Database -> Atom : '$1'.
-Database -> '$' Atom : atom_to_binary('$2', utf8 ).
-Database -> text : binary_to_atom(get_token('$1'),utf8).
+Database -> text : get_token('$1').
 
 GetFieldList -> '*': ['*'].
 GetFieldList -> GetField: ['$1'].
