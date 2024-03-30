@@ -859,16 +859,24 @@ init_default_users()->
   ok.
 
 new_db_id()->
-  case zaya:prev( ?SCHEMA, #dbId{k='$end'} ) of
-    {#dbId{k= MaxId},_}-> MaxId + 1;
-    _-> 0
-  end.
+  Counter =
+    case zaya:read( ?SCHEMA, [db_counter], write) of
+      [] -> 0;
+      [{_, C}] -> C + 1
+    end,
+  zaya:write( ?SCHEMA, [{db_counter, Counter}] ),
+
+  Counter.
 
 new_node_id()->
-  case zaya:prev( ?SCHEMA, #nodeId{k='$end'} ) of
-    {#nodeId{k= MaxId},_}-> MaxId + 1;
-    _-> 0
-  end.
+  Counter =
+    case zaya:read( ?SCHEMA, [node_counter], write) of
+      [] -> 0;
+      [{_, C}] -> C + 1
+    end,
+  zaya:write( ?SCHEMA, [{node_counter, Counter}] ),
+
+  Counter.
 
 init_tree(FolderID,Items)->
   [
