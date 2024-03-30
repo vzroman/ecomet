@@ -864,7 +864,7 @@ new_db_id()->
       [] -> 0;
       [{_, C}] -> C + 1
     end,
-  zaya:write( ?SCHEMA, [{db_counter, Counter}] ),
+  zaya:write( ?SCHEMA, [{db_counter, Counter}], write ),
 
   Counter.
 
@@ -874,7 +874,7 @@ new_node_id()->
       [] -> 0;
       [{_, C}] -> C + 1
     end,
-  zaya:write( ?SCHEMA, [{node_counter, Counter}] ),
+  zaya:write( ?SCHEMA, [{node_counter, Counter}], write ),
 
   Counter.
 
