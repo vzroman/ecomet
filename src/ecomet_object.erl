@@ -970,7 +970,7 @@ save(#object{oid=OID,pattern = P}=Object, Handler)->
   % Run behaviours
   [ case erlang:function_exported(Behaviour,Handler,1) of
       true ->
-        try Behaviour:Handler(Object) catch _:E:S->?LOGERROR("DEBUG: behaviour ~p error ~p : ~p",[ Behaviour, E, S ])  end;
+        Behaviour:Handler(Object);
       _ ->
         ?LOGWARNING("invalid behaviour ~p:~p",[Behaviour, Handler])
   end || Behaviour <- ecomet_pattern:get_behaviours(?map(P)) ],
