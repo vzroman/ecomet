@@ -265,6 +265,16 @@ destroy_monitor(#monitor{
   [ ets:delete_object(?S_OBJECT_INDEX, {{OID, F}, Key} ) || F <- Deps],
   ets:delete(?S_OBJECT, Key).
 
+check_object(#monitor{
+  owner = Owner,
+  no_feedback = true
+}, #{
+  action := Action,
+  self := Self
+}) when
+  (Owner =:= Self) andalso ( (Action =:= light_update) or (Action =:= update) )->
+  % Ignore own changes
+  ok;
 %%---------light update commit--------------------
 check_object(#monitor{
   id = ID,
@@ -280,15 +290,6 @@ check_object(#monitor{
   ok;
 
 %%---------full update commit--------------------
-check_object(#monitor{
-  owner = Owner,
-  no_feedback = true
-}, #{
-  action := update,
-  self := Self
-}) when Owner =:= Self->
-  % Ignore own changes
-  ok;
 check_object(#monitor{
   id = ID,
   oid = OID,
