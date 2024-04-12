@@ -306,7 +306,7 @@ get_mounted_folder(Path)->
 get_mounted_folder(Path, {#mntPath{k=MountedPath} = Closest, FolderID} )->
   S = size(MountedPath),
   case Path of
-    <<MountedPath:S/binary,_/binary>>->
+    <<MountedPath:S/binary,"/",_/binary>>->
       {MountedPath,FolderID};
     _->
       get_mounted_folder(Path, zaya:prev(?SCHEMA,Closest) )
