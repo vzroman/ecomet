@@ -308,7 +308,7 @@ check_parent(Object)->
 
 check_db(Object)->
   {ok,FolderID} = ecomet:read_field(Object,<<".folder">>),
-  case ecomet_object:get_db_name(FolderID) of
+  case ecomet_folder:get_db_name(FolderID) of
     ?ROOT->ok;
     _->?ERROR(not_root_database)
   end.
