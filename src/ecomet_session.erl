@@ -184,7 +184,7 @@ init([Name,UserId,Info,Owner])->
 
   % Register session
   true = ets:insert(?SESSIONS,#session{
-    id = self(),
+    id = Owner,
     ts = ecomet_lib:ts(),
     user = Name,
     user_id = UserId,
