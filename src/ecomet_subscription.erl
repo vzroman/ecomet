@@ -353,13 +353,17 @@ subscribe_query( #subscription{
   Index = compile_index( Tags, IndexDBs ),
   build_index(Index, {Owner, ID}),
 
-  {StartTS, ResultSet} =
-    if
-      Stateless -> {-1, ecomet_resultset:new()};
-      true ->
-        RS = ecomet_query:get(IndexDBs,rs,Conditions0),
+  RS = ecomet_query:get(IndexDBs,rs,Conditions0),
 
-        TS = ecomet_resultset:foldl(fun(OID, TS)->
+  StartTS =
+    if
+      Stateless ->
+        ecomet_resultset:foldl(fun(OID, TS)->
+          create_monitor( ecomet_object:construct( OID ), S ),
+          TS
+        end, -1, RS );
+      true ->
+        ecomet_resultset:foldl(fun(OID, TS)->
           Object = ecomet_object:construct( OID ),
           { ok, ObjectTS } = ecomet_object:read_field( Object, <<".ts">> ),
           create_monitor( Object, S ),
@@ -367,9 +371,7 @@ subscribe_query( #subscription{
             ObjectTS > TS-> ObjectTS;
             true -> TS
           end
-        end, -1, RS ),
-
-        { TS, RS }
+        end, -1, RS )
     end,
 
   Query = #query{
@@ -378,7 +380,7 @@ subscribe_query( #subscription{
       params = Params#{ stateless => true }
     },
     start_ts = StartTS,
-    rs = ResultSet,
+    rs = RS,
     self = self()
   },
 
