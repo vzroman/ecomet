@@ -343,14 +343,7 @@ check_name(Object,IsEmpty)->
     { NewName, OldName }->
       % Check the name for forbidden symbols
       case re:run(NewName,"^\\.?([a-zA-Z0-9_-]+)$") of
-        {match,_}->
-          if
-            OldName=/=none->
-              % The field is going to be renamed, remove the old name from the schema
-              {ok,PatternID}=ecomet:read_field(Object,<<".folder">>),
-              ecomet_pattern:remove_field(PatternID,OldName);
-            true -> ok
-          end;
+        {match,_}-> ok;
         _->?ERROR(invalid_name)
       end,
       if
@@ -358,9 +351,6 @@ check_name(Object,IsEmpty)->
           % There are already objects created by the pattern. They potentially have data
           % in the field. If we change the field's name the data will be lost.
           #{<<".folder">> := PatternOID} = ecomet:read_fields( Object, [<<".name">>, <<".folder">>] ),
-
-          % Clean old values
-          ecomet:set('*',#{ OldName => none}, {<<".pattern">>,'=', PatternOID}),
 
           {ok, Pattern} = ecomet:read_field( ecomet:open(PatternOID), <<".name">> ),
           ?LOGWARNING("Change name for the field ~p in pattern ~p. Field values for existing objects will be lost",[
