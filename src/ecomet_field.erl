@@ -326,7 +326,6 @@ on_delete(Object)->
       true->
         ok;
       _->
-        % The field cannot be deleted if the extent already exists
         ?LOGWARNING("remove field ~ts from pattern that has extent",[ ?PATH(Object) ])
     end,
     % Update the schema
@@ -398,9 +397,6 @@ check_storage(Object,IsEmpty)->
           % in the field. If we change the field's storage type the data will be lost.
           #{<<".name">> := Name, <<".folder">> := PatternOID} = ecomet:read_fields( Object, [<<".name">>, <<".folder">>] ),
 
-          % Clean old values
-          ecomet:set('*',#{ Name => none}, {<<".pattern">>,'=', PatternOID}),
-
           {ok, Pattern} = ecomet:read_field( ecomet:open(PatternOID), <<".name">> ),
           ?LOGWARNING("Change storage type for the field ~p in pattern ~p. Field values for existing objects will be lost",[
             Name,
@@ -434,9 +430,6 @@ check_type(Object,IsEmpty)->
           % There are already objects created by the pattern. They potentially have data
           % in the field. If we change the field's type the data will be lost.
           #{<<".name">> := Name, <<".folder">> := PatternOID} = ecomet:read_fields( Object, [<<".name">>, <<".folder">>] ),
-
-          % Clean old values
-          ecomet:set('*',#{ Name => none}, {<<".pattern">>,'=', PatternOID}),
 
           {ok, Pattern} = ecomet:read_field( ecomet:open(PatternOID), <<".name">> ),
           ?LOGWARNING("Change type for field ~p in pattern ~p. Field values for existing objects will be lost",[
