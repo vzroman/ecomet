@@ -341,10 +341,7 @@ dt_index(DT)->
 prepare_write(Module, Ref, Updates)->
   ByTags = group_by_tags( Updates ),
   maps:fold(fun(Tag, Patterns, Acc)->
-    try update_tag(Module, Ref, Tag, Patterns, Acc)
-    catch
-      _:E:S->?LOGERROR("DEBUG: index ~p : ~p",[E,S]), throw(E)
-    end
+    update_tag(Module, Ref, Tag, Patterns, Acc)
   end, {[],[]} , ByTags).
 
 group_by_tags( Updates )->
