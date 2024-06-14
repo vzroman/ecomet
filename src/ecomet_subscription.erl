@@ -50,11 +50,16 @@
 
 
 -define(SUBSCRIPTIONS,ecomet_subscriptions).
--define(S_OBJECT,ecomet_subscriptions_object).
--define(S_OBJECT_INDEX,ecomet_subscriptions_object_index).
+-define(S_OBJECT(I),list_to_atom("ecomet_subscriptions_object_"++integer_to_list(I))).
+-define(S_OBJECT_INDEX(I),list_to_atom("ecomet_subscriptions_object_index_"++integer_to_list(I))).
 -define(S_QUERY,ecomet_subscriptions_query).
 -define(S_INDEX,ecomet_subscriptions_index).
 -define(M_KEY(OID,ID,Owner),{OID, ID, Owner}).
+-define(S_SHARDS, persistent_term:get({?MODULE,shards})).
+-define(S_SHARDS(C), persistent_term:put({?MODULE,shards}, C)).
+-define(S_OID_SHARD(OID), erlang:phash2(OID, ?S_SHARDS)).
+-define(S_OBJECT_OID(OID), ?S_OBJECT( ?S_OID_SHARD(OID) )).
+-define(S_OBJECT_INDEX_OID(OID), ?S_OBJECT_INDEX( ?S_OID_SHARD(OID) )).
 
 %%=================================================================
 %%	Service API
@@ -71,26 +76,29 @@ on_init()->
     set,
     {keypos, #sub.id},
     {read_concurrency, true},
-    {write_concurrency,auto}
+    {write_concurrency,true}
   ]),
 
-  % Prepare the storage for object subscriptions
-  ets:new(?S_OBJECT,[
-    named_table,
-    public,
-    set,
-    {read_concurrency, true},
-    {write_concurrency,auto}
-  ]),
+  ?S_SHARDS(erlang:system_info(logical_processors)),
+  [ begin
+    % Prepare the storage for object monitors
+      ets:new(?S_OBJECT(I),[
+        named_table,
+        public,
+        set,
+        {read_concurrency, true},
+        {write_concurrency,true}
+      ]),
 
-  % Prepare the storage for object subscriptions
-  ets:new(?S_OBJECT_INDEX,[
-    named_table,
-    public,
-    bag,
-    {read_concurrency, true},
-    {write_concurrency,auto}
-  ]),
+      % Prepare the index for object monitors
+      ets:new(?S_OBJECT_INDEX(I),[
+        named_table,
+        public,
+        bag,
+        {read_concurrency, true},
+        {write_concurrency,true}
+      ])
+    end || I <- lists:seq(0, ?S_SHARDS-1) ],
 
   % Prepare the storage for query subscriptions
   ets:new(?S_QUERY,[
@@ -98,7 +106,7 @@ on_init()->
     public,
     set,
     {read_concurrency, true},
-    {write_concurrency,auto}
+    {write_concurrency,true}
   ]),
 
   % Prepare the storage for index
@@ -107,7 +115,7 @@ on_init()->
     public,
     set,
     {read_concurrency, true},
-    {write_concurrency,auto}
+    {write_concurrency,true}
   ]),
 
   ok.
@@ -241,8 +249,8 @@ create_monitor( Object, #subscription{
   },
 
   Key = ?M_KEY(OID,ID,Owner),
-  ets:insert(?S_OBJECT, {Key, Monitor}),
-  ets:insert(?S_OBJECT_INDEX, [{OID,Key} | [{{OID, F}, Key} || F <- Deps ]]),
+  ets:insert(?S_OBJECT_OID(OID), {Key, Monitor}),
+  ets:insert(?S_OBJECT_INDEX_OID(OID), [{OID,Key} | [{{OID, F}, Key} || F <- Deps ]]),
 
   if
     Stateless -> ignore;
@@ -261,9 +269,10 @@ destroy_monitor(#monitor{
   deps = Deps
 })->
   Key = ?M_KEY(OID,ID,Owner),
-  ets:delete_object (?S_OBJECT_INDEX, {OID, Key} ),
-  [ ets:delete_object(?S_OBJECT_INDEX, {{OID, F}, Key} ) || F <- Deps],
-  ets:delete(?S_OBJECT, Key).
+  SIndex = ?S_OBJECT_INDEX_OID(OID),
+  ets:delete_object (SIndex, {OID, Key} ),
+  [ ets:delete_object(SIndex, {{OID, F}, Key} ) || F <- Deps],
+  ets:delete(?S_OBJECT_OID(OID), Key).
 
 check_object(#monitor{
   owner = Owner,
@@ -428,7 +437,7 @@ destroy_query(#query{
   rs = RS
 }, Index )->
   ecomet_resultset:foldl(fun(OID, _)->
-    [ destroy_monitor( M ) || {_,M} <- ets:lookup(?S_OBJECT, ?M_KEY(OID, ID, Owner)) ],
+    [ destroy_monitor( M ) || {_,M} <- ets:lookup(?S_OBJECT_OID(OID), ?M_KEY(OID, ID, Owner)) ],
     ok
   end, ignore, RS ),
   catch destroy_index(Index, {Owner, ID}),
@@ -508,7 +517,7 @@ check_query(#query{
       catch Self ! { add, OID, Updates };
     {false, true}->
       % Remove the monitor
-      [ destroy_monitor( M ) || {_,M} <- ets:lookup(?S_OBJECT, ?M_KEY(OID, ID, Owner)) ],
+      [ destroy_monitor( M ) || {_,M} <- ets:lookup(?S_OBJECT_OID(OID), ?M_KEY(OID, ID, Owner)) ],
       Ignore = NoFeedback =:= true andalso Actor =:= Owner,
       catch Self ! { delete, OID, Ignore };
     _->
@@ -637,20 +646,22 @@ notify_monitor( OID, #{ object := Object } =  Log )->
 
 %% All OID monitors
 find_all_monitors( OID )->
-  MKeys = [ K || {_, K} <- ets:lookup( ?S_OBJECT_INDEX, OID )],
-  get_monitors( lists:usort( MKeys ) ).
+  SIndex = ?S_OBJECT_INDEX_OID(OID),
+  MKeys = [ K || {_, K} <- ets:lookup( SIndex, OID )],
+  get_monitors( lists:usort( MKeys ), ?S_OBJECT_OID(OID) ).
 
 %% OID fields monitors
 find_monitors(OID, Fields)->
-  MKeys = lists:append( [ [ K || {_, K} <- ets:lookup( ?S_OBJECT_INDEX, {OID, F} )] || F <- Fields ] ),
-  get_monitors( lists:usort( MKeys ) ).
+  SIndex = ?S_OBJECT_INDEX_OID(OID),
+  MKeys = lists:append( [ [ K || {_, K} <- ets:lookup( SIndex, {OID, F} )] || F <- Fields ] ),
+  get_monitors( lists:usort( MKeys ), ?S_OBJECT_OID(OID) ).
 
-get_monitors( [MKey|Rest] )->
-  case ets:lookup( ?S_OBJECT, MKey ) of
-    [{_,M}]-> [M | get_monitors( Rest ) ];
-    _-> get_monitors( Rest )
+get_monitors( [MKey|Rest], SObject )->
+  case ets:lookup( SObject, MKey ) of
+    [{_,M}]-> [M | get_monitors( Rest, SObject ) ];
+    _-> get_monitors( Rest, SObject )
   end;
-get_monitors([])->
+get_monitors([], _SObject)->
   [].
 
 %%=================================================================================
