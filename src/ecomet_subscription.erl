@@ -67,7 +67,8 @@
 on_init()->
 
   % Initialize subscriptions optimization
-  ok = ecomet_router:on_init( ?ENV( router_pool_size, ?ROUTER_POOL_SIZE ) ),
+  PoolSize = erlang:system_info(logical_processors),
+  ?S_SHARDS(PoolSize),
 
   % Prepare the storage for sessions
   ets:new(?SUBSCRIPTIONS,[
@@ -79,7 +80,6 @@ on_init()->
     {write_concurrency,true}
   ]),
 
-  ?S_SHARDS(erlang:system_info(logical_processors)),
   [ begin
     % Prepare the storage for object monitors
       ets:new(?S_OBJECT(I),[
@@ -98,7 +98,7 @@ on_init()->
         {read_concurrency, true},
         {write_concurrency,true}
       ])
-    end || I <- lists:seq(0, ?S_SHARDS-1) ],
+    end || I <- lists:seq(0, PoolSize-1) ],
 
   % Prepare the storage for query subscriptions
   ets:new(?S_QUERY,[
@@ -117,6 +117,8 @@ on_init()->
     {read_concurrency, true},
     {write_concurrency,true}
   ]),
+
+  ok = ecomet_router:on_init( PoolSize ),
 
   ok.
 
