@@ -51,7 +51,7 @@ on_init( PoolSize )->
       Acc#{ I => spawn_link(fun()->worker_loop( ?EMPTY_SET ) end) }
     end, #{}, lists:seq(0, PoolSize-1) ),
 
-  persistent_term:put({?MODULE, pool}, { PoolSize, maps:from_list(Workers) }).
+  persistent_term:put({?MODULE, pool}, { PoolSize, Workers }).
 
 worker_loop( Global )->
   receive
