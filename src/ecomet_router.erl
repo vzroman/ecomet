@@ -104,7 +104,7 @@ workers_update( Message )->
 
   {_, WorkersMap} = persistent_term:get({?MODULE, pool}),
   Workers = maps:values( WorkersMap ),
-  [ Worker ! {Message, Ref, self()} || Worker <- maps:values( Workers )],
+  [ Worker ! {Message, Ref, self()} || Worker <- Workers],
 
   wait_confirm(Workers, Ref).
 
