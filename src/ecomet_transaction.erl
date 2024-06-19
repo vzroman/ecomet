@@ -314,7 +314,16 @@ external_loop( Owner )->
 %%-----------------------------------------------------------------------
 %% Internal helpers
 %%-----------------------------------------------------------------------
-tcommit( #state{ log = Log, on_commit = OnCommit, owner = Owner })->
-  catch ecomet_router:on_commit( [ L#{ self => Owner } || L <- Log ] ),
-  [ catch F() || F <- lists:reverse(OnCommit) ].
+tcommit( #state{ log = Log0, on_commit = OnCommit, owner = Owner })->
+
+  %% TODO. Where to put self into the log?
+  Log =
+    [ L#{ self => Owner } || L <- Log0 ],
+
+  catch ecomet_router:on_commit( Log ),
+
+  % Run on commit actions
+  [ catch F() || F <- lists:reverse(OnCommit) ],
+
+  ok.
 

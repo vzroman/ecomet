@@ -294,9 +294,9 @@ check_object(#monitor{
   read = Read
 }, #{
   action := light_update,
-  object := Object
+  fields := Fields
 })->
-  Updates = Read( Object ),
+  Updates = Read( Fields ),
   catch Owner ! ?SUBSCRIPTION(ID,update,OID,Updates),
   ok;
 
@@ -308,9 +308,9 @@ check_object(#monitor{
   read = Read
 }, #{
   action := update,
-  object := Object
+  fields := Fields
 })->
-  Updates = Read( Object ),
+  Updates = Read( Fields ),
   catch Owner ! ?SUBSCRIPTION(ID,update,OID,Updates),
   ok;
 
@@ -471,15 +471,15 @@ check_query(#query{
   action := create,
   self := Actor,
   oid := OID,
-  object := Object
+  fields := Fields
 })->
 
-  case ecomet_resultset:direct(Conditions, Object) of
+  case ecomet_resultset:direct(Conditions, Fields) of
     true->
       Updates =
         if
           NoFeedback =:= true, Actor =:= Owner ->  ignore;
-          true -> Read( Object )
+          true -> Read( Fields )
         end,
       catch Self ! { add, OID, Updates };
     _->
@@ -499,11 +499,10 @@ check_query(#query{
   action := update,
   self := Actor,
   oid := OID,
-  object := Object,
-  object0 := Object0
+  fields := Fields,
+  fields0 := Fields0
 })->
-  FullObject = maps:merge(Object0, Object),
-  case { ecomet_resultset:direct(Conditions, FullObject), ecomet_resultset:direct(Conditions, Object0) } of
+  case { ecomet_resultset:direct(Conditions, Fields), ecomet_resultset:direct(Conditions, Fields0) } of
     {true,true}->
       % Object monitor is working
       ignore;
@@ -511,7 +510,7 @@ check_query(#query{
       Updates =
         if
           NoFeedback =:= true, Actor =:= Owner ->  ignore;
-          true -> Read( FullObject )
+          true -> Read( Fields )
         end,
       % The subscription process should create monitor itself.
       % Because if I create it and the subscription is already dead
@@ -641,8 +640,8 @@ notify_monitor( OID, #{ action:= delete } =  Log )->
   [ check_object( M, Log ) || M <- Monitors ],
   ok;
 
-notify_monitor( OID, #{ object := Object } =  Log )->
-  Monitors = find_monitors( OID, maps:keys( Object ) ),
+notify_monitor( OID, #{ fields := Fields } =  Log )->
+  Monitors = find_monitors( OID, maps:keys( Fields ) ),
   [ check_object( M, Log ) || M <- Monitors ],
   ok.
 

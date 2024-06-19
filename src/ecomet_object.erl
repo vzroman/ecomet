@@ -1032,7 +1032,7 @@ get_storage_indexes( Storages )->
 
 -record(s_data,{ oid, db, type, fields, data ,index, tags }).
 %-------------------------Create commit---------------------------------------------
-commit_object(on_create, #object{oid = OID, pattern = P, db = DB}=Object, Changes )->
+commit_object(on_create, #object{oid = OID, pattern = P, db = DB} = Object, Changes )->
 
   {ByStorageTypes, IndexedFields} = changes_by_storage( Changes, ?map( P ) ),
 
@@ -1050,16 +1050,16 @@ commit_object(on_create, #object{oid = OID, pattern = P, db = DB}=Object, Change
     }, Acc )
   end, ?EMPTY_SET, ByStorageTypes),
 
-  ObjectMap = maps:map(fun(_F,{V,_}) -> V end, Changes),
+  Fields = maps:map(fun(_F,{V,_}) -> V end, Changes),
 
   % Log timestamp. If it is an object creation then timestamp must be the same as
   % the timestamp of the object, otherwise it is taken as the current timestamp
-  TS = maps:get( <<".ts">>, ObjectMap ),
+  TS = maps:get( <<".ts">>, Fields ),
 
   #{
     action => create,
     oid => OID,
-    object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, ObjectMap),
+    fields => log_fields( Object, Fields ),
     db => DB,
     ts => TS,
     tags => AddTags
@@ -1103,7 +1103,7 @@ commit_object(on_delete, #object{oid = OID, pattern = P, db = DB}, _Changes )->
   }.
 
 %-------------------------Light Edit commit (no tags changed)---------------------------------------------
-commit_update_light(#object{oid = OID, db = DB}=Object, Changes, ByStorageTypes, Storages )->
+commit_update_light(#object{oid = OID, db = DB} = Object, Changes, ByStorageTypes, Storages )->
 
   %-----Commit changes---------------------------
   maps:foreach(fun(Type, Fields)->
@@ -1116,16 +1116,16 @@ commit_update_light(#object{oid = OID, db = DB}=Object, Changes, ByStorageTypes,
     } )
   end, ByStorageTypes),
 
-  Object1 = maps:map(fun(_F,{V,_}) -> V end, Changes ),
+  Fields = maps:map(fun(_F,{V,_}) -> V end, Changes ),
   % This is to trigger only sticky subscriptions
   #{
     action => light_update,
     oid => OID,
-    object => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, Object1)
+    fields => log_fields(Object, Fields)
   }.
 %-------------------------Full Edit commit (tags changed)---------------------------------------------
 % The heaviest version of commit, because we need to build full object with it's tags to properly trigger query subscriptions
--record(full_update_acc,{ add_tags, other_tags, del_tags, object0 }).
+-record(full_update_acc,{ add_tags, other_tags, del_tags, fields0 }).
 commit_update_full( #object{ oid = OID, pattern = P, db = DB } = Object, Changes, ByStorageTypes, IndexedFields , Storages0 )->
 
   % Load storages that are not loaded
@@ -1152,25 +1152,25 @@ commit_update_full( #object{ oid = OID, pattern = P, db = DB } = Object, Changes
     add_tags = ?EMPTY_SET,
     other_tags = ?EMPTY_SET,
     del_tags = ?EMPTY_SET,
-    object0 = #{}
+    fields0 = #{}
   }, ByStorageTypes),
 
   #full_update_acc{
     add_tags = AddTags,
     other_tags = OtherTags,
     del_tags = DelTags,
-    object0 = Object0
+    fields0 = Fields0
   } = CommitAcc,
 
-  Object1 = maps:map(fun(_F,{V,_}) -> V end, Changes),
+  Fields = maps:map(fun(_F,{V,_}) -> V end, Changes),
 
   TS = ecomet_lib:log_ts(),
 
   #{
     action => update,
     oid => OID,
-    object => Object1,
-    object0 => ecomet_query:object_map(Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false}, Object0),
+    fields => log_fields(Object, Fields),
+    fields0 => log_fields(Object, Fields0),
     db => DB,
     ts => TS,
     tags => {AddTags, OtherTags, DelTags}
@@ -1256,7 +1256,7 @@ commit_storage_update(#s_data{
   type =Type,
   fields = Fields
 }, #full_update_acc{
-  object0 = ObjectAcc
+  fields0 = Fields0Acc
 } = Acc)->
 
   case merge_fields( Fields0, Fields ) of
@@ -1267,7 +1267,7 @@ commit_storage_update(#s_data{
   end,
 
   Acc#full_update_acc{
-    object0 = maps:merge(ObjectAcc, Fields0 )
+    fields0 = maps:merge(Fields0Acc, Fields0 )
   };
 
 % Update storage without index with deleted tags
@@ -1281,7 +1281,7 @@ commit_storage_update(#s_data{
   fields = Fields
 }, #full_update_acc{
   del_tags = DelTagsAcc,
-  object0 = ObjectAcc
+  fields0 = Fields0Acc
 } = Acc)->
 
   case merge_fields( Fields0, Fields ) of
@@ -1295,7 +1295,7 @@ commit_storage_update(#s_data{
 
   Acc#full_update_acc{
     del_tags = ?SET_OR(DelTagsAcc,  DelTagsSet),
-    object0 = maps:merge(ObjectAcc, Fields0 )
+    fields0 = maps:merge(Fields0Acc, Fields0 )
   };
 
 % Update storage with index with tags
@@ -1311,7 +1311,7 @@ commit_storage_update(#s_data{
   add_tags = AddTagsAcc,
   other_tags = OtherTagsAcc,
   del_tags = DelTagsAcc,
-  object0 = ObjectAcc
+  fields0 = Fields0Acc
 } = Acc)->
 
   ok = ecomet_transaction:write(DB, ?DATA, Type, OID, #{ fields => merge_fields( Fields0, Fields ), index => Index },  none),
@@ -1324,7 +1324,7 @@ commit_storage_update(#s_data{
     add_tags = ?SET_OR(AddTagsAcc,  AddTagsSet),
     other_tags = ?SET_OR(OtherTagsAcc,  OtherTagsSet),
     del_tags = ?SET_OR(DelTagsAcc,  DelTagsSet),
-    object0 = maps:merge(ObjectAcc, Fields0 )
+    fields0 = maps:merge(Fields0Acc, Fields0 )
   };
 
 % Create storage without index
@@ -1357,6 +1357,8 @@ commit_storage_update(#s_data{
     add_tags = ?SET_OR( AddTagsAcc, ?NEW_SET(AddTags) )
   }.
 
+log_fields( #object{ oid = OID } = Object, Fields )->
+  Fields#{ object => Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false} }.
 
 %%==============================================================================================
 %%	Reindexing
@@ -1400,7 +1402,7 @@ rebuild_index(OID)->
       add_tags = ?EMPTY_SET,
       other_tags = ?EMPTY_SET,
       del_tags = ?EMPTY_SET,
-      object0 = #{}
+      fields0 = #{}
     }, ByStorageTypes)
   end),
   ok.
