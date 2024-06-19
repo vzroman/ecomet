@@ -502,7 +502,8 @@ check_query(#query{
   fields := Fields,
   fields0 := Fields0
 })->
-  case { ecomet_resultset:direct(Conditions, Fields), ecomet_resultset:direct(Conditions, Fields0) } of
+  FullObject = maps:merge(Fields0, Fields),
+  case { ecomet_resultset:direct(Conditions, FullObject), ecomet_resultset:direct(Conditions, Fields0) } of
     {true,true}->
       % Object monitor is working
       ignore;
@@ -510,7 +511,7 @@ check_query(#query{
       Updates =
         if
           NoFeedback =:= true, Actor =:= Owner ->  ignore;
-          true -> Read( Fields )
+          true -> Read( FullObject )
         end,
       % The subscription process should create monitor itself.
       % Because if I create it and the subscription is already dead
