@@ -970,18 +970,18 @@ read_up(none, get)->
   fun(OID,Fields)->
     Object=ecomet_object:construct(OID),
     Values = ecomet_object:read_fields(Object,Fields),
-    Values#{ object => Object }
+    Values#{ object => Object, <<".oid">> => OID }
   end;
 read_up(Lock, _Any)->
   fun(OID,Fields)->
     try
       Object = ecomet_object:open(OID,Lock),
       Values = ecomet_object:read_fields(Object,Fields),
-      Values#{ object => Object }
+      Values#{ object => Object, <<".oid">> => OID }
     catch
       _:not_exists->
         NoneValues = maps:from_list([{F,none}||F<-Fields]),
-        NoneValues#{ object => not_exists }
+        NoneValues#{ object => not_exists, <<".oid">> => OID }
     end
   end.
 
