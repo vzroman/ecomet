@@ -258,7 +258,7 @@ create_monitor( Object, #subscription{
     Stateless -> ignore;
     true ->
       Fields = ecomet_object:read_all(Object),
-      Update = Read( Fields#{ object => Object } ),
+      Update = Read( ecomet_query:query_object( Object, Fields ) ),
       Owner ! ?SUBSCRIPTION(ID,create,OID, Update)
   end,
 

@@ -1358,7 +1358,11 @@ commit_storage_update(#s_data{
   }.
 
 log_fields( #object{ oid = OID } = Object, Fields )->
-  Fields#{ object => Object#object{pattern = get_pattern_oid( OID ), edit = false, move = false} }.
+  ecomet_query:query_object( Object#object{
+    pattern = get_pattern_oid( OID ),
+    edit = false,
+    move = false
+  }, Fields ).
 
 %%==============================================================================================
 %%	Reindexing
