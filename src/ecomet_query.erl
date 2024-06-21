@@ -35,9 +35,9 @@
   set/3,set/4,
   insert/2,
   delete/2,delete/3,
-  object_map/2,
   compile/3,compile/4,
-  system/3
+  system/3,
+  query_object/2
 ]).
 
 %%====================================================================
@@ -230,7 +230,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
 
 compile_subscribe_read([<<".oid">>],_Formatter)->
   {
-    [<<".oid">>],
+    [],
     fun(_Object)-> #{} end
   };
 compile_subscribe_read(['*'],Formatter) when is_function(Formatter,2)->
@@ -970,27 +970,24 @@ read_up(none, get)->
   % Optimized for reading case
   fun(OID,Fields)->
     Object=ecomet_object:construct(OID),
-    object_map(Object,ecomet_object:read_fields(Object,Fields))
+    query_object( Object, ecomet_object:read_fields(Object,Fields) )
   end;
 read_up(Lock, _Any)->
   fun(OID,Fields)->
     try
       Object = ecomet_object:open(OID,Lock),
-      object_map(Object,ecomet_object:read_fields(Object,Fields))
+      query_object( Object, ecomet_object:read_fields(Object,Fields) )
     catch
       _:not_exists->
-        maps:merge(maps:from_list([{F,none}||F<-Fields]),#{
-          <<".oid">>=> OID,
-          object=> not_exists
-        })
+        NoneValues = maps:from_list([{F,none}||F<-Fields]),
+        NoneValues#{ object => not_exists, <<".oid">> => OID }
     end
   end.
 
-object_map(Object,Fields)->
-  % TODO. We need to avoid this
+query_object( Object, Fields )->
   Fields#{
-    <<".oid">>=>ecomet_object:get_oid(Object),
-    object=>Object
+    <<".oid">> => ecomet_object:get_oid( Object ),
+    object => Object
   }.
 
 %%--------Local presorting----------------------------------

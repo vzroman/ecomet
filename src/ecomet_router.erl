@@ -46,19 +46,21 @@ on_init( PoolSize )->
 
   spawn_link(fun ready_nodes/0),
 
-  [ persistent_term:put({?MODULE, I }, spawn_link(fun()->worker_loop( ?EMPTY_SET ) end)) || I <- lists:seq(0, PoolSize-1) ],
+  Workers =
+    lists:foldl(fun(I, Acc)->
+      Acc#{ I => spawn_link(fun()->worker_loop( ?EMPTY_SET ) end) }
+    end, #{}, lists:seq(0, PoolSize-1) ),
 
-  % Register the ServiceID for the subscriptions
-  persistent_term:put({?MODULE,pool_size}, PoolSize).
+  persistent_term:put({?MODULE, pool}, { PoolSize, Workers }).
 
 worker_loop( Global )->
   receive
     {log, Log} ->
-      [try ecomet_subscription:on_commit( L, Global )
+      try ecomet_subscription:on_commit( Log, Global )
       catch
         _:Error:Stack->
           ?LOGERROR("log error ~p, ~p, ~p",[ Log, Error, Stack ])
-      end || L <- Log],
+      end,
       worker_loop( Global );
     {{global_set, Bit}, Ref, ReplyTo}->
       catch ReplyTo ! {Ref, self(), ok},
@@ -69,8 +71,6 @@ worker_loop( Global )->
     Unexpected->
       ?LOGWARNING("unexpected message ~p", [Unexpected]),
       worker_loop( Global )
-  after
-    100-> erlang:hibernate(?MODULE, ?FUNCTION_NAME,[ Global ])
   end.
 
 on_commit( Log )->
@@ -78,16 +78,20 @@ on_commit( Log )->
   notify( Log ).
 
 notify( Log )->
-  case persistent_term:get({?MODULE,pool_size},none) of
-    PoolSize when is_integer(PoolSize)->
-      I = erlang:phash2(Log, PoolSize),
-      Worker = persistent_term:get({?MODULE,I}),
-      Worker ! {log,Log},
-      ok;
+  case persistent_term:get({?MODULE, pool}, none) of
+    { PoolSize, Workers }->
+      notify( Log, PoolSize, Workers );
     _->
       % Not initialized yet
       ignore
   end.
+
+notify( [ #{oid := OID} = Log | Rest], PoolSize, Workers )->
+  W = maps:get( erlang:phash2(OID, PoolSize), Workers),
+  W ! { log, Log },
+  notify( Rest, PoolSize, Workers );
+notify( [], _PoolSize, _Workers )->
+  ok.
 
 global_set( Bit )->
   workers_update( {global_set, Bit} ).
@@ -96,14 +100,12 @@ global_reset( Bit )->
   workers_update( {global_reset, Bit} ).
 
 workers_update( Message )->
-  PoolSize = persistent_term:get({?MODULE,pool_size},none),
   Ref = make_ref(),
-  Workers =
-    [ begin
-        Worker = persistent_term:get({?MODULE,I}),
-        Worker ! {Message, Ref, self()},
-        Worker
-      end || I <- lists:seq(0, PoolSize -1)],
+
+  {_, WorkersMap} = persistent_term:get({?MODULE, pool}),
+  Workers = maps:values( WorkersMap ),
+  [ Worker ! {Message, Ref, self()} || Worker <- Workers],
+
   wait_confirm(Workers, Ref).
 
 wait_confirm([], _Ref)->
@@ -113,7 +115,6 @@ wait_confirm(Workers, Ref)->
     {Ref, Worker, ok} ->
       wait_confirm( lists:delete( Worker, Workers ), Ref )
   end.
-
 
 ready_nodes()->
   Nodes = [ node(P) || P <- pg:get_members( ?MODULE, {?MODULE,'$members$'} )],
