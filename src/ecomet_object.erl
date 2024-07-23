@@ -237,15 +237,27 @@ open(OID,Lock,_IsTransaction = true)->
   end,
 
   Object = construct(OID),
-  case get_lock(Lock, Object) of
-    none-> throw(not_exists);
-    _->
-      case check_rights(Object) of
-        {read,CanMove}->Object#object{edit = false, move = CanMove};
-        {write,CanMove}->Object#object{edit = true, move = CanMove };
-        none->throw(access_denied);
-        not_exists->throw(not_exists)
-      end
+
+  if
+    Lock =/= none ->
+      case get_lock(Lock, Object) of
+        none->
+          case ecomet_transaction:dict_get({OID, data}, none ) of
+            Data when is_map( Data )-> ok;
+            _-> throw(not_exists)
+          end;
+        _->
+          todo
+      end;
+    true->
+      ignore
+  end,
+
+  case check_rights(Object) of
+    {read,CanMove}->Object#object{edit = false, move = CanMove};
+    {write,CanMove}->Object#object{edit = true, move = CanMove };
+    none->throw(access_denied);
+    not_exists->throw(not_exists)
   end.
 
 exists(OID)->
