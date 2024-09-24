@@ -1067,7 +1067,7 @@ direct_like(String,Pattern) when (is_binary(Pattern) and is_binary(String))->
 	case Pattern of
 		% Symbol '^' is string start
 		<<"^",StartPattern/binary>>->
-			Length=size(StartPattern)*8,
+			Length=size(StartPattern),
 			case String of
 				<<StartPattern:Length/binary,_/binary>>->true;
 				_->false
