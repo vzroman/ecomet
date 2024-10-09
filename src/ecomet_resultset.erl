@@ -731,12 +731,12 @@ transaction_wait( _Workers )->
 	[].
 
 db_transaction(DB, Conditions, Map, Union, Master, Context)->
-	erlang:monitor(process, Master),
 	Nodes = ecomet_db:available_nodes(DB),
 	case lists:member(node(), Nodes) of
 		true->
 			db_transaction_request(DB, Conditions, Map, Union, Master, Context);
 		_->
+			erlang:monitor(process, Master),
 			db_transaction(Nodes, DB, Conditions, Map, Union, Master, Context)
 	end.
 
@@ -763,6 +763,7 @@ db_transaction(Nodes, DB, Conditions, Map, Union, Master, Context)->
 	end.
 
 db_transaction_request(DB, Conditions, Map, Union, Master, Context)->
+	erlang:monitor(process, Master),
 	ecomet_user:query_context( Context ),
 	case ecomet:transaction(fun()->
 		Result = execute_local(DB,Conditions,Map,Union),
