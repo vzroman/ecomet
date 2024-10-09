@@ -524,36 +524,45 @@ compile_map_reduce(set,Fields,Params)->
           Acc + 1
       end
     end,
-  Map=
-    fun(RS)->
-      ecomet_resultset:foldr(fun(OID,Acc)->
+
+  Map=fun(RS)->RS	end,
+  Reduce =
+    fun(Results)->
+      ecomet_resultset:foldl(fun(OID,Acc)->
         try Update(OID, Acc) catch
           _:Error->
             ?LOGERROR("unable to update ~p, error ~p",[OID,Error]),
             Acc
         end
-      end,0,RS)
+      end,0,lists:append(Results))
     end,
-  Reduce=fun lists:sum/1,
+
   {Map,Reduce};
 
 compile_map_reduce(delete,none,Params)->
   % Fun to read object fields from storage, default lock is none (check rights is performed)
   ReadUp=read_up(maps:get(lock,Params,none), delete),
-  Map=
-    fun(RS)->
-      ecomet_resultset:foldr(fun(OID,Acc)->
-        #{object:=Object}=ReadUp(OID,[]),
-        if
-          Object =/= not_exists ->
-            ecomet_object:delete(Object),
-            Acc+1;
-          true ->
+  Map=fun(RS)->RS	end,
+  Reduce =
+    fun(Results)->
+      ecomet_resultset:foldl(fun(OID,Acc)->
+        try
+          #{object:=Object}=ReadUp(OID,[]),
+          if
+            Object =/= not_exists ->
+              ecomet_object:delete(Object),
+              Acc+1;
+            true ->
+              Acc
+          end
+        catch
+          _:Error->
+            ?LOGERROR("unable to delete ~p, error ~p",[OID,Error]),
             Acc
         end
-      end,0,RS)
+      end,0,lists:append(Results))
     end,
-  Reduce=fun lists:sum/1,
+
   {Map,Reduce}.
 %%-----------------------------------------------------------------
 %%	MAP/REDUCE PLANNING
