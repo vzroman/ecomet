@@ -68,14 +68,14 @@
 
 -ifndef(TEST).
 
--define(LOGERROR(Text),lager:error(Text)).
--define(LOGERROR(Text,Params),lager:error(Text,Params)).
--define(LOGWARNING(Text),lager:warning(Text)).
--define(LOGWARNING(Text,Params),lager:warning(Text,Params)).
--define(LOGINFO(Text),lager:info(Text)).
--define(LOGINFO(Text,Params),lager:info(Text,Params)).
--define(LOGDEBUG(Text),lager:debug(Text)).
--define(LOGDEBUG(Text,Params),lager:debug(Text,Params)).
+-define(LOGERROR(Text),logger:error(Text)).
+-define(LOGERROR(Text,Params),logger:error(Text,Params)).
+-define(LOGWARNING(Text),logger:warning(Text)).
+-define(LOGWARNING(Text,Params),logger:warning(Text,Params)).
+-define(LOGINFO(Text),logger:info(Text)).
+-define(LOGINFO(Text,Params),logger:info(Text,Params)).
+-define(LOGDEBUG(Text),logger:debug(Text)).
+-define(LOGDEBUG(Text,Params),logger:debug(Text,Params)).
 
 -else.
 
