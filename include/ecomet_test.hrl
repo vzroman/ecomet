@@ -29,7 +29,6 @@
   compiler,
   syntax_tools,
   goldrush,
-  lager,
   ecomet
 ]).
 
