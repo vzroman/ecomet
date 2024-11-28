@@ -23,8 +23,8 @@
 %% Protocol API
 %%=================================================================
 -export([
-  on_request/2,
-  handle/4,
+  on_request/1,on_request/2,
+  handle/3,handle/4,
   on_subscription/4
 ]).
 
@@ -39,6 +39,8 @@
 %%====================================================================
 %% Protocol API
 %%====================================================================
+on_request(Msg)->
+  on_request( Msg, _State = #{} ).
 on_request(Msg, State)->
   case try from_json(Msg) catch
     _:_->{error,invalid_format}
@@ -98,6 +100,8 @@ reply(ID,Type,Result)->
     <<"result">>=>Result
   }).
 
+handle(Type, ID, Params)->
+  handle( Type, ID, Params, _State = #{}).
 handle(<<"login">>,_ID,#{<<"login">>:=Login,<<"pass">>:=Pass}, State)->
   Info =
     case State of
