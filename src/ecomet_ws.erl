@@ -30,13 +30,13 @@
 ]).
 
 init(Req, _Options) ->
-  State = #{
+  Context = #{
     connection => #{
       type => ?MODULE,
       peer => cowboy_req:peer( Req )
     }
   },
-  { cowboy_websocket, Req, State, #{idle_timeout => 3600000} }.
+  { cowboy_websocket, Req, Context, #{idle_timeout => 3600000} }.
 
 websocket_init(State) ->
   {ok, State }.

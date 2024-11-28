@@ -40,8 +40,7 @@
 %% Protocol API
 %%====================================================================
 on_request(Msg)->
-  {Result, _} = on_request( Msg, _Context = #{} ),
-  Result.
+  on_request( Msg, _Context = #{} ).
 on_request(Msg, Context)->
   case try from_json(Msg) catch
     _:_->{error,invalid_format}
