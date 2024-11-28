@@ -65,6 +65,11 @@ on_request(Msg, State)->
             reply_ok(ID,Result),
             State
           };
+        {ok,Result, NewState}->
+          {
+            reply_ok(ID,Result),
+            NewState
+          };
         {error,Error}->
           {
             reply_error(ID,Error),
