@@ -41,9 +41,9 @@ init(Req, _Options) ->
 websocket_init(State) ->
   {ok, State }.
 
-websocket_handle({Type, Msg}, InState) when Type=:=text;Type=:=binary ->
-  {Response, OutState} = ecomet_json:on_request(Msg, InState),
-  {reply,{text,Response}, OutState};
+websocket_handle({Type, Msg}, Context) when Type=:=text;Type=:=binary ->
+  Response = ecomet_json:on_request(Msg, Context),
+  {reply,{text,Response}, Context};
 websocket_handle(Ping, State)
   when {ping, <<"PING">>}=:=Ping;ping=:=Ping ->
   {reply,{pong,<<"PONG">>},State};

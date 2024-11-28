@@ -40,9 +40,9 @@
 %% Protocol API
 %%====================================================================
 on_request(Msg)->
-  {Result, _} = on_request( Msg, _State = #{} ),
+  {Result, _} = on_request( Msg, _Context = #{} ),
   Result.
-on_request(Msg, State)->
+on_request(Msg, Context)->
   case try from_json(Msg) catch
     _:_->{error,invalid_format}
   end of
@@ -52,35 +52,18 @@ on_request(Msg, State)->
       <<"action">>:=Action,
       <<"params">>:=Params
     }->
-      case try handle(Action,ID,Params, State) catch
+      case try handle(Action,ID,Params, Context) catch
         _:HandlingError->{error,HandlingError}
       end of
         ok->
-          {
-            reply_ok(ID,ok),
-            State
-          };
+          reply_ok(ID,ok);
         {ok,Result}->
-          {
-            reply_ok(ID,Result),
-            State
-          };
-        {ok,Result, NewState}->
-          {
-            reply_ok(ID,Result),
-            NewState
-          };
+          reply_ok(ID,Result);
         {error,Error}->
-          {
-            reply_error(ID,Error),
-            State
-          }
+          reply_error(ID,Error)
       end;
     _->
-      {
-        reply_error(<<"none">>,<<"invalid request">>),
-        State
-      }
+      reply_error(<<"none">>,<<"invalid request">>)
   end.
 
 on_subscription(ID,Action,OID,Fields)->
@@ -107,10 +90,10 @@ reply(ID,Type,Result)->
   }).
 
 handle(Type, ID, Params)->
-  handle( Type, ID, Params, _State = #{}).
-handle(<<"login">>,_ID,#{<<"login">>:=Login,<<"pass">>:=Pass}, State)->
+  handle( Type, ID, Params, _Context = #{}).
+handle(<<"login">>,_ID,#{<<"login">>:=Login,<<"pass">>:=Pass}, Context)->
   Info =
-    case State of
+    case Context of
       #{ connection := ConnectionInfo} -> #{ connection => ConnectionInfo };
       _-> #{}
     end,
@@ -119,14 +102,14 @@ handle(<<"login">>,_ID,#{<<"login">>:=Login,<<"pass">>:=Pass}, State)->
     error->{error,invalid_credentials}
   end;
 
-handle(<<"query">>,_ID,#{<<"statement">>:=Statement}, _State)->
+handle(<<"query">>,_ID,#{<<"statement">>:=Statement}, _Context)->
   case ecomet:query(Statement) of
     {error,Error}->{error,Error};
     Result->
       JSONResult = query_result(Result),
       {ok, JSONResult}
   end;
-handle(<<"activate_fork">>, ID, #{<<"token">> := Token}, _State) ->
+handle(<<"activate_fork">>, ID, #{<<"token">> := Token}, _Context) ->
   case ets:lookup(?ECOMET_SESSION_TOKENS,Token) of
 		[{Token,Login}] -> 
       case ecomet:dirty_login(Login) of
@@ -137,7 +120,7 @@ handle(<<"activate_fork">>, ID, #{<<"token">> := Token}, _State) ->
         end;
   _ -> {error, access_denied}
 end;
-handle(<<"fork_connection">>, _ID, _Params, _State) ->
+handle(<<"fork_connection">>, _ID, _Params, _Context) ->
   Token = base64:encode(crypto:hash(sha256,integer_to_binary(erlang:unique_integer([monotonic])))),
   Timeout = ?ENV(auth_timeout, 2000),
   {ok, User} = ecomet:get_user(),
@@ -151,12 +134,12 @@ handle(<<"fork_connection">>, _ID, _Params, _State) ->
 %-----------------------------------------------------------
 % Object level actions
 %----------------------------------------------------------
-handle(<<"create">>,_ID,#{<<"fields">>:=Fields}, _State)->
+handle(<<"create">>,_ID,#{<<"fields">>:=Fields}, _Context)->
   Object = ecomet:create_object(Fields,#{ format=>fun ecomet:from_json/2 }),
   OID=?OID(Object),
   {ok, ?T2B(OID)};
 
-handle(<<"update">>,_ID,#{<<"oid">>:=ID,<<"fields">>:=Fields}, _State)->
+handle(<<"update">>,_ID,#{<<"oid">>:=ID,<<"fields">>:=Fields}, _Context)->
   ecomet:transaction(fun()->
     Object = ecomet:open(?OID(ID),write),
     ecomet:edit_object( Object , Fields, #{ format=>fun ecomet:from_json/2 }),
@@ -164,7 +147,7 @@ handle(<<"update">>,_ID,#{<<"oid">>:=ID,<<"fields">>:=Fields}, _State)->
     ?T2B(OID)
   end);
 
-handle(<<"delete">>,_ID,#{<<"oid">>:=ID}, _State)->
+handle(<<"delete">>,_ID,#{<<"oid">>:=ID}, _Context)->
   ecomet:transaction(fun()->
     Object = ecomet:open(?OID(ID),write),
     ecomet:delete_object( Object ),
@@ -172,7 +155,7 @@ handle(<<"delete">>,_ID,#{<<"oid">>:=ID}, _State)->
     ?T2B(OID)
   end);
 
-handle(_Action,_ID,_Params, _State)->
+handle(_Action,_ID,_Params, _Context)->
   {error,invalid_request}.
 %%=================================================================
 %% Utilities
