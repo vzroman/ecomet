@@ -32,6 +32,7 @@
   get_user/0,
   get_usergroups/0,
   get_session/0,
+  get_session_info/0,
   on_init_state/0,
   is_admin/0,
   get_salt/0
@@ -47,7 +48,13 @@
 ]).
 
 -define(CONTEXT,eCoMeT_uSeRcOnTeXt).
--record(state,{uid,session,is_admin,groups}).
+-record(state,{
+  uid,
+  session,
+  is_admin,
+  groups,
+  info
+}).
 
 %%=================================================================
 %%	Service API
@@ -79,7 +86,7 @@ login(Login,Pass,Info)->
               end
           end
         end,
-        fun(_)->set_context(User) end,
+        fun(_)->set_context(User, Info) end,
         fun(_)->create_session(User,Info) end
       ],none)
     end
@@ -97,7 +104,7 @@ dirty_login(Login, Info) ->
     fun(UserID)->{ok,?OBJECT(UserID)} end,
     fun(User)->
       ?PIPE([
-        fun(_)->set_context(User) end,
+        fun(_)->set_context(User, Info) end,
         fun(_)->create_session(User,Info) end
       ],none)
     end
@@ -150,6 +157,15 @@ get_session()->
     undefined->{error,user_undefined};
     #state{session = PID} when is_pid(PID)->
       {ok,PID};
+    _->
+      {error,invalid_session}
+  end.
+
+get_session_info()->
+  case get(?CONTEXT) of
+    undefined->{error,user_undefined};
+    #state{info = Info} ->
+      {ok, Info};
     _->
       {error,invalid_session}
   end.
@@ -233,7 +249,7 @@ create_session(User,Info)->
   put(?CONTEXT,Context#state{session = PID}),
   ok.
 
-set_context(User)->
+set_context(User, Info)->
 
   % Close the session
   logout(),
@@ -249,7 +265,8 @@ set_context(User)->
     uid=?OID(User),
     session=none,
     is_admin=IsAdmin,
-    groups=UserGroups
+    groups=UserGroups,
+    info = Info
   }),
 
   ok.

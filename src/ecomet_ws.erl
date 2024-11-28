@@ -29,15 +29,21 @@
   terminate/3
 ]).
 
-init(Req, Opts) ->
-  { cowboy_websocket, Req, Opts,#{idle_timeout => 3600000} }.
+init(Req, _Options) ->
+  State = #{
+    connection => #{
+      type => ?MODULE,
+      peer => cowboy_req:peer( Req )
+    }
+  },
+  { cowboy_websocket, Req, State, #{idle_timeout => 3600000} }.
 
 websocket_init(State) ->
   {ok, State }.
 
-websocket_handle({Type, Msg}, State) when Type=:=text;Type=:=binary ->
-  Response = ecomet_json:on_request(Msg),
-  {reply,{text,Response},State};
+websocket_handle({Type, Msg}, InState) when Type=:=text;Type=:=binary ->
+  {Response, OutState} = ecomet_json:on_request(Msg, InState),
+  {reply,{text,Response}, OutState};
 websocket_handle(Ping, State)
   when {ping, <<"PING">>}=:=Ping;ping=:=Ping ->
   {reply,{pong,<<"PONG">>},State};

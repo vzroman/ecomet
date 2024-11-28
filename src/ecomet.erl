@@ -24,6 +24,7 @@
   login/2, login/3, dirty_login/1, dirty_login/2,
   logout/0,
   get_user/0,
+  get_session_info/0,
   is_admin/0,
   get_active_users/0,
   get_sessions/0,get_sessions/1,
@@ -154,6 +155,9 @@ get_user()->
 
 is_admin()->
   ecomet_user:is_admin().
+
+get_session_info()->
+  ecomet_user:get_session_info().
 
 get_active_users()->
   ecomet_session:get_active_users().

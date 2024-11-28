@@ -23,8 +23,8 @@
 %% Protocol API
 %%=================================================================
 -export([
-  on_request/1,
-  handle/3,
+  on_request/2,
+  handle/4,
   on_subscription/4
 ]).
 
@@ -39,7 +39,7 @@
 %%====================================================================
 %% Protocol API
 %%====================================================================
-on_request(Msg)->
+on_request(Msg, State)->
   case try from_json(Msg) catch
     _:_->{error,invalid_format}
   end of
@@ -49,14 +49,30 @@ on_request(Msg)->
       <<"action">>:=Action,
       <<"params">>:=Params
     }->
-      case try handle(Action,ID,Params) catch
+      case try handle(Action,ID,Params, State) catch
         _:HandlingError->{error,HandlingError}
       end of
-        ok-> reply_ok(ID,ok);
-        {ok,Result}->reply_ok(ID,Result);
-        {error,Error}->reply_error(ID,Error)
+        ok->
+          {
+            reply_ok(ID,ok),
+            State
+          };
+        {ok,Result}->
+          {
+            reply_ok(ID,Result),
+            State
+          };
+        {error,Error}->
+          {
+            reply_error(ID,Error),
+            State
+          }
       end;
-    _->reply_error(<<"none">>,<<"invalid request">>)
+    _->
+      {
+        reply_error(<<"none">>,<<"invalid request">>),
+        State
+      }
   end.
 
 on_subscription(ID,Action,OID,Fields)->
@@ -82,20 +98,25 @@ reply(ID,Type,Result)->
     <<"result">>=>Result
   }).
 
-handle(<<"login">>,_ID,#{<<"login">>:=Login,<<"pass">>:=Pass})->
-  case ecomet_user:login(Login,Pass) of
+handle(<<"login">>,_ID,#{<<"login">>:=Login,<<"pass">>:=Pass}, State)->
+  Info =
+    case State of
+      #{ connection := ConnectionInfo} -> #{ connection => ConnectionInfo };
+      _-> #{}
+    end,
+  case ecomet_user:login(Login, Pass, Info) of
     ok->{ok,ok};
     error->{error,invalid_credentials}
   end;
 
-handle(<<"query">>,_ID,#{<<"statement">>:=Statement})->
+handle(<<"query">>,_ID,#{<<"statement">>:=Statement}, _State)->
   case ecomet:query(Statement) of
     {error,Error}->{error,Error};
     Result->
       JSONResult = query_result(Result),
       {ok, JSONResult}
   end;
-handle(<<"activate_fork">>, ID, #{<<"token">> := Token}) ->
+handle(<<"activate_fork">>, ID, #{<<"token">> := Token}, _State) ->
   case ets:lookup(?ECOMET_SESSION_TOKENS,Token) of
 		[{Token,Login}] -> 
       case ecomet:dirty_login(Login) of
@@ -106,7 +127,7 @@ handle(<<"activate_fork">>, ID, #{<<"token">> := Token}) ->
         end;
   _ -> {error, access_denied}
 end;
-handle(<<"fork_connection">>, _ID, _Params) ->
+handle(<<"fork_connection">>, _ID, _Params, _State) ->
   Token = base64:encode(crypto:hash(sha256,integer_to_binary(erlang:unique_integer([monotonic])))),
   Timeout = ?ENV(auth_timeout, 2000),
   {ok, User} = ecomet:get_user(),
@@ -120,12 +141,12 @@ handle(<<"fork_connection">>, _ID, _Params) ->
 %-----------------------------------------------------------
 % Object level actions
 %----------------------------------------------------------
-handle(<<"create">>,_ID,#{<<"fields">>:=Fields})->
+handle(<<"create">>,_ID,#{<<"fields">>:=Fields}, _State)->
   Object = ecomet:create_object(Fields,#{ format=>fun ecomet:from_json/2 }),
   OID=?OID(Object),
   {ok, ?T2B(OID)};
 
-handle(<<"update">>,_ID,#{<<"oid">>:=ID,<<"fields">>:=Fields})->
+handle(<<"update">>,_ID,#{<<"oid">>:=ID,<<"fields">>:=Fields}, _State)->
   ecomet:transaction(fun()->
     Object = ecomet:open(?OID(ID),write),
     ecomet:edit_object( Object , Fields, #{ format=>fun ecomet:from_json/2 }),
@@ -133,7 +154,7 @@ handle(<<"update">>,_ID,#{<<"oid">>:=ID,<<"fields">>:=Fields})->
     ?T2B(OID)
   end);
 
-handle(<<"delete">>,_ID,#{<<"oid">>:=ID})->
+handle(<<"delete">>,_ID,#{<<"oid">>:=ID}, _State)->
   ecomet:transaction(fun()->
     Object = ecomet:open(?OID(ID),write),
     ecomet:delete_object( Object ),
@@ -141,7 +162,7 @@ handle(<<"delete">>,_ID,#{<<"oid">>:=ID})->
     ?T2B(OID)
   end);
 
-handle(_Action,_ID,_Params)->
+handle(_Action,_ID,_Params, _State)->
   {error,invalid_request}.
 %%=================================================================
 %% Utilities

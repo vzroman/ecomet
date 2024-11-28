@@ -73,7 +73,7 @@ dispatch_rules() ->
   cowboy_router:compile([{'_',[
     {"/", ecomet_http, []},
     {"/static/[...]", cowboy_static, {priv_dir, ecomet, "static"}},
-    {"/websocket", ecomet_ws, []},
+    {"/websocket", ecomet_ws, #{}},
     {"/favicon.ico",  cowboy_static, {priv_file, ecomet, "static/favicon.ico"}}
   ]}]).
 
