@@ -138,7 +138,7 @@ sync()->
 
   case is_master() of
     true->
-      % Schema synchronization. Project ecomet schema objects into dlss configuration
+      % Schema synchronization. Project ecomet schema objects into zaya configuration
       Configured = get_configured_nodes(),
       Attached = get_attached_nodes(),
 
