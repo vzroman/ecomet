@@ -717,7 +717,7 @@ on_delete(Object)->
 check_name(<<>>) ->
   ?ERROR(<<"Name can not be empty">>);
 check_name(BinaryString) when is_binary(BinaryString) ->
-  case re:run(BinaryString, ?BAD_CHARS_PATTERN) of
+  case re:run(BinaryString, ?BAD_CHARS_PATTERN, [dollar_endonly]) of
     {match, _} -> ok;
     _ -> throw({name_has_whitespaces_or_bad_characters,BinaryString})
   end;
