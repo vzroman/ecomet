@@ -225,7 +225,7 @@ terminate(Reason,#state{
   ?LOGINFO("terminating session for user ~ts, reason ~p",[Name ,Reason]),
 
   % Unregister session
-  ets:delete(?SESSIONS, self()),
+  ets:delete(?SESSIONS, Owner),
 
   ets:update_counter(?SESSIONS,UserId,{#user.sessions_count,-1},#user{name = Name,sessions_count = 1}),
 
