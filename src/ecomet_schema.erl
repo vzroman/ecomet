@@ -157,18 +157,18 @@
   <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
   <<".ts">> =>#{ type => integer }
 }).
--define(FOLDER_SCHEMA,?OBJECT_SCHEMA#{
+-define(FOLDER_SCHEMA,maps:merge(?OBJECT_SCHEMA,#{
   <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
   <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
   <<"recursive_rights">> =>#{ type => bool },
   <<"database">> =>#{ type => link, index=> [simple] }
-}).
--define(PATTERN_SCHEMA,?FOLDER_SCHEMA#{
+})).
+-define(PATTERN_SCHEMA,maps:merge(?FOLDER_SCHEMA,#{
   <<"behaviour_module">>=>#{ type => atom , index=> [simple] },
   <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
   <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
-}).
--define(FIELD_SCHEMA,?OBJECT_SCHEMA#{
+})).
+-define(FIELD_SCHEMA,maps:merge(?OBJECT_SCHEMA,#{
   <<"type">>=>#{ type => atom, required => true, index=> [simple] },
   <<"subtype">>=>#{ type => atom, index=> [simple] },
   <<"index">>=>#{ type => list, subtype => atom, index=> [simple] },
@@ -177,7 +177,7 @@
   <<"storage">>=>#{ type => atom, default => disc, index=> [simple]  },
   <<"is_parent">>=>#{ type => bool, required => false, index=> [simple], default => false },
   <<"autoincrement">>=>#{ type => bool, index=> [simple] }
-}).
+})).
 %-------------STORAGE PATTERNS--------------------------------------------
 -define(DATABASE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] },
