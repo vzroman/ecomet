@@ -945,27 +945,26 @@ prepare_edit(Fields, #object{oid = OID, pattern = P})->
     end, #{}, Fields ),
 
 
+  Changes0 = ecomet_transaction:dict_get({OID, data}, #{}),
+  OtherChanges = maps:without( maps:keys(Fields), Changes0 ),
+  Changes = maps:merge( OtherChanges, NewChanges ),
+  TransactionDictionary = #{ {OID, data} => Changes },
+
   if
-    map_size(NewChanges) > 0 ->
-
-      Changes0 = ecomet_transaction:dict_get({OID, data}, #{}),
-      OtherChanges = maps:without( maps:keys(Fields), Changes0 ),
-      Changes = maps:merge( OtherChanges, NewChanges ),
-
-      Dict0 = #{ {OID, data} => Changes },
-      Dict =
+    map_size(Changes) > 0 ->
+      ChangesAndStorages =
         if
           map_size( Storages ) > map_size( Storages0 )->
-            Dict0#{ {OID, storages} => Storages };
+            TransactionDictionary#{ {OID, storages} => Storages };
           true ->
-            Dict0
+            TransactionDictionary
         end,
-      ecomet_transaction:dict_put( Dict );
+      ecomet_transaction:dict_put( ChangesAndStorages );
     true ->
-      ignore
+      ecomet_transaction:dict_put( TransactionDictionary )
   end,
 
-  NewChanges.
+  Changes.
 
 prepare_delete(#object{oid = OID, pattern = P})->
 
