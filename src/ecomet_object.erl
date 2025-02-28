@@ -592,8 +592,8 @@ check_move( #object{move=CanMove}=Object, EditFields )->
           NewPath = <<(?PATH(NewFolder))/binary,"/",Name/binary>>,
           S = size(Path),
           case NewPath of
-            <<Path:S/binary,_/binary>> -> throw(infinite_recursion);
-            _->ok
+            <<Path:S/binary, $/,_/binary>> -> throw(infinite_recursion);
+            _ -> ok
           end,
           % Check rights
           #{
