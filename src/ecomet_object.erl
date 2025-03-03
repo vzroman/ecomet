@@ -474,8 +474,14 @@ edit(#object{oid = OID, pattern = Map}=Object,InFields,_Params)->
   case ecomet_transaction:dict_get({OID,handler},none) of
     none ->
       ?TRANSACTION(fun()->
-        prepare_edit(Fields, Object),
-        save(Object, on_edit)
+        Updates = prepare_edit(Fields, Object),
+        if
+          map_size( Updates ) > 0 ->
+            save(Object, on_edit);
+          true ->
+            % No real updates, ignore
+            ignore
+        end
       end);
     _->
       % If object is under behaviour handlers, just save changes
@@ -586,8 +592,8 @@ check_move( #object{move=CanMove}=Object, EditFields )->
           NewPath = <<(?PATH(NewFolder))/binary,"/",Name/binary>>,
           S = size(Path),
           case NewPath of
-            <<Path:S/binary,_/binary>> -> throw(infinite_recursion);
-            _->ok
+            <<Path:S/binary, $/,_/binary>> -> throw(infinite_recursion);
+            _ -> ok
           end,
           % Check rights
           #{
@@ -912,54 +918,53 @@ prepare_edit(Fields, #object{oid = OID, pattern = P})->
 
   Schema = ?map(P),
 
-  Acc0 = {
-    ecomet_transaction:dict_get( {OID, data}, #{} ),
-    ecomet_transaction:dict_get( {OID, storages}, #{} )
-  },
-
-  {ChangesAcc, StoragesAcc} =
-    maps:fold(fun( F, V, { FAcc, SAcc } )->
-      case FAcc of
-        #{ F := { _V1, V0 } } when V0 =:= V->
-          { maps:remove( F, FAcc ), SAcc };
-        #{ F := { _V1, V0 } }->
-          { FAcc#{ F => { V, V0 } }, SAcc };
-        _->
-          #{ storage := S } = maps:get( F, Schema ),
-          case SAcc of
-            #{ S := SData }->
-              % The storage is already loaded
-              case SData of
-                #{ fields := #{ F := V0 } } when V0 =:= V ->
-                  { maps:remove( F, FAcc ), SAcc };
-                #{ fields := #{ F := V0 } }->
-                  { FAcc#{ F => { V, V0 } }, SAcc };
-                _ when V =/= none ->
-                  { FAcc#{ F => { V, none } }, SAcc };
-                _->
-                  { FAcc, SAcc }
-              end;
-            _->
-              % load the storage
-              SData = load_storage( false, OID, S ),
-              case SData of
-                #{ fields := #{ F := V0 } } when V0 =:= V ->
-                  { maps:remove( F, FAcc ), SAcc#{ S => SData } };
-                #{ fields := #{ F := V0 } }->
-                  { FAcc#{ F => { V, V0 } }, SAcc#{ S => SData } };
-                _ when V =/= none->
-                  { FAcc#{ F => { V, none } }, SAcc#{ S => SData } };
-                _->
-                  { FAcc, SAcc#{ S => SData } }
-              end
-          end
+  Storages0 = ecomet_transaction:dict_get({OID, storages}, #{}),
+  Storages =
+    maps:fold(fun(F, _V, Acc)->
+      #{ storage := S } = maps:get( F, Schema ),
+      case maps:is_key(S, Acc) of
+        true -> Acc;
+        _ -> Acc#{ S => load_storage( false, OID, S ) }
       end
-    end, Acc0, Fields ),
+    end, Storages0, Fields),
 
-  ecomet_transaction:dict_put( #{
-    {OID, data} => ChangesAcc,
-    {OID, storages} => StoragesAcc
-  }).
+  NewChanges =
+    maps:fold(fun(F, V, Acc)->
+      #{ storage := S } = maps:get( F, Schema ),
+      SData = maps:get( S, Storages ),
+      case SData of
+        #{ fields := #{ F := V0 } } when V0 =:= V ->
+          Acc;
+        #{ fields := #{ F := V0 } }->
+          Acc#{ F => { V, V0 } };
+        _ when V =/= none->
+          Acc#{ F => { V, none } };
+        _->
+          Acc
+      end
+    end, #{}, Fields ),
+
+
+  Changes0 = ecomet_transaction:dict_get({OID, data}, #{}),
+  OtherChanges = maps:without( maps:keys(Fields), Changes0 ),
+  Changes = maps:merge( OtherChanges, NewChanges ),
+  TransactionDictionary = #{ {OID, data} => Changes },
+
+  if
+    map_size(Changes) > 0 ->
+      ChangesAndStorages =
+        if
+          map_size( Storages ) > map_size( Storages0 )->
+            TransactionDictionary#{ {OID, storages} => Storages };
+          true ->
+            TransactionDictionary
+        end,
+      ecomet_transaction:dict_put( ChangesAndStorages );
+    true ->
+      ecomet_transaction:dict_put( TransactionDictionary )
+  end,
+
+  Changes.
 
 prepare_delete(#object{oid = OID, pattern = P})->
 
