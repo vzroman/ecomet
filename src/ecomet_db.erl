@@ -661,15 +661,13 @@ to_read_only(DB) ->
     {<<".pattern">>, '=', ?OID(<<"/root/.patterns/.database">>)},
     {<<".name">>, '=', atom_to_binary(DB, utf8)}
   ]}) of
-    {_, [[_ReadOnly = true]]} ->
-      case zaya:db_read_only(DB, true) of
+    {_, [[ReadOnly]]} when is_boolean(ReadOnly) ->
+      case zaya:db_read_only(DB, ReadOnly) of
         {[], Errors} ->
-          throw({failed_switch_to_read_only, Errors});
+          throw({failed_switch_read_only_mode, Errors});
         _ ->
           ok
       end;
-    {_, [[_ReadOnly = false]]} ->
-      ok;
     Other ->
       ?LOGWARNING("~p database is registered but read-only value ~p not found in the corresponding object", [DB, Other])
   end.
