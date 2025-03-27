@@ -110,6 +110,7 @@
 -export([
   ts/0,
   stop/0,
+  to_read_only/1,
   rebuild_index/1,
   wait_dbs/1,
   wait_local_dbs/0,
@@ -397,3 +398,6 @@ wait_local_dbs()->
 
 db_available_nodes( DB )->
   ecomet_db:available_nodes( DB ).
+
+to_read_only( DB )->
+  ecomet_db:to_read_only( DB ).

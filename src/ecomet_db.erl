@@ -96,6 +96,7 @@
   get_name/1,
   get_by_name/1,
   find_by_tag/1,
+  to_read_only/1,
   sync/0
 ]).
 
