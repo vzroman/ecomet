@@ -190,7 +190,7 @@
   <<"available_nodes">> => #{ type => list, subtype => atom, index=> [simple] },
   <<"not_ready_nodes">> => #{ type => list, subtype => atom, index=> [simple] },
   <<"is_available">> => #{ type => bool, index=> [simple] },
-  <<"read_only">> => #{ type => bool, index => [simple] }
+  <<"read_only">> => #{ type => bool, index => [simple] },
   <<"size">>=>#{ type => term }
 }).
 
