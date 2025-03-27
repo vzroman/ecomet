@@ -662,14 +662,14 @@ to_read_only(DB) ->
     {<<".name">>, '=', atom_to_binary(DB, utf8)}
   ]}) of
     {_, [[_ReadOnly = true]]} ->
-      ok;
-    {_, [[_ReadOnly = false]]} ->
       case zaya:db_read_only(DB, true) of
         {[], Errors} ->
           throw({failed_switch_to_read_only, Errors});
         _ ->
           ok
       end;
+    {_, [[_ReadOnly = false]]} ->
+      ok;
     Other ->
       ?LOGWARNING("~p database is registered but read-only value ~p not found in the corresponding object", [DB, Other])
   end.
