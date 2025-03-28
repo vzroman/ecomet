@@ -781,8 +781,8 @@ on_create(Object)->
 
   % If the transaction fails the database won't be registered in ecomet schema
   % and will be removed during the synchronization
-
   {ok,Id} = ecomet_schema:add_db( Name ),
+  check_tags( Object ),
 
   ecomet:edit_object(Object,#{
     <<"id">> => Id,
@@ -794,6 +794,7 @@ on_edit(Object)->
   check_name(Object),
   check_id(Object),
   check_types(Object),
+  check_tags(Object),
   case check_params(Object) of
     Params when is_map(Params)->
       ok = ecomet:edit_object(Object,#{<<"params">> => Params});
@@ -897,4 +898,14 @@ params_diff( NewParams, Modules )->
 
   end, #{}, NewParams).
 
-
+check_tags(Object)->
+  case ecomet:field_changes(Object,<<"tags">>) of
+    none->ok;
+    { NewTags, _OldParams }->
+      {ok, Name} = ecomet:read_field(Object, <<".name">>),
+      DB = binary_to_atom(Name,utf8),
+      case ecomet_schema:set_db_tags( DB, NewTags ) of
+        ok -> ok;
+        {error, Error} -> throw({ set_db_tags, DB, NewTags, Error })
+      end
+  end.

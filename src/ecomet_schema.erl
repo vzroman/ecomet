@@ -36,6 +36,8 @@
   get_db_id/1,
   get_db_name/1,
   get_registered_databases/0,
+  set_db_tags/2,
+  get_db_tags/1,
 
   %--------Node----------------------
   add_node/1,
@@ -213,6 +215,7 @@
 % Database indexing
 -record(dbId,{k}).
 -record(dbName,{k}).
+-record(dbTags,{k}).
 % Mount point indexing
 -record(mntOID,{k}).
 -record(mntPath,{k}).
@@ -252,7 +255,7 @@ remove_db(Name)->
   case zaya:transaction(fun()->
 
     [{_,Id}] = zaya:read( ?SCHEMA, [#dbName{k=Name}], write ),
-    ok = zaya:delete(?SCHEMA,[#dbId{k=Id},#dbName{k=Name}], write)
+    ok = zaya:delete(?SCHEMA,[#dbId{k=Id},#dbName{k=Name}, #dbTags{k=Name}], write)
 
   end) of
     { ok, ok }-> ok;
@@ -266,7 +269,7 @@ mount_db(FolderID,DB)->
 
     Path = ecomet:to_path( FolderID ),
 
-    ok = zaya:write(?SCHEMA,[{#mntOID{k=FolderID}, DB}, {#mntPath{k=Path}, FolderID}])
+    ok = zaya:write(?SCHEMA,[{#mntOID{k=FolderID}, DB}, {#mntPath{k=Path}, FolderID}], write)
 
   end) of
     { ok, ok }-> ok;
@@ -319,6 +322,22 @@ get_registered_databases()->
     ['$1']
   }],
   zaya:find(?SCHEMA,#{start => #dbName{k = -1}, stop => #dbName{k=[]}, ms => MS}).
+
+%%---------------Set database tags------------------
+set_db_tags(DB, Tags)->
+  case zaya:transaction(fun()->
+    ok = zaya:write(?SCHEMA,[{#dbTags{k=DB}, Tags}], write)
+  end) of
+    { ok, ok }-> ok;
+    { abort, Reason }->{error,Reason}
+  end.
+
+%%---------------Get database tags------------------
+get_db_tags(DB)->
+  case zaya:read( ?SCHEMA, [#dbTags{k=DB}]) of
+    [{_, Tags}] when is_list( Tags ) -> Tags;
+    _-> []
+  end.
 
 %%=================================================================
 %%	NODE API
