@@ -360,7 +360,12 @@ subscribe_query( #subscription{
 
   Tags = ecomet_resultset:subscription_prepare( Conditions ),
 
-  Index = compile_index( Tags, ordsets:from_list(DBs) ),
+  IndexDBs =
+    if
+      is_list( DBs )-> ordsets:from_list(DBs);
+      true -> DBs
+    end,
+  Index = compile_index( Tags, IndexDBs ),
   build_index(Index, {Owner, ID}),
 
   RS = ecomet_query:get(DBs,rs,Conditions0),
