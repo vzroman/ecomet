@@ -648,7 +648,28 @@ sync()->
       _:E->?LOGERROR("~p database update info error ~p",[DB,E])
     end|| DB <- RegisteredDBs, is_master(DB) ],
 
+  [ try sync_read_only(DB)
+    catch
+      _:E->?LOGERROR("~p database to read-only error ~p",[DB,E])
+    end|| DB <- RegisteredDBs, is_master(DB) ],
+
   ok.
+
+sync_read_only(DB) ->
+  {ok, OID} = get_by_name( DB ),
+  #{<<"read_only">> := ReadOnly} = ecomet:read_fields(?OBJECT(OID), #{<<"read_only">> => false} ),
+  ActualReadOnly = zaya:db_read_only(DB),
+  if
+    ReadOnly =/= ActualReadOnly ->
+      case zaya:db_read_only(DB, ReadOnly) of
+        {[], Errors} ->
+          throw({failed_switch_read_only_mode, Errors});
+        _ ->
+          ok
+      end;
+    true ->
+      ok
+  end.
 
 is_master(DB)->
   Node = node(),
