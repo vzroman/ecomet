@@ -677,7 +677,7 @@ is_master(DB)->
   ReadyNodes = zaya:ready_nodes(),
   if
     length(Masters)>0->
-      case Masters -- ReadyNodes of
+      case Masters -- (Masters -- ReadyNodes) of
         [Node|_]->
           true;
         _->
@@ -685,7 +685,7 @@ is_master(DB)->
       end;
     true->
       DBNodes = lists:usort( zaya:db_all_nodes(DB) ),
-      case DBNodes -- ReadyNodes of
+      case DBNodes -- (DBNodes -- ReadyNodes) of
         [Node|_]->
           true;
         _->
