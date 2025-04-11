@@ -365,10 +365,8 @@ compile(Type,Fields,Conditions,Params)->
 %%	EXECUTE
 %%=====================================================================
 execute(Handler,#compiled_query{conditions = Conditions,map = Map,reduce = Reduce}, DBs, Union)->
-  case prepare_dbs( DBs ) of
-    [] -> throw( {invalid_database, DBs} );
-    DBs1 -> ecomet_resultset:Handler(DBs1,Conditions,Map,Reduce,Union)
-  end.
+  AvailableDBs = [ DB || DB <- prepare_dbs( DBs ), ecomet_db:is_available(DB)],
+  ecomet_resultset:Handler(AvailableDBs, Conditions, Map, Reduce, Union).
 
 prepare_dbs( '*' )->
   ecomet_db:get_databases();

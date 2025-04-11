@@ -92,6 +92,7 @@
   wait_dbs/1,
   is_local/1,
   available_nodes/1,
+  is_available/1,
   get_databases/0,
   get_name/1,
   get_by_name/1,
@@ -600,6 +601,9 @@ is_local(DB)->
 
 available_nodes( DB )->
   zaya:db_available_nodes(DB).
+
+is_available(DB)->
+  zaya:is_db_available( DB ).
 
 get_databases()->
   ecomet_schema:get_registered_databases().
