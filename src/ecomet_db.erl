@@ -829,23 +829,20 @@ on_edit(Object)->
 
 on_delete(Object)->
   OID = ?OID( Object ),
-  MountedPoints =
-    [ P || P <- ecomet_folder:find_mount_points(OID),
-      % Check if the folder was unmounted within the same transaction
-      case ecomet:read_field(?OBJECT(P), <<"database">>) of
-        {ok, OID} -> true;
-        _-> false
-      end
-    ],
+  MountedFolders = ecomet_folder:find_mount_points(OID),
 
-  case MountedPoints of
-    []->
-      {ok,Name}=ecomet:read_field(Object,<<".name">>),
-      NameAtom = binary_to_atom(Name,utf8),
-      ok = ecomet_schema:remove_db( NameAtom );
-    _->
-      ?ERROR(is_mounted)
-  end.
+  % Unmount folders
+  [ok = ecomet_schema:unmount_db(F) || F <- MountedFolders],
+
+  % Unregister the DB
+  {ok, Name} = ecomet:read_field(Object, <<".name">>),
+  ok = ecomet_schema:remove_db( binary_to_atom(Name,utf8) ),
+
+  % Cleanup folders
+  ecomet:on_commit(fun()->
+    [ catch ecomet:edit_object(ecomet:open(F), #{<<"database">> => none}) || F <- MountedFolders]
+  end),
+  ok.
 
 check_name(Object)->
   case ecomet:field_changes(Object,<<".name">>) of

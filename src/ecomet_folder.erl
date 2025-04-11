@@ -363,8 +363,13 @@ check_database(Object)->
       % Step 1. Unmount the database (if mounted)
       if
         UnmountedDB =/=none->
-          % Detaching a database from a folder.
-          ok = ecomet_schema:unmount_db(FolderID);
+          % Unmount is only allowed when the folder is empty
+          case is_empty(FolderID) of
+            true->
+              ok = ecomet_schema:unmount_db(FolderID);
+            _->
+              ?ERROR(contains_objects)
+          end;
         true -> ok
       end,
 
