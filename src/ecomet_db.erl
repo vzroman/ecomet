@@ -828,7 +828,17 @@ on_edit(Object)->
   end.
 
 on_delete(Object)->
-  case ecomet_folder:find_mount_points(?OID(Object)) of
+  OID = ?OID( Object ),
+  MountedPoints =
+    [ P || P <- ecomet_folder:find_mount_points(OID),
+      % Check if the folder was unmounted within the same transaction
+      case ecomet:read_field(?OBJECT(P), <<"database">>) of
+        {ok, OID} -> true;
+        _-> false
+      end
+    ],
+
+  case MountedPoints of
     []->
       {ok,Name}=ecomet:read_field(Object,<<".name">>),
       NameAtom = binary_to_atom(Name,utf8),
