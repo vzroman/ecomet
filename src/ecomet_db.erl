@@ -92,6 +92,7 @@
   wait_dbs/1,
   is_local/1,
   available_nodes/1,
+  is_available/1,
   get_databases/0,
   get_name/1,
   get_by_name/1,
@@ -601,6 +602,9 @@ is_local(DB)->
 available_nodes( DB )->
   zaya:db_available_nodes(DB).
 
+is_available(DB)->
+  zaya:is_db_available( DB ).
+
 get_databases()->
   ecomet_schema:get_registered_databases().
 
@@ -608,7 +612,7 @@ get_by_name(Name) when is_atom(Name)->
   get_by_name(atom_to_binary(Name,utf8));
 get_by_name(Name) when is_binary(Name)->
   case ecomet_query:system([?ROOT],[<<".oid">>],{'AND',[
-    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.database">>)},
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.database">>)},
     {<<".name">>,'=',Name }
   ]}) of
     [OID]->{ok,OID};
@@ -648,7 +652,28 @@ sync()->
       _:E->?LOGERROR("~p database update info error ~p",[DB,E])
     end|| DB <- RegisteredDBs, is_master(DB) ],
 
+  [ try sync_read_only(DB)
+    catch
+      _:E->?LOGERROR("~p database to read-only error ~p",[DB,E])
+    end|| DB <- RegisteredDBs, is_master(DB) ],
+
   ok.
+
+sync_read_only(DB) ->
+  {ok, OID} = get_by_name( DB ),
+  #{<<"read_only">> := ReadOnly} = ecomet:read_fields(?OBJECT(OID), #{<<"read_only">> => false} ),
+  ActualReadOnly = zaya:db_read_only(DB),
+  if
+    ReadOnly =/= ActualReadOnly ->
+      case zaya:db_read_only(DB, ReadOnly) of
+        {[], Errors} ->
+          throw({failed_switch_read_only_mode, Errors});
+        _ ->
+          ok
+      end;
+    true ->
+      ok
+  end.
 
 is_master(DB)->
   Node = node(),
@@ -656,7 +681,7 @@ is_master(DB)->
   ReadyNodes = zaya:ready_nodes(),
   if
     length(Masters)>0->
-      case Masters -- ReadyNodes of
+      case Masters -- (Masters -- ReadyNodes) of
         [Node|_]->
           true;
         _->
@@ -664,7 +689,7 @@ is_master(DB)->
       end;
     true->
       DBNodes = lists:usort( zaya:db_all_nodes(DB) ),
-      case DBNodes -- ReadyNodes of
+      case DBNodes -- (DBNodes -- ReadyNodes) of
         [Node|_]->
           true;
         _->
@@ -781,8 +806,8 @@ on_create(Object)->
 
   % If the transaction fails the database won't be registered in ecomet schema
   % and will be removed during the synchronization
-
   {ok,Id} = ecomet_schema:add_db( Name ),
+  check_tags( Object ),
 
   ecomet:edit_object(Object,#{
     <<"id">> => Id,
@@ -794,6 +819,7 @@ on_edit(Object)->
   check_name(Object),
   check_id(Object),
   check_types(Object),
+  check_tags(Object),
   case check_params(Object) of
     Params when is_map(Params)->
       ok = ecomet:edit_object(Object,#{<<"params">> => Params});
@@ -802,14 +828,21 @@ on_edit(Object)->
   end.
 
 on_delete(Object)->
-  case ecomet_folder:find_mount_points(?OID(Object)) of
-    []->
-      {ok,Name}=ecomet:read_field(Object,<<".name">>),
-      NameAtom = binary_to_atom(Name,utf8),
-      ok = ecomet_schema:remove_db( NameAtom );
-    _->
-      ?ERROR(is_mounted)
-  end.
+  OID = ?OID( Object ),
+  MountedFolders = ecomet_folder:find_mount_points(OID),
+
+  % Unmount folders
+  [ok = ecomet_schema:unmount_db(F) || F <- MountedFolders],
+
+  % Unregister the DB
+  {ok, Name} = ecomet:read_field(Object, <<".name">>),
+  ok = ecomet_schema:remove_db( binary_to_atom(Name,utf8) ),
+
+  % Cleanup folders
+  ecomet:on_commit(fun()->
+    [ catch ecomet:edit_object(ecomet:open(F), #{<<"database">> => none}) || F <- MountedFolders]
+  end),
+  ok.
 
 check_name(Object)->
   case ecomet:field_changes(Object,<<".name">>) of
@@ -897,4 +930,14 @@ params_diff( NewParams, Modules )->
 
   end, #{}, NewParams).
 
-
+check_tags(Object)->
+  case ecomet:field_changes(Object,<<"tags">>) of
+    none->ok;
+    { NewTags, _OldParams }->
+      {ok, Name} = ecomet:read_field(Object, <<".name">>),
+      DB = binary_to_atom(Name,utf8),
+      case ecomet_schema:set_db_tags( DB, NewTags ) of
+        ok -> ok;
+        {error, Error} -> throw({ set_db_tags, DB, NewTags, Error })
+      end
+  end.

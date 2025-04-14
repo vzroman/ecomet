@@ -363,7 +363,6 @@ check_database(Object)->
       % Step 1. Unmount the database (if mounted)
       if
         UnmountedDB =/=none->
-          % Detaching a database from a folder.
           % Unmount is only allowed when the folder is empty
           case is_empty(FolderID) of
             true->

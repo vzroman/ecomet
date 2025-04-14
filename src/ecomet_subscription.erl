@@ -360,11 +360,15 @@ subscribe_query( #subscription{
 
   Tags = ecomet_resultset:subscription_prepare( Conditions ),
 
-  IndexDBs = index_dbs( DBs ),
+  IndexDBs =
+    if
+      is_list( DBs )-> ordsets:from_list(DBs);
+      true -> DBs
+    end,
   Index = compile_index( Tags, IndexDBs ),
   build_index(Index, {Owner, ID}),
 
-  RS = ecomet_query:get(IndexDBs,rs,Conditions0),
+  RS = ecomet_query:get(DBs,rs,Conditions0),
 
   StartTS =
     if
@@ -555,15 +559,6 @@ compile_index([], _DBs)->
 get_subscriptions( Session )->
   [ #{id => Id, ts => TS, pid => PID} || [Id,TS,PID] <-ets:match(?SUBSCRIPTIONS, #sub{id = {Session,'$1'}, ts ='$2', pid='$3', _ = '_'})].
 
-index_dbs( '*' )->
-  '*';
-index_dbs([ Tag | Rest ]) when is_binary( Tag )->
-  ecomet_db:find_by_tag( Tag ) ++ index_dbs( Rest );
-index_dbs([ DB | Rest ]) when is_atom( DB )->
-  [DB| index_dbs( Rest )];
-index_dbs([])->
-  [].
-
 build_index([#index{tag = Tag}=Index|Rest], ID)->
 
   {ok,TagUnlock} = elock:lock(?LOCKS,{tag,Tag}, _IsShared = false, _Timeout = infinity),
@@ -680,7 +675,8 @@ on_commit(#{
     ?EMPTY_SET->
       ignore;
     Global->
-      light_search(Global, DB, Tags, Log)
+      IndexDBs = index_dbs( DB ),
+      light_search(Global, IndexDBs, Tags, Log)
   end;
 
 %%---------------UPDATE-----------------------
@@ -707,7 +703,8 @@ on_commit(#{
       TNewMask = ?SET_OR( TAdd, TOld ),
       TOldMask = ?SET_OR( TDel, TOld ),
       TMask = ?SET_OR( TNewMask, TDel ),
-      search(Global, DB, TMask, TNewMask, TOldMask, Log)
+      IndexDBs = index_dbs( DB ),
+      search(Global, IndexDBs, TMask, TNewMask, TOldMask, Log)
   end,
 
   notify_monitor( OID, Log );
@@ -718,7 +715,7 @@ on_commit(#{
 } = Log, _Global)->
   notify_monitor( OID, Log ).
 
-light_search(Global, DB, Mask, Log )->
+light_search(Global, IndexDBs, Mask, Log )->
   case ?SET_AND(Mask,Global) of
     ?EMPTY_SET -> ignore;
     XTags->
@@ -728,7 +725,7 @@ light_search(Global, DB, Mask, Log )->
             maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers, TagNotified)->
               case bitmap_search(Mask, And, Not) of
                 true ->
-                  IsDB = DBs=:='*' orelse lists:member(DB, DBs),
+                  IsDB = DBs=:='*' orelse (ordsets:intersection( IndexDBs, DBs ) =/= []),
                   if
                     IsDB ->
                       ToNotify = ordsets:subtract( Subscribers, TagNotified ),
@@ -750,7 +747,7 @@ light_search(Global, DB, Mask, Log )->
       end,[], XTags)
   end.
 
-search(Global, DB, TMask, TNewMask, TOldMask, Log )->
+search(Global, IndexDBs, TMask, TNewMask, TOldMask, Log )->
   case ?SET_AND(TMask,Global) of
     ?EMPTY_SET -> ignore;
     XTags->
@@ -760,7 +757,7 @@ search(Global, DB, TMask, TNewMask, TOldMask, Log )->
             maps:fold(fun(#index{'&' = And,'!' = Not, db = DBs}, Subscribers, TagNotified)->
               case bitmap_search(TMask, TOldMask, TNewMask, And, Not) of
                 true ->
-                  IsDB = DBs =:= '*' orelse lists:member(DB, DBs),
+                  IsDB = DBs =:= '*' orelse (ordsets:intersection( IndexDBs, DBs ) =/= []),
                   if
                     IsDB ->
                       ToNotify = ordsets:subtract( Subscribers, TagNotified ),
@@ -818,8 +815,9 @@ bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
     _-> false
   end.
 
-
-
+index_dbs(DB)->
+  Tags = ecomet_schema:get_db_tags( DB ),
+  ordsets:from_list([DB|Tags]).
 
 
 

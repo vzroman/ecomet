@@ -36,6 +36,8 @@
   get_db_id/1,
   get_db_name/1,
   get_registered_databases/0,
+  set_db_tags/2,
+  get_db_tags/1,
 
   %--------Node----------------------
   add_node/1,
@@ -157,18 +159,18 @@
   <<".writegroups">>=>#{ type => list, subtype => link, index=> [simple] },
   <<".ts">> =>#{ type => integer }
 }).
--define(FOLDER_SCHEMA,?OBJECT_SCHEMA#{
+-define(FOLDER_SCHEMA,maps:merge(?OBJECT_SCHEMA,#{
   <<".contentreadgroups">>=>#{ type => list, subtype => link, index=> [simple] },
   <<".contentwritegroups">>=>#{ type => list, subtype => link, index=> [simple] },
   <<"recursive_rights">> =>#{ type => bool },
   <<"database">> =>#{ type => link, index=> [simple] }
-}).
--define(PATTERN_SCHEMA,?FOLDER_SCHEMA#{
+})).
+-define(PATTERN_SCHEMA,maps:merge(?FOLDER_SCHEMA,#{
   <<"behaviour_module">>=>#{ type => atom , index=> [simple] },
   <<"parent_pattern">>=>#{ type => link, index=> [simple], required => true },
   <<"parents">>=>#{ type => list, subtype => link, index=> [simple] }
-}).
--define(FIELD_SCHEMA,?OBJECT_SCHEMA#{
+})).
+-define(FIELD_SCHEMA,maps:merge(?OBJECT_SCHEMA,#{
   <<"type">>=>#{ type => atom, required => true, index=> [simple] },
   <<"subtype">>=>#{ type => atom, index=> [simple] },
   <<"index">>=>#{ type => list, subtype => atom, index=> [simple] },
@@ -177,7 +179,7 @@
   <<"storage">>=>#{ type => atom, default => disc, index=> [simple]  },
   <<"is_parent">>=>#{ type => bool, required => false, index=> [simple], default => false },
   <<"autoincrement">>=>#{ type => bool, index=> [simple] }
-}).
+})).
 %-------------STORAGE PATTERNS--------------------------------------------
 -define(DATABASE_SCHEMA,#{
   <<"id">>=>#{ type => integer, index=> [simple] },
@@ -190,6 +192,7 @@
   <<"available_nodes">> => #{ type => list, subtype => atom, index=> [simple] },
   <<"not_ready_nodes">> => #{ type => list, subtype => atom, index=> [simple] },
   <<"is_available">> => #{ type => bool, index=> [simple] },
+  <<"read_only">> => #{ type => bool, index => [simple], default => false },
   <<"size">>=>#{ type => term }
 }).
 
@@ -213,6 +216,7 @@
 % Database indexing
 -record(dbId,{k}).
 -record(dbName,{k}).
+-record(dbTags,{k}).
 % Mount point indexing
 -record(mntOID,{k}).
 -record(mntPath,{k}).
@@ -252,7 +256,7 @@ remove_db(Name)->
   case zaya:transaction(fun()->
 
     [{_,Id}] = zaya:read( ?SCHEMA, [#dbName{k=Name}], write ),
-    ok = zaya:delete(?SCHEMA,[#dbId{k=Id},#dbName{k=Name}], write)
+    ok = zaya:delete(?SCHEMA,[#dbId{k=Id},#dbName{k=Name}, #dbTags{k=Name}], write)
 
   end) of
     { ok, ok }-> ok;
@@ -266,7 +270,7 @@ mount_db(FolderID,DB)->
 
     Path = ecomet:to_path( FolderID ),
 
-    ok = zaya:write(?SCHEMA,[{#mntOID{k=FolderID}, DB}, {#mntPath{k=Path}, FolderID}])
+    ok = zaya:write(?SCHEMA,[{#mntOID{k=FolderID}, DB}, {#mntPath{k=Path}, FolderID}], write)
 
   end) of
     { ok, ok }-> ok;
@@ -319,6 +323,22 @@ get_registered_databases()->
     ['$1']
   }],
   zaya:find(?SCHEMA,#{start => #dbName{k = -1}, stop => #dbName{k=[]}, ms => MS}).
+
+%%---------------Set database tags------------------
+set_db_tags(DB, Tags)->
+  case zaya:transaction(fun()->
+    ok = zaya:write(?SCHEMA,[{#dbTags{k=DB}, Tags}], write)
+  end) of
+    { ok, ok }-> ok;
+    { abort, Reason }->{error,Reason}
+  end.
+
+%%---------------Get database tags------------------
+get_db_tags(DB)->
+  case zaya:read( ?SCHEMA, [#dbTags{k=DB}]) of
+    [{_, Tags}] when is_list( Tags ) -> Tags;
+    _-> []
+  end.
 
 %%=================================================================
 %%	NODE API

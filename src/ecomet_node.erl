@@ -67,14 +67,14 @@ get_unique_id(Node)->
 
 get_configured_nodes()->
   {_Header,Result}=ecomet_query:system([?ROOT],[{fun([N])->binary_to_atom(N,utf8) end,[<<".name">>]}],{'AND',[
-    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.node">>)},
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.node">>)},
     {<<".folder">>,'=',?OID(<<"/root/.nodes">>)}
   ]}),
   [N||[N]<-Result].
 
 get_configured_nodes( Filter )->
   {_Header,Result}=ecomet_query:system([?ROOT],[{fun([N])->binary_to_atom(N,utf8) end,[<<".name">>]}],{'AND',[
-    {<<".pattern">>,':=',?OID(<<"/root/.patterns/.node">>)},
+    {<<".pattern">>,'=',?OID(<<"/root/.patterns/.node">>)},
     {<<".folder">>,'=',?OID(<<"/root/.nodes">>)},
     Filter
   ]}),
