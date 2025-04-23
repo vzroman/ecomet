@@ -140,7 +140,8 @@ on_commit(Fun) when is_function(Fun,0)->
       External ! {on_commit, self(), Fun};
     _->
       throw(no_transaction)
-  end;
+  end,
+  ok;
 on_commit(_Invalid)->
   throw( badarg ).
 

@@ -628,36 +628,42 @@ find_by_tag( Tag )->
 
 sync()->
   % Run through all databases
-  RegisteredDBs = get_databases(),
-  ActualDBs =
-    [DB || DB <- zaya:all_dbs(), zaya:db_module( DB ) =:= ?MODULE],
+  Unlock = ecomet_schema:lock(),
 
-  [ try update_masters( DB )
-    catch
-      _:E-> ?LOGERROR("~p database remove error ~p",[DB,E])
-    end|| DB <- ActualDBs -- RegisteredDBs, is_master(DB) ],
+  try
+    RegisteredDBs = get_databases(),
+    ActualDBs =
+      [DB || DB <- zaya:all_dbs(), zaya:db_module( DB ) =:= ?MODULE],
 
-  [ try remove_database( DB )
-   catch
-      _:E-> ?LOGERROR("~p database remove error ~p",[DB,E])
-    end|| DB <- ActualDBs -- RegisteredDBs, is_master(DB) ],
+    [ try update_masters( DB )
+      catch
+        _:E-> ?LOGERROR("~p database update masters error ~p",[DB,E])
+      end|| DB <- ActualDBs -- RegisteredDBs, is_master(DB) ],
 
-  [ try sync_copies(DB)
-    catch
-      _:E-> ?LOGERROR("~p database sync copies error ~p",[DB,E])
-    end|| DB <- RegisteredDBs ],
+    [ try remove_database( DB )
+     catch
+        _:E-> ?LOGERROR("~p database remove error ~p",[DB,E])
+      end|| DB <- ActualDBs -- RegisteredDBs, is_master(DB) ],
 
-  [ try update_info(DB)
-   catch
-      _:E->?LOGERROR("~p database update info error ~p",[DB,E])
-    end|| DB <- RegisteredDBs, is_master(DB) ],
+    [ try sync_copies(DB)
+      catch
+        _:E-> ?LOGERROR("~p database sync copies error ~p",[DB,E])
+      end|| DB <- RegisteredDBs ],
 
-  [ try sync_read_only(DB)
-    catch
-      _:E->?LOGERROR("~p database to read-only error ~p",[DB,E])
-    end|| DB <- RegisteredDBs, is_master(DB) ],
+    [ try update_info(DB)
+     catch
+        _:E->?LOGERROR("~p database update info error ~p",[DB,E])
+      end|| DB <- RegisteredDBs, is_master(DB) ],
 
-  ok.
+    [ try sync_read_only(DB)
+      catch
+        _:E->?LOGERROR("~p database to read-only error ~p",[DB,E])
+      end|| DB <- RegisteredDBs, is_master(DB) ],
+
+    ok
+  after
+    Unlock()
+  end.
 
 sync_read_only(DB) ->
   {ok, OID} = get_by_name( DB ),
@@ -723,6 +729,7 @@ update_masters( DB )->
   end.
 
 remove_database( DB )->
+  ?LOGINFO("~p database remove",[DB]),
   zaya:db_close( DB ),
   wait_close( DB ),
   zaya:db_remove( DB ).
@@ -789,7 +796,6 @@ update_info(DB)->
 %%=================================================================
 on_create(Object)->
   Name=check_name(Object),
-
   %<<"params">>=>#{ Node => #{ Type => Params } },
 
   Types = check_types(Object),
@@ -797,23 +803,28 @@ on_create(Object)->
 
   %-------------Create a new database-------------------------
   ?LOGINFO("creating a new database ~p, params ~p",[Name,Params]),
-  case zaya:db_create(Name,?MODULE,Params) of
-    {_,[]}->
-      ok;
-    {_,CreateErrors}->
-      ?LOGERROR("~p database create errors ~p",[Name,CreateErrors])
-  end,
+  Unlock = ecomet_schema:lock(),
+  try
+    case zaya:db_create(Name,?MODULE,Params) of
+      {_,[]}->
+        ok;
+      {_,CreateErrors}->
+        ?LOGERROR("~p database create errors ~p",[Name,CreateErrors])
+    end,
 
-  % If the transaction fails the database won't be registered in ecomet schema
-  % and will be removed during the synchronization
-  {ok,Id} = ecomet_schema:add_db( Name ),
-  check_tags( Object ),
+    % If the transaction fails the database won't be registered in ecomet schema
+    % and will be removed during the synchronization
+    {ok,Id} = ecomet_schema:add_db( Name ),
+    check_tags( Object ),
 
-  ecomet:edit_object(Object,#{
-    <<"id">> => Id,
-    <<"params">> => Params,
-    <<"types">>=>maps:keys( Types )
-  }).
+    ecomet:edit_object(Object,#{
+      <<"id">> => Id,
+      <<"params">> => Params,
+      <<"types">>=>maps:keys( Types )
+    })
+  after
+    Unlock()
+  end.
 
 on_edit(Object)->
   check_name(Object),
@@ -831,18 +842,22 @@ on_delete(Object)->
   OID = ?OID( Object ),
   MountedFolders = ecomet_folder:find_mount_points(OID),
 
-  % Unmount folders
-  [ok = ecomet_schema:unmount_db(F) || F <- MountedFolders],
+  Unlock = ecomet_schema:lock(),
+  try
+    % Unmount folders
+    [ok = ecomet_schema:unmount_db(F) || F <- MountedFolders],
 
-  % Unregister the DB
-  {ok, Name} = ecomet:read_field(Object, <<".name">>),
-  ok = ecomet_schema:remove_db( binary_to_atom(Name,utf8) ),
+    % Unregister the DB
+    {ok, Name} = ecomet:read_field(Object, <<".name">>),
+    ok = ecomet_schema:remove_db( binary_to_atom(Name,utf8) ),
 
-  % Cleanup folders
-  ecomet:on_commit(fun()->
-    [ catch ecomet:edit_object(ecomet:open(F), #{<<"database">> => none}) || F <- MountedFolders]
-  end),
-  ok.
+    % Cleanup folders
+    ecomet:on_commit(fun()->
+      [ catch ecomet:edit_object(ecomet:open(F), #{<<"database">> => none}) || F <- MountedFolders]
+    end)
+  after
+    Unlock()
+  end.
 
 check_name(Object)->
   case ecomet:field_changes(Object,<<".name">>) of

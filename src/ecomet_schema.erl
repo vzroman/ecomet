@@ -26,6 +26,8 @@
 %%	SERVICE API
 %%=================================================================
 -export([
+  %--------Schema------------------
+  lock/0,
   %--------Database------------------
   add_db/1,
   remove_db/1,
@@ -234,12 +236,22 @@
 }).
 
 %%=================================================================
+%%	SCHEMA API
+%%=================================================================
+lock()->
+  case elock:lock(?LOCKS, ?schema_lock ,_IsShared = false, _Timeout = infinity, zaya:db_available_nodes(?SCHEMA)) of
+    {ok,Unlock} -> Unlock;
+    {error, deadlock}-> lock();
+    {error, Error}-> throw({schema_lock_error, Error})
+  end.
+
+%%=================================================================
 %%	DATABASE API
 %%=================================================================
 %%------------Add a new database to the schema---------------
 add_db(Name)->
   % Adding a new database requires lock on the schema
-  {ok,Unlock} = elock:lock(?LOCKS, ?schema_lock ,_IsShared = false, _Timeout = infinity, zaya:db_available_nodes(?SCHEMA)),
+  Unlock = lock(),
   Result = zaya:transaction(fun()->
     Id = new_db_id(),
     ok = zaya:write( ?SCHEMA, [{ #dbId{k=Id}, Name }, {#dbName{k=Name}, Id}], write ),
@@ -346,7 +358,7 @@ get_db_tags(DB)->
 %%------------Add a new node to the schema---------------
 add_node(Name)->
   % Adding a new node requires lock on the schema
-  {ok,Unlock} = elock:lock(?LOCKS, ?schema_lock ,_IsShared = false, _Timeout = infinity, zaya:db_available_nodes(?SCHEMA)),
+  Unlock = lock(),
   Result = zaya:transaction(fun()->
     Id = new_node_id(),
     ok = zaya:write(?SCHEMA,[{#nodeId{k=Id}, Name},{ #nodeName{k=Name}, Id }], write),
