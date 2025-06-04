@@ -119,7 +119,6 @@ get_sessions(Sessions) when is_list(Sessions)->
     user_id => UserId,
     pid => PID,
     ts => TS,
-    subscriptions => ecomet_subscription:get_subscriptions( Id ),
     info => Info
   } || #session{
     id = Id,

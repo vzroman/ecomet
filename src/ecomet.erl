@@ -28,6 +28,7 @@
   is_admin/0,
   get_active_users/0,
   get_sessions/0,get_sessions/1,
+  get_session_subscriptions/1,
   spawn_session/1
 ]).
 
@@ -166,6 +167,9 @@ get_sessions()->
   ecomet_session:get_sessions().
 get_sessions(User)->
   ecomet_session:get_sessions(User).
+
+get_session_subscriptions( SessionId )->
+  ecomet_subscription:get_subscriptions( SessionId ).
 
 spawn_session( Fun )->
   ecomet_user:spawn_session( Fun ).
