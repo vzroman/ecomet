@@ -299,8 +299,13 @@ build_3gram([],Acc)->
 
 % split string to 3grams
 split_3grams(Value)->
-  Value1=unicode:characters_to_list(<<"^",Value/binary,"$">>),
-  split_3grams(Value1,[]).
+  case catch unicode:characters_to_list(<<"^",Value/binary,"$">>) of
+    Value1 when is_list( Value1 )->
+      split_3grams(Value1,[]);
+    _Unexpected->
+      ?LOGWARNING("~p is not valid unicode, skip 3gram indexing",[Value]),
+      []
+  end.
 split_3grams([C1,C2,C3|Rest],NgramList)->
   split_3grams([C2,C3|Rest],[unicode:characters_to_binary(string:uppercase([C1,C2,C3]))|NgramList]);
 split_3grams([_C1,_C2],NgramList)->
