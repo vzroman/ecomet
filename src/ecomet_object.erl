@@ -46,6 +46,7 @@
 -export([
   create/1,create/2,
   delete/1,
+  purge/1,
   open/1,open/2,
   exists/1,
   construct/1,
@@ -208,6 +209,24 @@ delete(#object{oid=OID, pattern = P}=Object) when is_map(P)->
   end;
 delete(#object{pattern = P}=Object)->
   delete(Object#object{ pattern = ecomet_pattern:get_map(P) }).
+
+purge(OID)->
+  try delete( open(OID) )
+  catch
+    _:_->
+      try purge_dirty(OID)
+      catch
+        _:E->{error, E}
+      end
+  end.
+
+purge_dirty(OID)->
+  ?TRANSACTION(fun()->
+    Object = construct(OID),
+    prepare_delete(Object),
+    ecomet_object:commit([{Object, on_delete}]),
+    ok
+  end).
 
 % Open object
 open(OID)->open(OID, _Lock = none).

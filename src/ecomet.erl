@@ -46,6 +46,7 @@
   field_type/2,
   edit_object/2,edit_object/3,
   delete_object/1,
+  purge_objects/1,
   copy_object/2, copy_object/3
 ]).
 
@@ -259,6 +260,11 @@ edit_object(Object, Fields, Params)->
 
 delete_object(Object)->
   ecomet_object:delete(Object).
+
+% @edoc Purges ecomet object ()
+-spec purge_objects(OIDs :: [oid()]) -> [ok | {error, Error :: term()}].
+purge_objects(OIDs)->
+  [ ecomet_object:purge(OID) || OID <- OIDs ].
 
 % @edoc Deletes existing ecomet object
 -spec copy_object(ID :: oid(), Overwrite :: map()) -> ok.
