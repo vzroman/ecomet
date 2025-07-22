@@ -589,6 +589,7 @@ bulk_delete(DB, Storage, Type, Keys, Lock)->
 transaction_lock(Fun) ->
   transaction(
     fun() ->
+      ecomet:open(?OID(<<"/root/.databases">>, write)),
       Fun()
     end).
 
