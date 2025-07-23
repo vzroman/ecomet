@@ -654,7 +654,7 @@ sync()->
 
 sync_remove_dbs()->
   % remove databases in locked mode
-  case transaction(fun()->
+  case ecomet:transaction(fun()->
 
     % set the global lock to ensure no databases are under create procedure
     ecomet:open(?OID(<<"/root/.databases">>), write),
@@ -672,7 +672,7 @@ sync_remove_dbs()->
 
   end) of
     {ok, Result} -> Result;
-    {abort, Reason} -> throw(Reason)
+    {error, Reason} -> throw(Reason)
   end.
 
 
@@ -791,8 +791,7 @@ wait_close( DB, Node )->
 update_info(DB)->
   case get_by_name( DB ) of
     {ok, OID}->
-      transaction(
-        fun() ->
+      case ecomet:transaction(fun() ->
           ok = ecomet:edit_object(ecomet:open(OID, write), #{
             <<"nodes">> => zaya:db_all_nodes(DB),
             <<"available_nodes">> => zaya:db_available_nodes(DB),
@@ -800,7 +799,10 @@ update_info(DB)->
             <<"is_available">> => zaya:is_db_available(DB),
             <<"size">> => zaya:db_size(DB)
           })
-        end);
+      end) of
+        {ok,_}->ok;
+        {error, Reason}-> throw( Reason )
+      end;
     _->
       ?LOGWARNING("~p database update info is not possible as the corresponding object is not found",[DB])
   end.
