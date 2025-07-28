@@ -32,6 +32,10 @@
 -define(STORAGE_TYPES,[?DISC,?RAMDISC,?RAM]).
 
 %-------CONSTANTS------------------
+-define(NODE_ID_LENGTH,16).
+-define(DB_ID_LENGTH,8).
+-define(PATTERN_IDL_LENGTH,16).
+
 -define(BITSTRING_LENGTH,65536).
 -define(MAX_NODES,65535).
 -define(ROUTER_POOL_SIZE, 128).

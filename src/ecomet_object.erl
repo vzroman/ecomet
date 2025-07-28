@@ -93,10 +93,6 @@
 -type object_handler() :: #object{}.
 -export_type([object_handler/0]).
 
--define(NODE_ID_LENGTH,16).
--define(DB_ID_LENGTH,8).
--define(PATTERN_IDL_LENGTH,16).
-
 -define(ObjectID(PatternID,ObjectID),{PatternID,ObjectID}).
 -define(map(P),
   if

@@ -891,24 +891,44 @@ init_default_users()->
   ok.
 
 new_db_id()->
-  Counter =
-    case zaya:read( ?SCHEMA, [db_counter], write) of
-      [] -> 0;
-      [{_, C}] -> C + 1
-    end,
-  zaya:write( ?SCHEMA, [{db_counter, Counter}], write ),
-
-  Counter.
+  zaya:read( ?SCHEMA, [db_counter], write),
+  Id = new_db_id(zaya:next(?SCHEMA, #dbId{k=-1}), 0),
+  if
+    Id < (1 bsl ?DB_ID_LENGTH) -> Id;
+    true -> throw({max_db_number_reached, (1 bsl ?DB_ID_LENGTH) -1 })
+  end.
+new_db_id({#dbId{k=NextId}, _}=Next, I) when NextId > I->
+  case zaya:read( ?SCHEMA, [#dbId{k=I}], write) of
+    []-> I;
+    _-> new_db_id(Next, I+1)
+  end;
+new_db_id({#dbId{k=Next}, _}, _I)->
+  new_db_id(zaya:next(?SCHEMA, #dbId{k=Next}), Next+1);
+new_db_id(Other, I)->
+  case zaya:read( ?SCHEMA, [#dbId{k=I}], write) of
+    []-> I;
+    _-> new_db_id(Other, I+1)
+  end.
 
 new_node_id()->
-  Counter =
-    case zaya:read( ?SCHEMA, [node_counter], write) of
-      [] -> 0;
-      [{_, C}] -> C + 1
-    end,
-  zaya:write( ?SCHEMA, [{node_counter, Counter}], write ),
-
-  Counter.
+  zaya:read( ?SCHEMA, [node_counter], write),
+  Id = new_node_id(zaya:next(?SCHEMA, #nodeId{k=-1}), 0),
+  if
+    Id < (1 bsl ?NODE_ID_LENGTH) -> Id;
+    true -> throw({max_nodes_number_reached, (1 bsl ?NODE_ID_LENGTH) -1 })
+  end.
+new_node_id({#nodeId{k=NextId}, _}=Next, I) when NextId > I->
+  case zaya:read( ?SCHEMA, [#nodeId{k=I}], write) of
+    []-> I;
+    _-> new_node_id(Next, I+1)
+  end;
+new_node_id({#nodeId{k=Next}, _}, _I)->
+  new_node_id(zaya:next(?SCHEMA, #nodeId{k=Next}), Next+1);
+new_node_id(Other, I)->
+  case zaya:read( ?SCHEMA, [#nodeId{k=I}], write) of
+    []-> I;
+    _-> new_node_id(Other, I+1)
+  end.
 
 init_tree(FolderID,Items)->
   [
