@@ -627,42 +627,52 @@ find_by_tag( Tag )->
   [ binary_to_atom( DB, utf8 ) || [DB] <- DBs ].
 
 sync()->
-  % Run through all databases
-  Unlock = ecomet_schema:lock(),
 
-  try
+  {RegisteredDBs, ActualDBs} = sync_remove_dbs(),
+
+  [ try update_masters( DB )
+    catch
+      _:E-> ?LOGERROR("~p database update masters error ~p",[DB,E])
+    end|| DB <- ActualDBs -- RegisteredDBs, is_master(DB) ],
+
+  [ try sync_copies(DB)
+    catch
+      _:E-> ?LOGERROR("~p database sync copies error ~p",[DB,E])
+    end|| DB <- RegisteredDBs ],
+
+  [ try update_info(DB)
+    catch
+      _:E->?LOGERROR("~p database update info error ~p",[DB,E])
+    end|| DB <- RegisteredDBs, is_master(DB) ],
+
+  [ try sync_read_only(DB)
+    catch
+      _:E->?LOGERROR("~p database to read-only error ~p",[DB,E])
+    end|| DB <- RegisteredDBs, is_master(DB) ],
+
+  ok.
+
+sync_remove_dbs()->
+  % remove databases in locked mode
+  case ecomet:transaction(fun()->
+
+    % set the global lock to ensure no databases are under create procedure
+    ecomet:open(?OID(<<"/root/.databases">>), write),
+
     RegisteredDBs = get_databases(),
     ActualDBs =
       [DB || DB <- zaya:all_dbs(), zaya:db_module( DB ) =:= ?MODULE],
 
-    [ try update_masters( DB )
-      catch
-        _:E-> ?LOGERROR("~p database update masters error ~p",[DB,E])
-      end|| DB <- ActualDBs -- RegisteredDBs, is_master(DB) ],
-
     [ try remove_database( DB )
-     catch
+      catch
         _:E-> ?LOGERROR("~p database remove error ~p",[DB,E])
       end|| DB <- ActualDBs -- RegisteredDBs, is_master(DB) ],
 
-    [ try sync_copies(DB)
-      catch
-        _:E-> ?LOGERROR("~p database sync copies error ~p",[DB,E])
-      end|| DB <- RegisteredDBs ],
+    {RegisteredDBs, ActualDBs}
 
-    [ try update_info(DB)
-     catch
-        _:E->?LOGERROR("~p database update info error ~p",[DB,E])
-      end|| DB <- RegisteredDBs, is_master(DB) ],
-
-    [ try sync_read_only(DB)
-      catch
-        _:E->?LOGERROR("~p database to read-only error ~p",[DB,E])
-      end|| DB <- RegisteredDBs, is_master(DB) ],
-
-    ok
-  after
-    Unlock()
+  end) of
+    {ok, Result} -> Result;
+    {error, Reason} -> throw(Reason)
   end.
 
 sync_read_only(DB) ->
@@ -780,13 +790,18 @@ wait_close( DB, Node )->
 update_info(DB)->
   case get_by_name( DB ) of
     {ok, OID}->
-      ok = ecomet:edit_object(ecomet:open(OID),#{
-        <<"nodes">> => zaya:db_all_nodes( DB ),
-        <<"available_nodes">> => zaya:db_available_nodes(DB),
-        <<"not_ready_nodes">> => zaya:db_not_ready_nodes(DB),
-        <<"is_available">> => zaya:is_db_available(DB),
-        <<"size">> => zaya:db_size(DB)
-      });
+      case ecomet:transaction(fun() ->
+          ok = ecomet:edit_object(ecomet:open(OID, write), #{
+            <<"nodes">> => zaya:db_all_nodes(DB),
+            <<"available_nodes">> => zaya:db_available_nodes(DB),
+            <<"not_ready_nodes">> => zaya:db_not_ready_nodes(DB),
+            <<"is_available">> => zaya:is_db_available(DB),
+            <<"size">> => zaya:db_size(DB)
+          })
+      end) of
+        {ok,_}->ok;
+        {error, Reason}-> throw( Reason )
+      end;
     _->
       ?LOGWARNING("~p database update info is not possible as the corresponding object is not found",[DB])
   end.
@@ -803,28 +818,27 @@ on_create(Object)->
 
   %-------------Create a new database-------------------------
   ?LOGINFO("creating a new database ~p, params ~p",[Name,Params]),
-  Unlock = ecomet_schema:lock(),
-  try
-    case zaya:db_create(Name,?MODULE,Params) of
-      {_,[]}->
-        ok;
-      {_,CreateErrors}->
-        ?LOGERROR("~p database create errors ~p",[Name,CreateErrors])
-    end,
 
-    % If the transaction fails the database won't be registered in ecomet schema
-    % and will be removed during the synchronization
-    {ok,Id} = ecomet_schema:add_db( Name ),
-    check_tags( Object ),
+  % set the global lock ti synchronize with schema synchronization service
+  ecomet:open(?OID(<<"/root/.databases">>), write),
 
-    ecomet:edit_object(Object,#{
-      <<"id">> => Id,
-      <<"params">> => Params,
-      <<"types">>=>maps:keys( Types )
-    })
-  after
-    Unlock()
-  end.
+  case zaya:db_create(Name,?MODULE,Params) of
+    {_,[]}->
+      ok;
+    {_,CreateErrors}->
+      ?LOGERROR("~p database create errors ~p",[Name,CreateErrors])
+  end,
+
+  % If the transaction fails the database won't be registered in ecomet schema
+  % and will be removed during the synchronization
+  {ok,Id} = ecomet_schema:add_db( Name ),
+  check_tags( Object ),
+
+  ecomet:edit_object(Object,#{
+    <<"id">> => Id,
+    <<"params">> => Params,
+    <<"types">>=>maps:keys( Types )
+  }).
 
 on_edit(Object)->
   check_name(Object),
