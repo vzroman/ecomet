@@ -181,6 +181,9 @@ init([Name,UserId,Info,Owner])->
   % We need to trap_exit to run the disconnect process before exit
   process_flag(trap_exit,true),
 
+  % If the monitor exits with normal it's session should exit too
+  erlang:monitor(process, Owner),
+
   % Register session
   true = ets:insert(?SESSIONS,#session{
     id = Owner,
@@ -211,6 +214,10 @@ handle_call(Request, From, State) ->
 handle_cast(Request,State)->
   ?LOGWARNING("ecomet session got an unexpected cast resquest ~p, state ~p",[Request, State]),
   {noreply,State}.
+
+handle_info({'DOWN', _Ref, process, Owner, Reason}, #state{ owner = Owner }=State)->
+  ?LOGWARNING("ecomet_session got 'DOWN', reason: ~p, state ~p",[Reason,State]),
+  {stop,Reason,State};
 
 handle_info(Message,State)->
   ?LOGWARNING("ecomet_session got an unexpected message ~p, state ~p",[Message,State]),
