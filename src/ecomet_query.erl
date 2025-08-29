@@ -174,25 +174,35 @@ get(DBs,Fields,Conditions)->
 get(DBs,Fields,Conditions,Params) when is_list(Params)->
   get(DBs,Fields,Conditions,maps:from_list(Params));
 get(DBs,Fields,Conditions,Params)->
-  CompiledQuery=compile(get,Fields,Conditions,Params),
-  Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-  case maps:get(lock,Params,none) of
-    none ->
-      % All operations are dirty
-      execute(no_transaction,CompiledQuery,DBs,Union);
-    _->
-      execute(execute,CompiledQuery,DBs,Union)
+  case check_dbs(get, DBs, Fields, Conditions) of
+    {ok, AvailableDBs} ->
+      CompiledQuery = compile(get, Fields, Conditions, Params),
+      Union = maps:get(union, Params, {'OR', ecomet_resultset:new()}),
+      case maps:get(lock, Params, none) of
+        none ->
+          % All operations are dirty
+          execute(no_transaction, CompiledQuery, AvailableDBs, Union);
+        _ ->
+          execute(execute, CompiledQuery, AvailableDBs, Union)
+      end;
+    {default, Default} ->
+      Default
   end.
 
 system(DBs,Fields,Conditions)->
-  Conditions1=ecomet_resultset:prepare(Conditions),
-  {Map,Reduce}=compile_map_reduce(get,Fields,#{}),
-  Compiled = #compiled_query{
-    conditions = Conditions1,
-    map = Map,
-    reduce = Reduce
-  },
-  execute(no_transaction,Compiled,DBs,{'OR',ecomet_resultset:new()}).
+  case check_dbs(get, DBs, Fields, Conditions) of
+    {ok, AvailableDBs} ->
+      Conditions1 = ecomet_resultset:prepare(Conditions),
+      {Map, Reduce} = compile_map_reduce(get, Fields, #{}),
+      Compiled = #compiled_query{
+        conditions = Conditions1,
+        map = Map,
+        reduce = Reduce
+      },
+      execute(no_transaction, Compiled, AvailableDBs, {'OR', ecomet_resultset:new()});
+    {default, Default} ->
+      Default
+  end.
 
 %%=====================================================================
 %%	SUBSCRIBE
@@ -295,9 +305,14 @@ set(DBs,Fields,Conditions)->
 set(DBs,Fields,Conditions,Params) when is_list(Params)->
   set(DBs,Fields,Conditions,maps:from_list(Params));
 set(DBs,Fields,Conditions,Params)->
-  CompiledQuery=compile(set,Fields,Conditions,Params),
-  Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-  execute(execute,CompiledQuery,DBs,Union).
+  case check_dbs(set, DBs, Fields, Conditions) of
+    {ok, AvailableDBs} ->
+      CompiledQuery = compile(set, Fields, Conditions, Params),
+      Union = maps:get(union, Params, {'OR', ecomet_resultset:new()}),
+      execute(execute, CompiledQuery, AvailableDBs, Union);
+    {default, Default} ->
+      Default
+  end.
 
 %%=====================================================================
 %%	INSERT
@@ -341,9 +356,14 @@ delete(DBs,Conditions)->
 delete(DBs,Conditions,Params) when is_list(Params)->
   delete(DBs,Conditions,Params);
 delete(DBs,Conditions,Params)->
-  CompiledQuery=compile(delete,none,Conditions,Params),
-  Union=maps:get(union,Params,{'OR',ecomet_resultset:new()}),
-  execute(execute,CompiledQuery,DBs,Union).
+  case check_dbs(delete, DBs, Conditions) of
+    {ok, AvailableDBs} ->
+      CompiledQuery = compile(delete, none, Conditions, Params),
+      Union = maps:get(union, Params, {'OR', ecomet_resultset:new()}),
+      execute(execute, CompiledQuery, AvailableDBs, Union);
+    {default, Default} ->
+      Default
+  end.
 
 %%=====================================================================
 %%	COMPILE
@@ -365,8 +385,7 @@ compile(Type,Fields,Conditions,Params)->
 %%	EXECUTE
 %%=====================================================================
 execute(Handler,#compiled_query{conditions = Conditions,map = Map,reduce = Reduce}, DBs, Union)->
-  AvailableDBs = [ DB || DB <- prepare_dbs( DBs ), ecomet_db:is_available(DB)],
-  ecomet_resultset:Handler(AvailableDBs, Conditions, Map, Reduce, Union).
+  ecomet_resultset:Handler(DBs, Conditions, Map, Reduce, Union).
 
 prepare_dbs( '*' )->
   ecomet_db:get_databases();
@@ -1252,3 +1271,34 @@ set_rights(Type,Conditions)->
         {'OR',[{Level,'=',GID}||GID<-UserGroups]}
       ]}
   end.
+
+check_dbs(Type, DBs, Params) ->
+  check_dbs(Type, DBs, [], Params).
+check_dbs(Type, DBs, Fields, Params) ->
+  case [DB || DB <- prepare_dbs(DBs), ecomet_db:is_available(DB)] of
+    [] -> {default, return_default(Type, Fields, Params)};
+    AvailableDBs -> {ok, AvailableDBs}
+  end.
+
+return_default(get, rs, _Params) ->
+  [];
+return_default(get, [count], _Params) ->
+  [];
+return_default(get, [<<".oid">>], Params) ->
+  return_with_count(get, [], Params);
+return_default(get, Fields, Params) ->
+  return_with_count(get, {Fields, []}, Params);
+return_default(set, _Fields, _Params) ->
+  0;
+return_default(delete, _Fields, _Params) ->
+  0;
+return_default(_Type, _Fields, _Params) ->
+  0.
+  
+return_with_count(get, Return, Params) ->
+  case maps:get(page, Params, none) of
+    none -> Return;
+    _Other -> {0, Return}
+  end;
+return_with_count(_Type, Return, _Params) ->
+  Return.
