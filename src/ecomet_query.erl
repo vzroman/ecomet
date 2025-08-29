@@ -174,7 +174,7 @@ get(DBs,Fields,Conditions)->
 get(DBs,Fields,Conditions,Params) when is_list(Params)->
   get(DBs,Fields,Conditions,maps:from_list(Params));
 get(DBs,Fields,Conditions,Params)->
-  case check_dbs(get, DBs, Fields, Conditions) of
+  case check_dbs(get, DBs, Params, Fields) of
     {ok, AvailableDBs} ->
       CompiledQuery = compile(get, Fields, Conditions, Params),
       Union = maps:get(union, Params, {'OR', ecomet_resultset:new()}),
@@ -190,7 +190,7 @@ get(DBs,Fields,Conditions,Params)->
   end.
 
 system(DBs,Fields,Conditions)->
-  case check_dbs(get, DBs, Fields, Conditions) of
+  case check_dbs(get, DBs, #{}, Fields) of
     {ok, AvailableDBs} ->
       Conditions1 = ecomet_resultset:prepare(Conditions),
       {Map, Reduce} = compile_map_reduce(get, Fields, #{}),
@@ -305,7 +305,7 @@ set(DBs,Fields,Conditions)->
 set(DBs,Fields,Conditions,Params) when is_list(Params)->
   set(DBs,Fields,Conditions,maps:from_list(Params));
 set(DBs,Fields,Conditions,Params)->
-  case check_dbs(set, DBs, Fields, Conditions) of
+  case check_dbs(set, DBs, Params, Fields) of
     {ok, AvailableDBs} ->
       CompiledQuery = compile(set, Fields, Conditions, Params),
       Union = maps:get(union, Params, {'OR', ecomet_resultset:new()}),
@@ -356,7 +356,7 @@ delete(DBs,Conditions)->
 delete(DBs,Conditions,Params) when is_list(Params)->
   delete(DBs,Conditions,Params);
 delete(DBs,Conditions,Params)->
-  case check_dbs(delete, DBs, Conditions) of
+  case check_dbs(delete, DBs) of
     {ok, AvailableDBs} ->
       CompiledQuery = compile(delete, none, Conditions, Params),
       Union = maps:get(union, Params, {'OR', ecomet_resultset:new()}),
@@ -1272,9 +1272,11 @@ set_rights(Type,Conditions)->
       ]}
   end.
 
+check_dbs(Type, DBs) ->
+  check_dbs(Type, DBs, #{}).
 check_dbs(Type, DBs, Params) ->
-  check_dbs(Type, DBs, [], Params).
-check_dbs(Type, DBs, Fields, Params) ->
+  check_dbs(Type, DBs, Params, []).
+check_dbs(Type, DBs, Params, Fields) ->
   case [DB || DB <- prepare_dbs(DBs), ecomet_db:is_available(DB)] of
     [] -> {default, return_default(Type, Fields, Params)};
     AvailableDBs -> {ok, AvailableDBs}
