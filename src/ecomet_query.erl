@@ -598,10 +598,13 @@ map_reduce_plan(#{aggregate:=false,group:=[],order:=Order}=Params) when (Order=:
           ecomet_resultset:fold(fun(OID,Acc)->[BuildRowFun(OID)|Acc] end,[],RS,Order,none)
         end,
       ReduceFun=
-        fun([Init|Results])->
-          % Traversing results from the right to optimize ++ operator (assume that Rows < Acc ).
-          % If only database requested, no ++ is performed
-          lists:foldr(fun(Rows,Acc)->Rows++Acc end,Init,Results)
+        fun
+          ([])->
+            [];
+          ([Init|Results])->
+            % Traversing results from the right to optimize ++ operator (assume that Rows < Acc ).
+            % If only database requested, no ++ is performed
+            lists:foldr(fun(Rows,Acc)->Rows++Acc end,Init,Results)
         end,
       {MapFun,ReduceFun};
     % PAGE. Optimized case. Local worker sends raw resultSet, manager build rows itself only for requested page
