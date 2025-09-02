@@ -698,12 +698,15 @@ map_reduce_plan(#{aggregate:=false}=Params)->
   TraverseGroups=[{true,Order}||{_,Order}<-Grouping]++[{false,Order}||{_,Order}<-Sorting],
 
   MergeTrees=
-    fun([InitTree|Results])->
-      lists:foldr(fun(GroupsTree,Acc)->
-        merge_trees(length(TraverseGroups),GroupsTree,Acc,fun(RowList,GroupAcc)->
-          RowList++GroupAcc
-        end)
-      end,InitTree,Results)
+    fun
+      ([])->
+        [];
+      ([InitTree|Results])->
+        lists:foldr(fun(GroupsTree,Acc)->
+          merge_trees(length(TraverseGroups),GroupsTree,Acc,fun(RowList,GroupAcc)->
+            RowList++GroupAcc
+          end)
+        end,InitTree,Results)
      end,
   %-------Fun to reduce results--------------
   ReduceFun=
@@ -768,10 +771,13 @@ map_reduce_plan(#{group:=[]}=Params)->
     end,
   %------REDUCE--------------------------------------
   ReduceFun=
-    fun([Init|Results])->
-      lists:foldl(fun(Res,Acc)->
-        AppendRowFun(Res,Acc)
-      end,Init,Results)
+    fun
+      ([])->
+        [];
+      ([Init|Results])->
+        lists:foldl(fun(Res,Acc)->
+          AppendRowFun(Res,Acc)
+        end,Init,Results)
     end,
   {MapFun,ReduceFun};
 
@@ -845,19 +851,22 @@ map_reduce_plan(Params)->
   %-------Fun to reduce results--------------
   Page=maps:get(page,Params),
   ReduceFun=
-    fun([InitTree|Results])->
-      % Traversing results from the right to optimize ++ operator (assume that RowList < GroupAcc )
-      MergedGroups=
-        lists:foldr(fun(GroupsTree,Acc)->
-          merge_trees(length(TraverseGroups),GroupsTree,Acc,AppendRowFun)
-        end,InitTree,Results),
-      SortedGroups=sort_leafs(length(Grouping)-1,MergedGroups,LeafSorting),
-      if
-        Page=:=none -> grouped_resut(lists:droplast(TraverseGroups),SortedGroups,FinalRow,[]);
-        true ->
-          PreparedResults=grouped_resut(lists:droplast(TraverseGroups),SortedGroups,FinalRow,[]),
-          {length(PreparedResults),groups_page(PreparedResults,Page)}
-      end
+    fun
+      ([]) ->
+        [];
+      ([InitTree|Results])->
+        % Traversing results from the right to optimize ++ operator (assume that RowList < GroupAcc )
+        MergedGroups=
+          lists:foldr(fun(GroupsTree,Acc)->
+            merge_trees(length(TraverseGroups),GroupsTree,Acc,AppendRowFun)
+          end,InitTree,Results),
+        SortedGroups=sort_leafs(length(Grouping)-1,MergedGroups,LeafSorting),
+        if
+          Page=:=none -> grouped_resut(lists:droplast(TraverseGroups),SortedGroups,FinalRow,[]);
+          true ->
+            PreparedResults=grouped_resut(lists:droplast(TraverseGroups),SortedGroups,FinalRow,[]),
+            {length(PreparedResults),groups_page(PreparedResults,Page)}
+        end
     end,
   {MapFun,ReduceFun}.
 
