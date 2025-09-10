@@ -368,13 +368,15 @@ execute(Handler,#compiled_query{conditions = Conditions,map = Map,reduce = Reduc
   AvailableDBs = [ DB || DB <- prepare_dbs( DBs ), ecomet_db:is_available(DB)],
   ecomet_resultset:Handler(AvailableDBs, Conditions, Map, Reduce, Union).
 
-prepare_dbs( '*' )->
+prepare_dbs( DBs )->
+  lists:uniq( find_dbs( DBs ) ).
+find_dbs( '*' )->
   ecomet_db:get_databases();
-prepare_dbs([ Tag | Rest ]) when is_binary( Tag )->
-  ecomet_db:find_by_tag( Tag ) ++ prepare_dbs( Rest );
-prepare_dbs([ DB | Rest ]) when is_atom( DB )->
-  [DB| prepare_dbs( Rest )];
-prepare_dbs([])->
+find_dbs([ Tag | Rest ]) when is_binary( Tag )->
+  ecomet_db:find_by_tag( Tag ) ++ find_dbs( Rest );
+find_dbs([ DB | Rest ]) when is_atom( DB )->
+  [DB| find_dbs( Rest )];
+find_dbs([])->
   [].
 
 %%-------------GET------------------------------------------------
