@@ -365,7 +365,7 @@ compile(Type,Fields,Conditions,Params)->
 %%	EXECUTE
 %%=====================================================================
 execute(Handler, #compiled_query{conditions = Conditions, map = Map, reduce = Reduce}, DBs, Union) ->
-  case [DB || DB <- prepare_dbs(DBs), ecomet_db:is_available(DB)] of
+  case lists:uniq([DB || DB <- prepare_dbs(DBs), ecomet_db:is_available(DB)]) of
     [] ->
       Reduce([]);
     AvailableDBs ->
