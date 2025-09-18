@@ -23,7 +23,7 @@
 -export([
   login/2, login/3, dirty_login/1, dirty_login/2,
   logout/0,
-  get_user/0,
+  get_user/0, get_user/1,
   get_session_info/0,
   is_admin/0,
   get_active_users/0,
@@ -154,6 +154,9 @@ logout()->
 
 get_user()->
   ecomet_user:get_user().
+
+get_user(PID) ->
+  ecomet_user:get_user(PID).
 
 is_admin()->
   ecomet_user:is_admin().
