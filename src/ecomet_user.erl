@@ -29,7 +29,7 @@
   spawn_session/1,
   query_context/0, query_context/1,
   logout/0,
-  get_user/0,
+  get_user/0, get_user/1,
   get_usergroups/0,
   get_session/0,
   get_session_info/0,
@@ -139,6 +139,13 @@ get_user()->
   case get(?CONTEXT) of
     undefined->{error,user_undefined};
     #state{uid=UID}->{ok,UID}
+  end.
+
+get_user(PID) ->
+  {dictionary, Dict} = erlang:process_info(PID, dictionary),
+  case lists:keyfind(?CONTEXT, 1, Dict) of
+    {_, #state{uid=UID}} -> {ok, UID};
+    _ -> {error, user_undefined}
   end.
 
 get_usergroups()->
