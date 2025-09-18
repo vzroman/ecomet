@@ -799,6 +799,7 @@ check_db(#object{oid=OID}=Object)->
       end
   end.
   
+% Object can not change if it's database is in read-only mode
 check_db_available(#object{db = DB}) ->
   case zaya_db:read_only(DB) of
     true -> throw(database_read_only);
