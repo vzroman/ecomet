@@ -677,6 +677,7 @@ load_storage(_IsTransaction = true, OID, Type)->
 %% Behaviour handlers
 %%=====================================================================
 on_create(Object)->
+  check_db_available(Object),
   check_name(Object),
   check_storage_type(Object),
   check_path(Object),
@@ -686,6 +687,7 @@ on_create(Object)->
   }).
 
 on_edit(Object)->
+  check_db_available(Object),
   % Check domain change
   check_db(Object),
   % Check for unique name in folder
@@ -795,6 +797,12 @@ check_db(#object{oid=OID}=Object)->
         _->
           ?ERROR(different_database)
       end
+  end.
+  
+check_db_available(#object{db = DB}) ->
+  case zaya_db:read_only(DB) of
+    true -> throw(database_read_only);
+    false -> ok
   end.
 
 % ReadGroups must contain all the WriteGroups
