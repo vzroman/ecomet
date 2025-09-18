@@ -802,7 +802,7 @@ check_db(#object{oid=OID}=Object)->
 % Object can not change if it's database is in read-only mode
 check_db_available(#object{db = DB}) ->
   case zaya_db:read_only(DB) of
-    true -> throw(database_read_only);
+    true -> throw({database_read_only, DB});
     false -> ok
   end.
 
