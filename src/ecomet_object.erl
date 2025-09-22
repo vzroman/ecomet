@@ -717,6 +717,7 @@ on_edit(Object)->
   edit_rights(Object).
 
 on_delete(Object)->
+  check_db_available(Object),
   case is_system(Object) of
     true->
       % We are not allowed to delete system objects until it is not the
