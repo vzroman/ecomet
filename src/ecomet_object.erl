@@ -677,6 +677,7 @@ load_storage(_IsTransaction = true, OID, Type)->
 %% Behaviour handlers
 %%=====================================================================
 on_create(Object)->
+  check_db_available(Object),
   check_name(Object),
   check_storage_type(Object),
   check_path(Object),
@@ -686,6 +687,7 @@ on_create(Object)->
   }).
 
 on_edit(Object)->
+  check_db_available(Object),
   % Check domain change
   check_db(Object),
   % Check for unique name in folder
@@ -715,6 +717,7 @@ on_edit(Object)->
   edit_rights(Object).
 
 on_delete(Object)->
+  check_db_available(Object),
   case is_system(Object) of
     true->
       % We are not allowed to delete system objects until it is not the
@@ -795,6 +798,13 @@ check_db(#object{oid=OID}=Object)->
         _->
           ?ERROR(different_database)
       end
+  end.
+  
+% Object can not change if it's database is in read-only mode
+check_db_available(#object{db = DB}) ->
+  case zaya_db:read_only(DB) of
+    true -> throw({read_only, DB});
+    false -> ok
   end.
 
 % ReadGroups must contain all the WriteGroups
