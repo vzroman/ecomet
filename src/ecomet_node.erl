@@ -162,7 +162,7 @@ sync()->
 %%=================================================================
 on_create(Object)->
   check_name(Object),
-  register_node(Object),
+  get_id(Object),
   ok.
 
 on_edit(Object)->
@@ -198,6 +198,16 @@ check_name(Object)->
       ?ERROR(renaming_is_not_allowed)
   end.
 
+get_id(Object)->
+  % Node gets its Id during schema initialization process
+  {ok,Name}=ecomet:read_field(Object,<<".name">>),
+  Id =
+    try ecomet_schema:get_node_id(binary_to_atom(Name,utf8))
+    catch
+      _:_-> throw( node_is_not_registered )
+    end,
+  ok = ecomet:edit_object(Object,#{<<"id">>=>Id}).
+
 check_id(Object)->
   case ecomet:field_changes(Object,<<"id">>) of
     none->ok;
@@ -208,10 +218,6 @@ check_id(Object)->
       ?ERROR(change_id_is_not_allowed)
   end.
 
-register_node(Object)->
-  {ok,Name}=ecomet:read_field(Object,<<".name">>),
-  {ok,ID}=ecomet_schema:add_node(binary_to_atom(Name,utf8)),
-  ok = ecomet:edit_object(Object,#{<<"id">>=>ID}).
 
 unregister_node(Object)->
   {ok,Name}=ecomet:read_field(Object,<<".name">>),
