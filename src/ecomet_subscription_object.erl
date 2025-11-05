@@ -15,7 +15,7 @@
 -export([
   add_subscription_call/1,
   add_subscription_cast/2,
-  remove_subscription/2
+  unsubscribe/2
 ]).
 
 %%=================================================================
@@ -79,9 +79,9 @@ add_subscription_cast(
 )->
   gen_server:cast(?WORKER(OID), {add_subscription, Subscription, Updates}).
 
-remove_subscription(Client, SubsID)->
+unsubscribe(Client, SubsID)->
   PoolSize = ecomet_subscription_pool:get_size(),
-  [gen_server:cast(?NAME(N), {remove_subscription, Client, SubsID}) || N <- lists:seq(0, PoolSize-1)],
+  [gen_server:cast(?NAME(N), {unsubscribe, Client, SubsID}) || N <- lists:seq(0, PoolSize-1)],
   ok.
 
 
@@ -128,9 +128,9 @@ handle_cast({add_subscription, Subscription, Updates}, State0) ->
       {noreply, State}
   end;
 
-handle_cast({remove_subscription, Client, SubsID}, State0) ->
+handle_cast({unsubscribe, Client, SubsID}, State0) ->
   try
-    State = remove_subscription(Client, SubsID, State0),
+    State = unsubscribe(Client, SubsID, State0),
     {noreply, State}
   catch
     _:E:S->
@@ -190,21 +190,156 @@ add_subscription(
 %-------------------------------------------------------------------
 %  Remove subscription
 %-------------------------------------------------------------------
-remove_subscription(
-    ClientPID,
+unsubscribe(
+    ClientID,
+    SubsID,
+    State0
+)->
+
+  State1 = destroy_sub(ClientID, SubsID, State0),
+
+  remove_client(State1).
+
+destroy_sub(
+    ClientID,
     SubsID,
     State0 = #state{
-      objects = Objects0,
-      clients = Clients0 = #{
-        ClientPID := Client0 = #client{
-          monitor = MonitorRef,
-          subs = Subs0 = #{
-            SubsID := SubObjects
+      clients = #{
+        ClientID := #client{
+          subs = #{
+            SubsID := #sub{
+              objects = Objects,
+              fields = Fields
+            }
           }
         }
       }
     }
 )->
+
+  State1 = maps:fold(
+    fun(OID,_, Acc)->
+      remove_object_subscription(OID, Fields, ClientID, SubsID, Acc)
+    end,
+    State0,
+    Objects
+  ),
+
+  State2 = maps:fold(
+    fun(OID,_, Acc)->
+      remove_access_denied(OID, ClientID, Acc)
+    end,
+    State1,
+    Objects
+  ),
+
+  remove_client( State2 ).
+
+remove_object_subscription(
+    OID,
+    SubscriptionFields,
+    ClientID,
+    SubsID,
+    State0 = #state{
+      objects = Objects0 = #{
+        OID := Object0
+      }
+    }
+)->
+
+  Object = lists:foldl(
+    fun
+      (F, Acc)-> remove_field_subscription(F, ClientID, SubsID, Acc)
+    end,
+    Object0,
+    SubscriptionFields
+  ),
+
+  Objects =
+    if
+      map_size( Object#object.fields ) > 0 ->
+        Object0#{ OID => Object };
+      true ->
+        maps:remove(OID, Objects0)
+    end,
+
+  State0#state{
+    objects = Objects
+  }.
+
+remove_field_subscription(
+    FieldName,
+    ClientID,
+    SubsID,
+    Object0 = #object{
+      fields = Fields0 = #{
+        FieldName:= Field0 = #field{
+          clients = Clients0 = #{
+            ClientID := ClientSubscriptions0
+          }
+        }
+      }
+    }
+)->
+
+  ClientSubscriptions = ordsets:del_element(SubsID, ClientSubscriptions0),
+  Clients =
+    if
+      length(ClientSubscriptions) > 0 ->
+        Clients0#{
+          ClientID => ClientSubscriptions
+        };
+      true->
+        maps:remove(ClientID, Clients0)
+    end,
+
+  Fields =
+    if
+      map_size(Clients) > 0 ->
+        Fields0#{
+          FieldName => Field0#field{
+            clients = Clients
+          }
+        };
+      true ->
+        maps:remove(FieldName, Fields0)
+    end,
+
+  Object0#object{
+    fields = Fields
+  }
+
+
+
+
+  lists:foldl(
+    fun(OID, Acc)->
+      remove_subscription(ClientID, SubsID, OID, Acc)
+    end,
+    State0,
+    maps:keys(SubscriptionObjects)).
+
+remove_subscription(
+    ClientID,
+    SubsID,
+    OID,
+    State0 = #state{
+      clients = #{
+        ClientID := #client{
+          subs = #{
+            SubsID := #sub{
+              fields = SubscriptionFields
+            }
+          }
+        }
+      }
+    }
+)->
+
+  State1 = remove_object_subscription( Sub,  ),
+
+
+
 
   %-----------Remove subscription from objects collection---------------
   Objects =
