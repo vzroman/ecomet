@@ -68,10 +68,7 @@ on_init()->
   ets:new(?ECOMET_SESSION_TOKENS,[named_table,public,set]),	
 
   % Initialize subscriptions
-  case ?ENV(disable_subscriptions, false) of
-    false -> ecomet_subscription:on_init();
-    _-> ignore
-  end,
+  ecomet_subscription_sup:on_init(),
 
   ok.
 

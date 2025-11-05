@@ -66,10 +66,6 @@
 %%=================================================================
 on_init()->
 
-  % Initialize subscriptions optimization
-  PoolSize = erlang:system_info(logical_processors),
-  ?S_SHARDS(PoolSize),
-
   % Prepare the storage for sessions
   ets:new(?SUBSCRIPTIONS,[
     named_table,
@@ -79,46 +75,6 @@ on_init()->
     {read_concurrency, true},
     {write_concurrency,true}
   ]),
-
-  [ begin
-    % Prepare the storage for object monitors
-      ets:new(?S_OBJECT(I),[
-        named_table,
-        public,
-        set,
-        {read_concurrency, true},
-        {write_concurrency,true}
-      ]),
-
-      % Prepare the index for object monitors
-      ets:new(?S_OBJECT_INDEX(I),[
-        named_table,
-        public,
-        bag,
-        {read_concurrency, true},
-        {write_concurrency,true}
-      ])
-    end || I <- lists:seq(0, PoolSize-1) ],
-
-  % Prepare the storage for query subscriptions
-  ets:new(?S_QUERY,[
-    named_table,
-    public,
-    set,
-    {read_concurrency, true},
-    {write_concurrency,true}
-  ]),
-
-  % Prepare the storage for index
-  ets:new(?S_INDEX,[
-    named_table,
-    public,
-    set,
-    {read_concurrency, true},
-    {write_concurrency,true}
-  ]),
-
-  ok = ecomet_router:on_init( PoolSize ),
 
   ok.
 
