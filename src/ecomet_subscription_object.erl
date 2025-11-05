@@ -31,9 +31,31 @@
 ]).
 
 -record(state, {
-  subs,
+  objects,
   clients,
   access_denied
+}).
+
+-record(object,{
+  instance,
+  read_groups,
+  fields
+}).
+
+-record(field,{
+  value,
+  clients
+}).
+
+-record(client,{
+  usergroups,
+  subs
+}).
+
+-record(sub,{
+  deps,
+  read,
+  no_feedback
 }).
 
 %%=================================================================
@@ -57,7 +79,7 @@ start_link(N)->
 init([]) ->
 
   {ok, #state{
-    subs = #{},
+    objects = #{},
     clients = #{},
     access_denied = #{}
   }}.
@@ -68,7 +90,7 @@ init([]) ->
 handle_call({add_subscription, OID, Subscription}, _From, State0) ->
 
   try
-    State = add_subscription(OID, Subscription, _Fields = #{}, State0),
+    State = add_subscription(OID, Subscription, _Update = #{}, State0),
     {reply, ok, State}
   catch
     _:E:S->
@@ -97,7 +119,7 @@ code_change(_OldVsn, State, _Extra) ->
 %-------------------------------------------------------------------
 add_subscription(
     _OID,
-    _Fields,
+    _Update,
     #subscription{
       id = SubsID,
       client = Client
@@ -109,9 +131,9 @@ add_subscription(
   % The subscription already exists, ignore
   State;
 
-add_subscription(OID, Fields, Subscription, State0)->
+add_subscription(OID, Update, Subscription, State0)->
 
-  State1 = add_object( OID, Subscription, Fields, State0),
+  State1 = add_object( OID, Subscription, Update, State0),
 
   State2 = check_access( OID, Subscription, State1 ),
 
@@ -121,15 +143,187 @@ add_subscription(OID, Fields, Subscription, State0)->
 %-------------------------------------------------------------------
 %  State transformations
 %-------------------------------------------------------------------
+%---------Extend already active object---------------
 add_object(
     OID,
     #subscription{
-
+      deps = Deps
     },
-    Fields,
+    Update,
     State0 = #state{
-
+      objects = Objects0 =#{
+        OID:= Object0 = #object{
+          instance = Instance,
+          fields = Fields0
+        }
+      }
     })->
+
+  NewFields = Deps -- maps:keys( Fields0 ),
+  ToReadFields = NewFields -- maps:keys(Update),
+  ReadValues =
+    if
+      map_size(ToReadFields) > 0 ->
+        ecomet_object:read_fields( Instance, ToReadFields );
+      true ->
+        #{}
+    end,
+  Values = maps:merge( ReadValues, Update ),
+
+  Fields =
+    lists:foldl(
+      fun(F, Acc)->
+        Acc#{F => #field{
+          value = maps:get(F, Values),
+          clients = #{}
+        }}
+      end,
+      Fields0,
+      NewFields),
+
+  State0#state{
+    objects = Objects0#{
+      OID => Object0#object{
+        fields = Fields
+      }
+    }
+  };
+
+%---------Append new object---------------
+add_object(
+    OID,
+    Subscription,
+    Update,
+    State0 = #state{
+      objects = Objects0
+    })->
+
+  Instance = ecomet_object:construct( OID ),
+  #{ <<".readgroups">> := ReadGroups } = ecomet:read_fields( Instance, #{ <<".readgroups">> => [] }),
+  State = State0#state{
+    objects = Objects0#{
+      OID => #object{
+        instance = Instance,
+        read_groups = ordsets:from_list(ReadGroups),
+        fields = #{}
+      }
+    }
+  },
+
+  add_object( OID, Subscription, Update, State ).
+
+check_access(
+    _OID,
+    #subscription{
+      usergroups = is_admin
+    },
+    State
+)->
+  % The client has admin rights
+  State;
+
+check_access(
+    OID,
+    #subscription{
+      client = Client,
+      usergroups = UserGroups
+    },
+    State0 = #state{
+      objects = #{
+        OID:=#object{
+          read_groups = ReadGroups
+        }
+      },
+      access_denied = AccessDenied0
+    }
+)->
+  case ordsets:intersection( UserGroups, ReadGroups ) of
+    []->
+      DeniedClients0 = maps:get( OID, AccessDenied0, #{}),
+      DeniedClients = DeniedClients0#{ Client => true },
+      AccessDenied = AccessDenied0#{ OID => DeniedClients },
+      State0#state{
+        access_denied = AccessDenied
+      };
+    _->
+      % The client has access to the object
+      State0
+  end.
+
+
+
+add_client(
+    OID,
+    #subscription{
+      id = SubsID,
+      client = ClientPID,
+      usergroups = UserGroups,
+      deps = Deps,
+      read = Read,
+      params = #{
+        no_feedback := NoFeedback
+      }
+    },
+    State0 = #state{
+      objects = Objects,
+      clients = Clients0
+    }
+)->
+
+  Client0 =
+    maps:get(ClientPID, Clients0, #client{ usergroups = UserGroups, subs = #{} }),
+
+  Subs0 = Client0#client.subs,
+  SubObjects0 = maps:get(SubsID, Subs0, #{}),
+
+  SubObjects = SubObjects0#{
+    OID => #sub{
+      deps = Deps,
+      read = Read,
+      no_feedback = NoFeedback
+    }
+  },
+
+  Subs = Subs0#{
+    SubsID => SubObjects
+  },
+
+  Client = Client0#client{
+    subs = Subs
+  },
+
+  if
+    NoFeedback =:= false ->
+      todo;
+    true ->
+      #object{
+        instance = Instance,
+        fields = Fields
+      } = maps:get(OID, Objects),
+      Values = actual_values( Deps, Fields ),
+      Update = ecomet_query:query_object(Instance, Values),
+      catch ClientPID ! ?SUBSCRIPTION(SubsID, create, OID, Update)
+  end,
+
+  State0#state{
+    clients = Clients0#{
+      ClientPID => Client
+    }
+  }.
+
+actual_values(Needed, Fields)->
+  lists:foldl(
+    fun(F, Acc)->
+      #field{value = V} = maps:get(F, Fields),
+      Acc#{ F=> V }
+    end,
+    #{},
+    Needed).
+
+
+
+
+
 
 
 
