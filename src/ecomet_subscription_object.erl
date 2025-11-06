@@ -14,7 +14,9 @@
 %%=================================================================
 -export([
   subscribe/1,
-  unsubscribe/2
+  unsubscribe/2,
+  global_set/1,
+  global_reset/1
 ]).
 
 %%=================================================================
@@ -32,7 +34,8 @@
 
 -record(state, {
   objects,
-  clients
+  clients,
+  queries
 }).
 
 -record(object,{
@@ -72,11 +75,16 @@ subscribe(
   gen_server:call(?WORKER(OID), Subscription, ?CALL_TIMEOUT).
 
 unsubscribe(Client, SubsID)->
-  PoolSize = ecomet_subscription_pool:get_size(),
-  [gen_server:cast(?NAME(N), {unsubscribe, Client, SubsID}) || N <- lists:seq(0, PoolSize-1)],
+  [gen_server:cast(?NAME(N), {unsubscribe, Client, SubsID}) || N <-ecomet_subscription_pool:get_workers()],
   ok.
 
+global_set(Tag)->
+  [gen_server:cast(?NAME(N), {global_set, Tag}) || N <-ecomet_subscription_pool:get_workers()],
+  ok.
 
+global_reset(Tag)->
+  [gen_server:cast(?NAME(N), {global_reset, Tag}) || N <-ecomet_subscription_pool:get_workers()],
+  ok.
 
 %%=================================================================
 %%        OTP
@@ -89,7 +97,8 @@ init([]) ->
 
   {ok, #state{
     objects = #{},
-    clients = #{}
+    clients = #{},
+    queries = #{}
   }}.
 
 %%===================================================================
