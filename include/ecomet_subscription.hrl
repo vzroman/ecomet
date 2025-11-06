@@ -30,7 +30,7 @@
 -define(SET_IS_DISJOINT(S1,S2), gb_sets:is_disjoint( S1, S2 )).
 -define(SET_FOLD(F,Acc,S), gb_sets:fold( F, Acc, S )).
 
--record(subscription,{
+-record(subscribe,{
   id,
   client,
   usergroups,
