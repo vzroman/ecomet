@@ -35,7 +35,8 @@
 -record(state, {
   objects,
   clients,
-  queries
+  queries,
+  global
 }).
 
 -record(object,{
@@ -46,22 +47,33 @@
   fields_ref
 }).
 
+-record(query,{
+  conditions,
+  fields,
+  clients
+}).
+
 -record(client,{
   monitor,
   usergroups,
   subs
 }).
 
--record(clt,{
+-record(o_client,{
   access,
   subs
 }).
 
--record(sub,{
+-record(o_sub,{
   fields,
   read,
   no_feedback,
   oid
+}).
+
+-record(q_sub,{
+  read,
+  no_feedback
 }).
 
 %%=================================================================
@@ -98,7 +110,8 @@ init([]) ->
   {ok, #state{
     objects = #{},
     clients = #{},
-    queries = #{}
+    queries = #{},
+    global = ?EMPTY_SET
   }}.
 
 %%===================================================================
@@ -286,7 +299,7 @@ remove_object(
       clients = #{
         ClientID := #client{
           subs = #{
-            SubsID:=#sub{
+            SubsID:=#o_sub{
               fields = SubsFields,
               oid = OID
             }
@@ -403,7 +416,7 @@ add_object_client(
     _UserGroups,
     Object0 = #object{
       clients = Clients0 = #{
-        ClientID := Client0 = #clt{
+        ClientID := Client0 = #o_client{
           subs = Subs0
         }
       }
@@ -411,7 +424,7 @@ add_object_client(
 )->
   %-----------Add subscription to the existing client------------
   Subs = ordsets:add_element(SubsID, Subs0),
-  Client = Client0#clt{
+  Client = Client0#o_client{
     subs = Subs
   },
   Clients = Clients0#{
@@ -434,7 +447,7 @@ add_object_client(
 )->
   %-----------Add new client-------------------
   Access = check_access(UserGroups, RG),
-  Client = #clt{
+  Client = #o_client{
     access = Access,
     subs = ordsets:from_list([SubsID])
   },
@@ -451,7 +464,7 @@ remove_object_client(
     SubsID,
     Object0 = #object{
       clients = Clients0 = #{
-        ClientID := Client0 = #clt{
+        ClientID := Client0 = #o_client{
           subs = Subs0
         }
       }
@@ -463,7 +476,7 @@ remove_object_client(
       0 ->
         maps:remove(ClientID, Clients0);
       _->
-        Client = Client0#clt{
+        Client = Client0#o_client{
           subs = Subs
         },
         Clients0#{
@@ -497,7 +510,7 @@ add_client(
     }
 )->
   %----------add subscription to the existing client--------------
-  Sub = #sub{
+  Sub = #o_sub{
     fields = Fields,
     read = Read,
     no_feedback = NoFeedback,
@@ -536,7 +549,7 @@ add_client(
     }
 )->
   %-------------Add new client------------------
-  Sub = #sub{
+  Sub = #o_sub{
     fields = Fields,
     read = Read,
     no_feedback = NoFeedback,
@@ -611,7 +624,7 @@ init_subscription(
       objects = #{
         OID:=#object{
           clients = #{
-            ClientID := #clt{
+            ClientID := #o_client{
               access = false
             }
           }
@@ -638,7 +651,7 @@ init_subscription(
       clients = #{
         ClientID := #client{
           subs = #{
-            SubsID:=#sub{
+            SubsID:=#o_sub{
               read = Read
             }
           }
