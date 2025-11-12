@@ -14,7 +14,16 @@
 %%=================================================================
 -export([
   subscribe/1,
-  unsubscribe/2,
+  unsubscribe/2
+]).
+
+%%=================================================================
+%%        Query API
+%%=================================================================
+-export([
+  init_query/3,
+  add_query_client/2,
+  remove_query_client/3,
   global_set/1,
   global_reset/1
 ]).
@@ -50,7 +59,13 @@
 -record(query,{
   conditions,
   fields,
-  clients
+  clients,
+  set
+}).
+
+-record(wait_query,{
+  add,
+  remove
 }).
 
 -record(client,{
@@ -90,12 +105,60 @@ unsubscribe(Client, SubsID)->
   [gen_server:cast(?NAME(N), {unsubscribe, Client, SubsID}) || N <-ecomet_subscription_pool:get_workers()],
   ok.
 
-global_set(Tag)->
-  [gen_server:cast(?NAME(N), {global_set, Tag}) || N <-ecomet_subscription_pool:get_workers()],
+%%=================================================================
+%%        Query API
+%%=================================================================
+init_query(Key, Subscription, InitSet)->
+  % Group the set by workers
+  ByWorkers =
+    ecomet_resultset:foldl(
+      fun(OID, Acc)->
+        Worker = ?WORKER(OID),
+        WorkerAcc0=
+        case Acc of
+          #{Worker := _WorkerAcc} ->
+            _WorkerAcc;
+          _->
+            ecomet_resultset:new()
+        end,
+        Acc#{
+          Worker = ecomet_resultset:add_oid(OID, WorkerAcc0)
+        }
+      end,
+      _Acc = undefined,
+      InitSet
+    ),
+
+  maps:foreach(
+    fun(Worker, Set)->
+      gen_server:cast(Worker, {init_query, Key, Subscription, Set})
+    end,
+    ByWorkers),
   ok.
 
+add_query_client(Key, Subscription)->
+  todo.
+
+remove_query_client(Key, ClientID, SubsID)->
+  todo.
+
+global_set(Tag)->
+  Ref = make_ref(),
+  ReplyTo = self(),
+  [gen_server:cast(?NAME(N), {global_set, Ref, Tag, ReplyTo}) || N <-ecomet_subscription_pool:get_workers()],
+  wait_confirm(ecomet_subscription_pool:get_size(), Ref).
+
 global_reset(Tag)->
-  [gen_server:cast(?NAME(N), {global_reset, Tag}) || N <-ecomet_subscription_pool:get_workers()],
+  Ref = make_ref(),
+  ReplyTo = self(),
+  [gen_server:cast(?NAME(N), {global_reset, Ref, Tag, ReplyTo}) || N <-ecomet_subscription_pool:get_workers()],
+  wait_confirm(ecomet_subscription_pool:get_size(), Ref).
+
+wait_confirm(Rest, Ref) when Rest > 0->
+  receive
+    {confirm, Ref} -> wait_confirm(Rest-1, Ref)
+  end;
+wait_confirm(_Rest, _Ref)->
   ok.
 
 %%=================================================================
@@ -141,6 +204,38 @@ handle_cast({unsubscribe, Client, SubsID}, State0) ->
       {noreply, State}
   end;
 
+handle_cast({init_query, Key, Subscription, Set}, State0) ->
+  try
+    State = add_query(Key, Subscription, Set, State0),
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("add new query error: ~p, stack ~p",[E,S]),
+      {noreply, State}
+  end;
+
+handle_cast({global_set, Ref, Tag, ReplyTo}, State0) ->
+  try
+    State = global_set(Tag, State0),
+    catch ReplyTo ! {confirm, Ref},
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("add new query error: ~p, stack ~p",[E,S]),
+      {noreply, State}
+  end;
+
+handle_cast({global_reset, Ref, Tag, ReplyTo}, State0) ->
+  try
+    State = global_reset(Tag, State0),
+    catch ReplyTo ! {confirm, Ref},
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("add new query error: ~p, stack ~p",[E,S]),
+      {noreply, State}
+  end;
+
 handle_cast(Request,State) ->
   ?LOGWARNING("unexpected cast request ~p", [Request]),
   {noreply, State}.
@@ -158,7 +253,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %-------------------------------------------------------------------
-%  Add new subscription
+%  Object subscriptions
 %-------------------------------------------------------------------
 add_subscription(
     #subscribe{
@@ -187,10 +282,6 @@ add_subscription(
 
   State.
 
-
-%-------------------------------------------------------------------
-%  Remove subscription
-%-------------------------------------------------------------------
 unsubscribe(
     ClientID,
     SubsID,
@@ -217,6 +308,19 @@ unsubscribe(
 )->
   % The subscription doesn't exist
   State.
+
+%-------------------------------------------------------------------
+%  Query subscriptions
+%-------------------------------------------------------------------
+add_query(
+    Key,
+    Subscription,
+    Set,
+    State0 = #state{
+      queries = Queries0
+    }
+)->
+  todo.
 
 %-------------------------------------------------------------------
 %  State transformations
@@ -665,6 +769,29 @@ init_subscription(
 
   catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update),
   ok.
+
+global_set(
+    Tag,
+    State0 = #state{
+      global = Global0
+    }
+)->
+  Global = ?SET_ADD(Tag, Global0),
+  State0#state{
+    global = Global
+  }.
+
+global_reset(
+    Tag,
+    State0 = #state{
+      global = Global0
+    }
+)->
+  Global = ?SET_DEL( Tag, Global0),
+  State0#state{
+    global = Global
+  }.
+
 
 check_access(is_admin, _RG)->
   true;

@@ -35,12 +35,12 @@
 }).
 
 -record(query,{
-  ref,
-  count
+  count,
+  index
 }).
 
 -record(client,{
-  ref,
+  monitor_ref,
   subs
 }).
 
@@ -51,8 +51,10 @@
   db
 }).
 
--define(key(DBs,Fields,Conditions),{
-  DBs,Fields,Conditions
+-define(key(S),#query_id{
+  dbs = S#subscribe.dbs,
+  fields = S#subscribe.deps,
+  conditions = S#subscribe.conditions
 }).
 
 %%=================================================================
@@ -99,7 +101,7 @@ handle_call(#subscribe{} = Subscription, _From, State0) ->
   catch
     _:E:S->
       ?LOGERROR("add object subscription error: ~p, stack ~p",[E,S]),
-      {reply, {error, E}, State}
+      {reply, {error, E}, State0}
   end;
 handle_call(Request, From, State) ->
   ?LOGWARNING("unexpected call request ~p from ~p", [Request, From]),
@@ -112,13 +114,22 @@ handle_cast({unsubscribe, Client, SubsID}, State0) ->
   catch
     _:E:S->
       ?LOGERROR("remove object subscription error: ~p, stack ~p",[E,S]),
-      {noreply, State}
+      {noreply, State0}
   end;
 
 handle_cast(Request,State) ->
   ?LOGWARNING("unexpected cast request ~p", [Request]),
   {noreply, State}.
 
+handle_info({'DOWN', _Ref, process, Client, _Reason}, State0) ->
+  try
+    State = destroy_client(Client, State0),
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("remove object subscription error: ~p, stack ~p",[E,S]),
+      {noreply, State0}
+  end;
 
 handle_info(Info, State) ->
   ?LOGWARNING("unexpected info event ~p", [Info]),
@@ -147,37 +158,19 @@ add_subscription(
 remove_subscription(
     ClientID,
     SubsID,
-    State0 = #state{
-      clients = Clients0 = #{
-        ClientID := Client0 = #client{
-          subs = Subs0 = #{
-            SubsID => Key
-          }
-        }
-      },
-      queries = #{
-        Key := Query0 = #query{
-          count = Count0
-        }
-      }
-    }
+    State0
 )->
 
-  {State1, Key} = remove_client( ClientID, SubsID, State0 ),
-  State = remove_query_client(Key, State1),
+  {State1, Key} = remove_client(ClientID, SubsID, State0),
+  State = remove_query_client(ClientID, SubsID, Key, State1),
 
   State.
 
 add_query_client(
-    Subscription = #subscribe{
-      conditions = Conditions,
-      deps = Fields,
-      dbs = DBs
-    },
+    Subscription,
     State0 = #state{
       queries = Queries0 = #{
-        Key = ?key(DBs,Fields,Conditions) := Query0 = #query{
-          ref = Ref,
+        Key = ?key(Subscription) := Query0 = #query{
           count = Count0
         }
       }
@@ -192,7 +185,7 @@ add_query_client(
     Key => Query
   },
 
-  ecomet_subscription_object:add_query_client(Ref, Subscription),
+  ecomet_subscription_object:add_query_client(Key, Subscription),
 
   State0#state{
     queries = Queries
@@ -201,7 +194,6 @@ add_query_client(
 add_query_client(
     Subscription0 = #subscribe{
       conditions = Conditions0,
-      deps = Fields,
       dbs = DBs
     },
     State0 = #state{
@@ -209,7 +201,7 @@ add_query_client(
     }
 )->
   %-------Create new query---------------------
-  Ref = make_ref(),
+  Key = ?key(Subscription0),
   Conditions = compile_conditions( Conditions0 ),
 
   % Prepare query index
@@ -220,7 +212,7 @@ add_query_client(
       true -> DBs
     end,
   Index = compile_index( Tags, IndexDBs ),
-  build_index(Index, Ref),
+  build_index(Index, Key),
 
   % Prepare initial set
   InitSet = ecomet_query:get(DBs,rs,Conditions0),
@@ -228,14 +220,14 @@ add_query_client(
     conditions = Conditions
   },
 
-  ecomet_subscription_object:init_query(Ref, Subscription, InitSet),
+  ecomet_subscription_object:init_query(Key, Subscription, InitSet),
   Query = #query{
-    ref = Ref,
-    count = 1
+    count = 1,
+    index = Index
   },
 
   Queries = Queries0#{
-    ?key(DBs,Fields, Conditions0) => Query
+    Key => Query
   },
 
   State0#state{
@@ -243,41 +235,43 @@ add_query_client(
   }.
 
 remove_query_client(
+    ClientID,
+    SubsID,
     Key,
     State0 = #state{
       queries = Queries0= #{
         Key := Query0= #query{
-          ref = Ref,
-          count = Count0
+          count = Count0,
+          index = Index
         }
       }
     }
 )->
   Count = Count0 - 1,
-  Queries0 =
+  Queries =
     if
       Count > 0->
-
+        Query = Query0#query{
+          count = Count
+        },
+        Queries0#{
+          Key => Query
+        };
+      true ->
+        destroy_index(Index, Key),
+        maps:remove(Key, Queries0)
     end,
 
-  ecomet_subscription_object:destroy_query(Ref),
+  ecomet_subscription_object:remove_query_client(Key, ClientID, SubsID),
 
-  Queries = maps:remove(Key, Queries0),
   State0#state{
     queries = Queries
   }.
 
-
-
-
-
 add_client(
-    #subscribe{
+    Subscription = #subscribe{
       client = ClientID,
-      id = SubsID,
-      dbs = DBs,
-      deps = Fields,
-      conditions = Conditions
+      id = SubsID
     },
     State0 = #state{
       clients = Clients0 = #{
@@ -289,7 +283,7 @@ add_client(
 )->
   % Add new subscription to the existing client
   Subs = Subs0#{
-    SubsID => ?key(DBs, Fields, Conditions)
+    SubsID => ?key(Subscription)
   },
 
   Client = Client0#client{
@@ -305,12 +299,9 @@ add_client(
   };
 
 add_client(
-    #subscribe{
+    Subscription = #subscribe{
       client = ClientID,
-      id = SubsID,
-      dbs = DBs,
-      deps = Fields,
-      conditions = Conditions
+      id = SubsID
     },
     State0 = #state{
       clients = Clients0
@@ -318,13 +309,13 @@ add_client(
 )->
   % Add new client
   Subs = #{
-    SubsID => ?key(DBs, Fields, Conditions)
+    SubsID => ?key(Subscription)
   },
 
   Ref = erlang:monitor(process, ClientID),
 
   Client = #client{
-    ref = Ref,
+    monitor_ref = Ref,
     subs = Subs
   },
 
@@ -342,7 +333,7 @@ remove_client(
     State0 = #state{
       clients = Clients0 = #{
         ClientID := Client0 =#client{
-          ref = MonitorRef,
+          monitor_ref = MonitorRef,
           subs = Subs0 #{
             SubsID := Key
           }
@@ -377,6 +368,25 @@ remove_client(ClientID, SubsID, State)->
     ClientID, SubsID
   ]),
   {State, undefined}.
+
+destroy_client(
+    ClientID,
+    State0 = #state{
+      clients = #{
+        ClientID := #client{
+          subs = Subs
+        }
+      }
+    }
+)->
+  lists:foldl(
+    fun(SubsID, Acc)->
+      remove_subscription(ClientID, SubsID, Acc)
+    end,
+    State0,
+    maps:keys(Subs)
+  ).
+
 %%------------------------------------------------------------
 %%  Search engine
 %%------------------------------------------------------------

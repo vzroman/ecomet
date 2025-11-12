@@ -41,4 +41,10 @@
   params
 }).
 
+-record(query_id,{
+  dbs,
+  fields,
+  conditions
+}).
+
 -endif.
