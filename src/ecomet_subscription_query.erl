@@ -31,10 +31,12 @@
 
 -record(state,{
   queries,
+  key2ref,
   clients
 }).
 
 -record(query,{
+  key,
   count,
   index
 }).
@@ -87,6 +89,7 @@ init([]) ->
 
   {ok, #state{
     queries = #{},
+    key2ref = #{},
     clients = #{}
   }}.
 
@@ -161,47 +164,65 @@ remove_subscription(
     State0
 )->
 
-  {State1, Key} = remove_client(ClientID, SubsID, State0),
-  State = remove_query_client(ClientID, SubsID, Key, State1),
+  {State1, Ref} = remove_client(ClientID, SubsID, State0),
+  State = remove_query_client(ClientID, SubsID, Ref, State1),
 
   State.
 
 add_query_client(
     Subscription,
     State0 = #state{
-      queries = Queries0 = #{
-        Key = ?key(Subscription) := Query0 = #query{
-          count = Count0
-        }
-      }
+      key2ref = Key2Ref
+    }
+)->
+  Key = ?key(Subscription),
+  case Key2Ref of
+    #{Key := Ref} ->
+      add_query_client(Ref, Subscription, State0);
+    _->
+      init_query(Key, Subscription, State0)
+  end.
+
+add_query_client(
+    Ref,
+    Subscription,
+    State0 = #state{
+      queries = Queries0
     }
 )->
 
   % Add new subscription to the existing query
+  Query0 = #query{
+    count = Count0
+  } = maps:get(Ref, Queries0),
+
   Query = Query0#query{
     count = Count0 + 1
   },
   Queries = Queries0#{
-    Key => Query
+    Ref => Query
   },
 
-  ecomet_subscription_object:add_query_client(Key, Subscription),
+  ecomet_subscription_object:add_query_client(Ref, Subscription),
 
   State0#state{
     queries = Queries
-  };
+  }.
 
-add_query_client(
+init_query(
+    Key,
     Subscription0 = #subscribe{
       conditions = Conditions0,
       dbs = DBs
     },
     State0 = #state{
+      key2ref = Key2Ref0,
       queries = Queries0
     }
 )->
   %-------Create new query---------------------
-  Key = ?key(Subscription0),
+  Ref = make_ref(),
+
   Conditions = compile_conditions( Conditions0 ),
 
   % Prepare query index
@@ -212,7 +233,7 @@ add_query_client(
       true -> DBs
     end,
   Index = compile_index( Tags, IndexDBs ),
-  build_index(Index, Key),
+  build_index(Index, Ref),
 
   % Prepare initial set
   InitSet = ecomet_query:get(DBs,rs,Conditions0),
@@ -220,27 +241,36 @@ add_query_client(
     conditions = Conditions
   },
 
-  ecomet_subscription_object:init_query(Key, Subscription, InitSet),
+  ecomet_subscription_object:init_query(Ref, Subscription, InitSet),
+
   Query = #query{
+    key = Key,
     count = 1,
     index = Index
   },
 
   Queries = Queries0#{
-    Key => Query
+    Ref => Query
+  },
+
+  Key2Ref = Key2Ref0#{
+    Key => Ref
   },
 
   State0#state{
+    key2ref = Key2Ref,
     queries = Queries
   }.
 
 remove_query_client(
     ClientID,
     SubsID,
-    Key,
+    Ref,
     State0 = #state{
+      key2ref = Key2Ref0,
       queries = Queries0= #{
-        Key := Query0= #query{
+        Ref := Query0= #query{
+          key = Key,
           count = Count0,
           index = Index
         }
@@ -255,17 +285,24 @@ remove_query_client(
           count = Count
         },
         Queries0#{
-          Key => Query
+          Ref => Query
         };
       true ->
-        destroy_index(Index, Key),
-        maps:remove(Key, Queries0)
+        destroy_index(Index, Ref),
+        maps:remove(Ref, Queries0)
     end,
 
-  ecomet_subscription_object:remove_query_client(Key, ClientID, SubsID),
+  Key2Ref =
+    case maps:is_key(Ref, Queries) of
+      true -> Key2Ref0;
+      _-> maps:remove(Key, Key2Ref0)
+    end,
+
+  ecomet_subscription_object:remove_query_client(Ref, ClientID, SubsID),
 
   State0#state{
-    queries = Queries
+    queries = Queries,
+    key2ref = Key2Ref
   }.
 
 add_client(
@@ -274,6 +311,7 @@ add_client(
       id = SubsID
     },
     State0 = #state{
+      key2ref = Key2Ref,
       clients = Clients0 = #{
         ClientID := Client0 = #client{
           subs = Subs0
@@ -281,9 +319,10 @@ add_client(
       }
     }
 )->
+  Ref = maps:get(?key(Subscription), Key2Ref),
   % Add new subscription to the existing client
   Subs = Subs0#{
-    SubsID => ?key(Subscription)
+    SubsID => Ref
   },
 
   Client = Client0#client{
@@ -304,18 +343,20 @@ add_client(
       id = SubsID
     },
     State0 = #state{
+      key2ref = Key2Ref,
       clients = Clients0
     }
 )->
   % Add new client
+  Ref = maps:get(?key(Subscription), Key2Ref),
   Subs = #{
-    SubsID => ?key(Subscription)
+    SubsID => Ref
   },
 
-  Ref = erlang:monitor(process, ClientID),
+  MonitorRef = erlang:monitor(process, ClientID),
 
   Client = #client{
-    monitor_ref = Ref,
+    monitor_ref = MonitorRef,
     subs = Subs
   },
 
@@ -335,7 +376,7 @@ remove_client(
         ClientID := Client0 =#client{
           monitor_ref = MonitorRef,
           subs = Subs0 #{
-            SubsID := Key
+            SubsID := Ref
           }
         }
       }
@@ -361,7 +402,7 @@ remove_client(
     clients = Clients
   },
 
-  {State, Key};
+  {State, Ref};
 
 remove_client(ClientID, SubsID, State)->
   ?LOGWARNING("Attempt to remove not registered subscription client pid ~p, subscription id ~p",[

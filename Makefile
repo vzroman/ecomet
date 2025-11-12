@@ -1,4 +1,4 @@
-REBAR3 := $(shell which rebar3)
+REBAR3 := ./rebar3
 
 compile:
 	$(REBAR3) compile
