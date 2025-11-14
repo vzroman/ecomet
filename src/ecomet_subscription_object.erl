@@ -413,21 +413,22 @@ remove_object(
     ClientID,
     SubsID,
     State0 = #state{
-      clients = #{
-        ClientID := #client{
-          subs = #{
-            SubsID:=#o_sub{
-              fields = SubsFields,
-              oid = OID
-            }
-          }
-        }
-      },
-      objects = Objects0 =#{
-        OID := Object0
-      }
+      clients = Clients,
+      objects = Objects0
     }
 )->
+
+  #{
+    ClientID := #client{
+      subs = #{
+        SubsID:=#o_sub{
+          fields = SubsFields,
+          oid = OID
+        }
+      }
+    }
+  } = maps:get(ClientID, Clients),
+  Object0 = maps:get(OID, Objects0),
 
   Object1 = remove_object_client(ClientID, SubsID, Object0),
   Object = remove_fields(SubsFields, Object1),
@@ -530,28 +531,43 @@ remove_fields(
 add_object_client(
     ClientID,
     SubsID,
-    _UserGroups,
-    Object0 = #object{
-      clients = Clients0 = #{
-        ClientID := Client0 = #o_client{
-          subs = Subs0
-        }
-      }
+    UserGroups,
+    Object = #object{
+      clients = ObjectClients
     }
 )->
+
+  case maps:is_key(ClientID, ObjectClients) of
+    true ->
+      add_object_client_sub(ClientID, SubsID, Object);
+    _->
+      init_object_client(ClientID, SubsID, UserGroups, Object)
+  end.
+
+add_object_client_sub(
+    ClientID,
+    SubsID,
+    Object0 = #object{
+      clients = ObjectClients0
+    }
+)->
+  Client0 = #o_client{
+    subs = Subs0
+  } = maps:get(ClientID, ObjectClients0),
+
   %-----------Add subscription to the existing client------------
   Subs = ordsets:add_element(SubsID, Subs0),
   Client = Client0#o_client{
     subs = Subs
   },
-  Clients = Clients0#{
+  Clients = ObjectClients0#{
     ClientID => Client
   },
   Object0#object{
     clients = Clients
-  };
+  }.
 
-add_object_client(
+init_object_client(
     ClientID,
     SubsID,
     UserGroups,
@@ -580,13 +596,14 @@ remove_object_client(
     ClientID,
     SubsID,
     Object0 = #object{
-      clients = Clients0 = #{
-        ClientID := Client0 = #o_client{
-          subs = Subs0
-        }
-      }
+      clients = Clients0
     }
 )->
+
+  Client0 = #o_client{
+    subs = Subs0
+  } = maps:get(ClientID, Clients0),
+
   Subs = ordsets:del_element(SubsID, Subs0),
   Clients =
     case ordsets:size(Subs) of
@@ -604,8 +621,6 @@ remove_object_client(
   Object0#object{
     clients = Clients
   }.
-
-
 
 add_client(
     Subscription = #subscribe{

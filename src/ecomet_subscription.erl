@@ -81,9 +81,9 @@ on_init()->
 %%=================================================================
 %%	API
 %%=================================================================
-subscribe(#subscription{
+subscribe(#subscribe{
   id = ID,
-  owner = Owner
+  client = Owner
 } = Subscription)->
   PID =
     ecomet_user:spawn_session(fun()->
@@ -112,13 +112,13 @@ subscribe(#subscription{
     {error,PID,Error}->throw(Error)
   end.
 
-do_subscribe(#subscription{
+do_subscribe(#subscribe{
   conditions = {<<".path">>,'=',Path}
 } = S )->
-  do_subscribe(S#subscription{
+  do_subscribe(S#subscribe{
     conditions = {<<".oid">>,'=',?OID(Path)}
   });
-do_subscribe(#subscription{
+do_subscribe(#subscribe{
   conditions = {<<".oid">>,'=',OID}
 } = S)->
   % Object subscription
@@ -184,9 +184,9 @@ object_monitor(#monitor{id = ID, oid = OID, owner = Owner } = Monitor )->
 %%=================================================================
 %%	OBJECT MONITOR ENGINE
 %%=================================================================
-create_monitor( Object, #subscription{
+create_monitor( Object, #subscribe{
   id = ID,
-  owner = Owner,
+  client = Owner,
   read = Read,
   deps = Deps,
   params = #{
@@ -291,10 +291,10 @@ check_object(#monitor{
 %%	Query subscription
 %%=================================================================
 -record(query,{rs, start_ts, self, subscription}).
-subscribe_query( #subscription{
+subscribe_query( #subscribe{
   id = ID,
   conditions = Conditions0,
-  owner = Owner,
+  client = Owner,
   dbs = DBs,
   params = #{
     stateless := Stateless,     % No initial query, only updates
@@ -346,7 +346,7 @@ subscribe_query( #subscription{
     end,
 
   Query = #query{
-    subscription = S#subscription{
+    subscription = S#subscribe{
       conditions = Conditions,
       params = Params#{ stateless => true }
     },
@@ -361,9 +361,9 @@ subscribe_query( #subscription{
 
 % SUBSCRIBE CID=test GET .name, f1 from * where and(.folder=$oid('/root/f1'), .name='o12')
 query_monitor(#query{
-  subscription = #subscription{
+  subscription = #subscribe{
     id = ID,
-    owner = Owner
+    client = Owner
   } = S,
   rs = RS
 } = Query, Index )->
@@ -392,9 +392,9 @@ query_monitor(#query{
   end.
 
 destroy_query(#query{
-  subscription = #subscription{
+  subscription = #subscribe{
     id = ID,
-    owner = Owner
+    client = Owner
   },
   rs = RS
 }, Index )->
@@ -420,8 +420,8 @@ check_query(#query{
   ignore;
 
 check_query(#query{
-  subscription = #subscription{
-    owner = Owner,
+  subscription = #subscribe{
+    client = Owner,
     conditions = Conditions,
     read = Read,
     params = #{ no_feedback := NoFeedback }
@@ -447,9 +447,9 @@ check_query(#query{
   end;
 
 check_query(#query{
-  subscription = #subscription{
+  subscription = #subscribe{
     id = ID,
-    owner = Owner,
+    client = Owner,
     conditions = Conditions,
     read = Read,
     params = #{ no_feedback := NoFeedback }
