@@ -122,7 +122,7 @@ init_query(Key, Subscription, InitSet)->
             ecomet_resultset:new()
         end,
         Acc#{
-          Worker = ecomet_resultset:add_oid(OID, WorkerAcc0)
+          Worker => ecomet_resultset:add_oid(OID, WorkerAcc0)
         }
       end,
       _Acc = undefined,
@@ -188,7 +188,7 @@ handle_call(#subscribe{} = Subscription, _From, State0) ->
   catch
     _:E:S->
       ?LOGERROR("add object subscription error: ~p, stack ~p",[E,S]),
-      {reply, {error, E}, State}
+      {reply, {error, E}, State0}
   end;
 handle_call(Request, _From, State) ->
   ?LOGWARNING("unexpected call request ~p", [Request]),
@@ -201,7 +201,7 @@ handle_cast({unsubscribe, Client, SubsID}, State0) ->
   catch
     _:E:S->
       ?LOGERROR("remove object subscription error: ~p, stack ~p",[E,S]),
-      {noreply, State}
+      {noreply, State0}
   end;
 
 handle_cast({init_query, Key, Subscription, Set}, State0) ->
@@ -211,7 +211,7 @@ handle_cast({init_query, Key, Subscription, Set}, State0) ->
   catch
     _:E:S->
       ?LOGERROR("add new query error: ~p, stack ~p",[E,S]),
-      {noreply, State}
+      {noreply, State0}
   end;
 
 handle_cast({global_set, Ref, Tag, ReplyTo}, State0) ->
@@ -222,7 +222,7 @@ handle_cast({global_set, Ref, Tag, ReplyTo}, State0) ->
   catch
     _:E:S->
       ?LOGERROR("add new query error: ~p, stack ~p",[E,S]),
-      {noreply, State}
+      {noreply, State0}
   end;
 
 handle_cast({global_reset, Ref, Tag, ReplyTo}, State0) ->
@@ -233,7 +233,7 @@ handle_cast({global_reset, Ref, Tag, ReplyTo}, State0) ->
   catch
     _:E:S->
       ?LOGERROR("add new query error: ~p, stack ~p",[E,S]),
-      {noreply, State}
+      {noreply, State0}
   end;
 
 handle_cast(Request,State) ->
@@ -256,58 +256,53 @@ code_change(_OldVsn, State, _Extra) ->
 %  Object subscriptions
 %-------------------------------------------------------------------
 add_subscription(
-    #subscribe{
-      id = SubsID,
-      client = Client
+    Subscription = #subscribe{
+      client = ClientID,
+      id = SubsID
     },
-    #state{
-      clients = #{ Client := #client{
+    State0 = #state{
+      clients = Clients
+    }
+)->
+
+  case Clients of
+    #{
+      ClientID := #client{
         subs = #{
           SubsID := _
         }
-      } }
-    } =State)->
-
-  % The subscription already exists, ignore
-  State;
-
-add_subscription(
-    Subscription,
-    State0
-)->
-
-  State1 = add_object(Subscription, State0),
-  State = add_client(Subscription, State1),
-  init_subscription(Subscription, State),
-
-  State.
+      }
+    } ->
+      % The subscription already exists, ignore
+      State0;
+    _->
+      State1 = add_object(Subscription, State0),
+      State = add_client(Subscription, State1),
+      init_subscription(Subscription, State),
+      State
+  end.
 
 unsubscribe(
     ClientID,
     SubsID,
     State0 = #state{
-      clients = #{
-        ClientID := #client{
-          subs = #{
-            SubsID := _
-          }
-        }
-      }
+      clients = Clients
     }
 )->
 
-  State1 = remove_object(ClientID, SubsID, State0),
-  State = remove_client(ClientID, SubsID, State1),
-
-  State;
-
-unsubscribe(
-    _ClientID,
-    _SubsID,
-    State
-)->
-  % The subscription doesn't exist
-  State.
+  case Clients of
+    #{
+      ClientID := #client{
+        subs = #{
+          SubsID := _
+        }
+      }
+    }->
+      State1 = remove_object(ClientID, SubsID, State0),
+      remove_client(ClientID, SubsID, State1);
+    _->
+      State0
+  end.
 
 %-------------------------------------------------------------------
 %  Query subscriptions
@@ -326,6 +321,21 @@ add_query(
 %  State transformations
 %-------------------------------------------------------------------
 add_object(
+    Subscription = #subscribe{
+      conditions = {<<".oid">>,'=',OID}
+    },
+    State = #state{
+      objects = Objects
+    }
+)->
+  case maps:is_key(OID, Objects) of
+    true ->
+      add_object_sub(Subscription, State);
+    _->
+      init_object( Subscription, State)
+  end.
+
+add_object_sub(
     #subscribe{
       conditions = {<<".oid">>,'=',OID},
       client = ClientID,
@@ -334,14 +344,15 @@ add_object(
       deps = SubsFields
     },
     State0 = #state{
-      objects = Objects0 = #{
-        OID := Object0
-      }
+      objects = Objects0
     }
 )->
+
   %---------Update already existing object---------------
+  Object0 = maps:get(OID, Objects0),
+
   Object1 = add_fields(SubsFields, Object0),
-  Object = add_object_client( ClientID, SubsID, UserGroups, Object1 ),
+  Object = add_object_client(ClientID, SubsID, UserGroups, Object1),
 
   Objects = Objects0#{
     OID => Object
@@ -349,11 +360,14 @@ add_object(
 
   State0#state{
     objects = Objects
-  };
+  }.
 
-add_object(
-    Subscription = #subscribe{
+init_object(
+    #subscribe{
       conditions = {<<".oid">>,'=',OID},
+      client = ClientID,
+      id = SubsID,
+      usergroups = UserGroups,
       deps = SubsFields
     },
     State0 = #state{
@@ -374,10 +388,10 @@ add_object(
       #{<<".readgroups">> => []},
       SubsFields),
 
-  Fields = ecomet:read_field(Instance, InitFields),
+  Fields = ecomet:read_fields(Instance, InitFields),
   FieldsRef = maps:map(fun(_F,_V)->1 end, Fields),
 
-  Object = #object{
+  Object0 = #object{
     instance = Instance,
     fields = Fields,
     fields_ref = FieldsRef,
@@ -385,16 +399,15 @@ add_object(
     queries = ordsets:new()
   },
 
+  Object = add_object_client(ClientID, SubsID, UserGroups, Object0),
+
   Objects = Objects0#{
     OID => Object
   },
 
-  add_object(
-    Subscription,
-    State0 = #state{
-      objects = Objects
-    }
-  ).
+  State0#state{
+    objects = Objects
+  }.
 
 remove_object(
     ClientID,
@@ -584,7 +597,7 @@ remove_object_client(
           subs = Subs
         },
         Clients0#{
-          ClientID = Client
+          ClientID => Client
         }
     end,
 
@@ -595,6 +608,22 @@ remove_object_client(
 
 
 add_client(
+    Subscription = #subscribe{
+      client = ClientID
+    },
+    State = #state{
+      clients = Clients
+    }
+)->
+
+  case maps:is_key(ClientID, Clients) of
+    true ->
+      add_client_sub(Subscription, State);
+    _->
+      init_client(Subscription, State)
+  end.
+
+add_client_sub(
     #subscribe{
       conditions = {<<".oid">>,'=',OID},
       client = ClientID,
@@ -606,14 +635,15 @@ add_client(
       }
     },
     State0 = #state{
-      clients = Clients0 = #{
-        ClientID := Client0= #client{
-          subs = Subs0
-        }
-      }
+      clients = Clients0
     }
 )->
+
   %----------add subscription to the existing client--------------
+  Client0 = #client{
+    subs = Subs0
+  } = maps:get(ClientID, Clients0),
+
   Sub = #o_sub{
     fields = Fields,
     read = Read,
@@ -634,9 +664,9 @@ add_client(
   },
   State0#state{
     clients = Clients
-  };
+  }.
 
-add_client(
+init_client(
    #subscribe{
      conditions = {<<".oid">>,'=',OID},
      client = ClientID,
@@ -681,32 +711,38 @@ remove_client(
     ClientID,
     SubsID,
     State0 = #state{
-      clients = Clients0= #{
-        ClientID := Client0=#client{
-          monitor = MonitorRef,
-          subs = Subs0
-        }
-      }
+      clients = Clients0
     }
 )->
-  Subs = maps:remove(SubsID, Subs0),
-  Clients =
-    if
-      map_size(Subs) > 0->
-        Client = Client0#client{
-          subs = Subs
-        },
-        Clients0#{
-          ClientID => Client
-        };
-      true->
-        erlang:demonitor(MonitorRef),
-        maps:remove(ClientID, Clients0)
-    end,
 
-  State0#state{
-    clients = Clients
-  }.
+  case Clients0 of
+    #{
+      ClientID := Client0 = #client{
+        monitor = MonitorRef,
+        subs = Subs0
+      }
+    }->
+      Subs = maps:remove(SubsID, Subs0),
+      Clients =
+        if
+          map_size(Subs) > 0->
+            Client = Client0#client{
+              subs = Subs
+            },
+            Clients0#{
+              ClientID => Client
+            };
+          true->
+            erlang:demonitor(MonitorRef),
+            maps:remove(ClientID, Clients0)
+        end,
+
+      State0#state{
+        clients = Clients
+      };
+    _->
+      State0
+  end.
 
 init_subscription(
     #subscribe{
@@ -722,53 +758,44 @@ init_subscription(
 init_subscription(
     #subscribe{
       conditions = {<<".oid">>,'=',OID},
-      client = ClientID
-    },
-    #state{
-      objects = #{
-        OID:=#object{
-          clients = #{
-            ClientID := #o_client{
-              access = false
-            }
-          }
-        }
-      }
-    }
-)->
-  % The the client has no access to the object
-  ignore;
-
-init_subscription(
-    #subscribe{
-      conditions = {<<".oid">>,'=',OID},
       client = ClientID,
       id = SubsID
     },
     #state{
-      objects = #{
-        OID:=#object{
-          instance = Instance,
-          fields = Fields
-        }
-      },
-      clients = #{
-        ClientID := #client{
-          subs = #{
-            SubsID:=#o_sub{
-              read = Read
-            }
-          }
-        }
-      }
+      objects = Objects,
+      clients = Clients
     }
 )->
-  % Send create to the client
-  ActualValues = ecomet_query:query_object(Instance, Fields),
-  Update = Read( ActualValues ),
+  #object{
+    instance = Instance,
+    fields = Fields,
+    clients = #{
+      ClientID := #o_client{
+        access = HasAccess
+      }
+    }
+  } = maps:get(OID, Objects),
 
-  catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update),
-  ok.
+  if
+    HasAccess =:= true ->
+      % Send create to the client
+      #client{
+        subs = #{
+          SubsID:=#o_sub{
+            read = Read
+          }
+        }
+      } = maps:get(ClientID, Clients),
+
+      ActualValues = ecomet_query:query_object(Instance, Fields),
+      Update = Read( ActualValues ),
+
+      catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update),
+      ok;
+    true->
+      % The the client has no access to the object
+      ignore
+  end.
 
 global_set(
     Tag,

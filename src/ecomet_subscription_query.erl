@@ -164,8 +164,8 @@ remove_subscription(
     State0
 )->
 
-  {State1, Ref} = remove_client(ClientID, SubsID, State0),
-  State = remove_query_client(ClientID, SubsID, Ref, State1),
+  State1 = remove_query_client(ClientID, SubsID, State0),
+  State = remove_client(ClientID, SubsID, State1),
 
   State.
 
@@ -265,66 +265,91 @@ init_query(
 remove_query_client(
     ClientID,
     SubsID,
-    Ref,
     State0 = #state{
+      clients = Clients,
       key2ref = Key2Ref0,
-      queries = Queries0= #{
-        Ref := Query0= #query{
-          key = Key,
-          count = Count0,
-          index = Index
-        }
-      }
+      queries = Queries0
     }
 )->
-  Count = Count0 - 1,
-  Queries =
-    if
-      Count > 0->
-        Query = Query0#query{
-          count = Count
-        },
-        Queries0#{
-          Ref => Query
-        };
-      true ->
-        destroy_index(Index, Ref),
-        maps:remove(Ref, Queries0)
-    end,
 
-  Key2Ref =
-    case maps:is_key(Ref, Queries) of
-      true -> Key2Ref0;
-      _-> maps:remove(Key, Key2Ref0)
-    end,
+  Ref = sub2ref(ClientID, SubsID, Clients),
+  if
+    is_reference( Ref ) ->
+      Query0= #query{
+        key = Key,
+        count = Count0,
+        index = Index
+      } = maps:get(Ref, Queries0),
 
-  ecomet_subscription_object:remove_query_client(Ref, ClientID, SubsID),
+      Count = Count0 - 1,
+      Queries =
+        if
+          Count > 0->
+            Query = Query0#query{
+              count = Count
+            },
+            Queries0#{
+              Ref => Query
+            };
+          true ->
+            destroy_index(Index, Ref),
+            maps:remove(Ref, Queries0)
+        end,
 
-  State0#state{
-    queries = Queries,
-    key2ref = Key2Ref
-  }.
+      Key2Ref =
+        case maps:is_key(Ref, Queries) of
+          true -> Key2Ref0;
+          _-> maps:remove(Key, Key2Ref0)
+        end,
+
+      ecomet_subscription_object:remove_query_client(Ref, ClientID, SubsID),
+
+      State0#state{
+        queries = Queries,
+        key2ref = Key2Ref
+      };
+
+    true ->
+      State0
+  end.
 
 add_client(
     Subscription = #subscribe{
+      client = ClientID
+    },
+    State = #state{
+      clients = Clients
+    }
+)->
+
+  case maps:is_key(ClientID, Clients) of
+    true ->
+      add_client_sub(Subscription, State);
+    _->
+      init_client(Subscription, State)
+  end.
+
+add_client_sub(
+    Subscription=#subscribe{
       client = ClientID,
       id = SubsID
     },
     State0 = #state{
       key2ref = Key2Ref,
-      clients = Clients0 = #{
-        ClientID := Client0 = #client{
-          subs = Subs0
-        }
-      }
+      clients = Clients0
     }
 )->
+
+
   Ref = maps:get(?key(Subscription), Key2Ref),
   % Add new subscription to the existing client
+  Client0 = #client{
+    subs = Subs0
+  } = maps:get(ClientID, Clients0),
+
   Subs = Subs0#{
     SubsID => Ref
   },
-
   Client = Client0#client{
     subs = Subs
   },
@@ -335,9 +360,9 @@ add_client(
 
   State0#state{
     clients = Clients
-  };
+  }.
 
-add_client(
+init_client(
     Subscription = #subscribe{
       client = ClientID,
       id = SubsID
@@ -372,61 +397,66 @@ remove_client(
     ClientID,
     SubsID,
     State0 = #state{
-      clients = Clients0 = #{
-        ClientID := Client0 =#client{
-          monitor_ref = MonitorRef,
-          subs = Subs0 #{
-            SubsID := Ref
-          }
-        }
-      }
+      clients = Clients0
     }
 )->
+  maybe
+    #{
+      ClientID := Client0 =#client{
+        monitor_ref = MonitorRef,
+        subs = Subs0
+      }
+    } ?= Clients0,
+    true ?= maps:is_key(SubsID, Subs0),
 
-  Subs = maps:remove(SubsID, Subs0),
-  Clients =
-    if
-      map_size(Subs) > 0->
-        Client = Client0#client{
-          subs = Subs
-        },
-        Clients0#{
-          ClientID => Client
-        };
-      true ->
-        erlang:demonitor(MonitorRef),
-        maps:remove(ClientID, Clients0)
-    end,
+    Subs = maps:remove(SubsID, Subs0),
+    Clients =
+      if
+        map_size(Subs) > 0->
+          Client = Client0#client{
+            subs = Subs
+          },
+          Clients0#{
+            ClientID => Client
+          };
+        true ->
+          erlang:demonitor(MonitorRef),
+          maps:remove(ClientID, Clients0)
+      end,
 
-  State = State0#state{
-    clients = Clients
-  },
-
-  {State, Ref};
-
-remove_client(ClientID, SubsID, State)->
-  ?LOGWARNING("Attempt to remove not registered subscription client pid ~p, subscription id ~p",[
-    ClientID, SubsID
-  ]),
-  {State, undefined}.
+    State0#state{
+      clients = Clients
+    }
+  else
+    _->
+      ?LOGWARNING("Attempt to remove not registered subscription client pid ~p, subscription id ~p",[
+        ClientID, SubsID
+      ]),
+      State0
+  end.
 
 destroy_client(
     ClientID,
     State0 = #state{
-      clients = #{
-        ClientID := #client{
-          subs = Subs
-        }
-      }
+      clients = Clients
     }
 )->
-  lists:foldl(
-    fun(SubsID, Acc)->
-      remove_subscription(ClientID, SubsID, Acc)
-    end,
-    State0,
-    maps:keys(Subs)
-  ).
+  case Clients of
+    #{
+      ClientID := #client{
+        subs = Subs
+      }
+    } ->
+      lists:foldl(
+        fun(SubsID, Acc)->
+          remove_subscription(ClientID, SubsID, Acc)
+        end,
+        State0,
+        maps:keys(Subs)
+      );
+    _->
+      State0
+  end.
 
 %%------------------------------------------------------------
 %%  Search engine
@@ -514,4 +544,16 @@ global_reset(Tag)->
 %---------------------------------------------------------
 % Utilities
 %---------------------------------------------------------
-
+sub2ref(ClientID, SubsID, Clients)->
+  case Clients of
+    #{
+      ClientID := #client{
+        subs = #{
+          SubsID := Ref
+        }
+      }
+    }->
+      Ref;
+    _->
+      undefined
+  end.

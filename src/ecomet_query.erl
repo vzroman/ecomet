@@ -208,18 +208,20 @@ subscribe(ID,DBs,Fields,Conditions,InParams) when is_list(InParams)->
 subscribe(ID,DBs,Fields,Conditions,InParams)->
 
   Params = #{
-    format := Formatter         % Format fields according to their types
+    format := Formatter,         % Format fields according to their types
+    client := Client
   } = maps:merge(#{
     stateless => false,
     no_feedback => false,
-    format => undefined
+    format => undefined,
+    client => self()
   },InParams),
 
   {Deps, Read} = compile_subscribe_read(Fields,Formatter),
 
-  ecomet_subscription:subscribe(#subscription{
+  ecomet_subscription:subscribe(#subscribe{
     id = ID,
-    owner = self(),
+    client = Client,
     dbs = DBs,
     read = Read,
     deps = Deps,
