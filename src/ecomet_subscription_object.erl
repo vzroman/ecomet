@@ -108,7 +108,7 @@ unsubscribe(Client, SubsID)->
 %%=================================================================
 %%        Query API
 %%=================================================================
-init_query(Key, Subscription, InitSet)->
+init_query(Ref, Subscription, InitSet)->
   % Group the set by workers
   ByWorkers =
     ecomet_resultset:foldl(
@@ -131,16 +131,18 @@ init_query(Key, Subscription, InitSet)->
 
   maps:foreach(
     fun(Worker, Set)->
-      gen_server:cast(Worker, {init_query, Key, Subscription, Set})
+      gen_server:cast(Worker, {init_query, Ref, Subscription, Set})
     end,
     ByWorkers),
   ok.
 
-add_query_client(Key, Subscription)->
-  todo.
+add_query_client(Ref, Subscription)->
+  [gen_server:cast(?NAME(N), {add_query_client, Ref, Subscription}) || N <-ecomet_subscription_pool:get_workers()],
+  ok.
 
-remove_query_client(Key, ClientID, SubsID)->
-  todo.
+remove_query_client(Ref, ClientID, SubsID)->
+  [gen_server:cast(?NAME(N), {remove_query_client, Ref, ClientID, SubsID}) || N <-ecomet_subscription_pool:get_workers()],
+  ok.
 
 global_set(Tag)->
   Ref = make_ref(),
@@ -204,9 +206,9 @@ handle_cast({unsubscribe, Client, SubsID}, State0) ->
       {noreply, State0}
   end;
 
-handle_cast({init_query, Key, Subscription, Set}, State0) ->
+handle_cast({init_query, Ref, Subscription, Set}, State0) ->
   try
-    State = add_query(Key, Subscription, Set, State0),
+    State = add_query(Ref, Subscription, Set, State0),
     {noreply, State}
   catch
     _:E:S->
@@ -308,14 +310,38 @@ unsubscribe(
 %  Query subscriptions
 %-------------------------------------------------------------------
 add_query(
-    Key,
+    Ref,
     Subscription,
-    Set,
+    Set0,
     State0 = #state{
-      queries = Queries0
+      queries = Queries0,
+      objects = Objects0
     }
 )->
+  Set = init_query_set(Set0, maps:get(Ref, Queries0, undefined)),
+
+
   todo.
+
+init_query_set(
+    #wait_query{
+      add = AddObjects,
+      remove = RemoveObjects
+    },
+    Set0
+)->
+  Set1 = lists:foldl(
+    fun ecomet_resultset:remove_oid/2,
+    Set0,
+    RemoveObjects
+  ),
+  lists:foldl(
+    fun ecomet_resultset:add_oid/2,
+    Set1,
+    AddObjects
+  );
+init_query_set(_NoWaitQuery, Set)->
+  Set.
 
 %-------------------------------------------------------------------
 %  State transformations
