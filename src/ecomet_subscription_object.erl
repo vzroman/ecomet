@@ -223,6 +223,16 @@ handle_cast({init_query, Ref, Subscription, Set}, State0) ->
       {noreply, State0}
   end;
 
+handle_cast({add_query_client, Ref, Subscription}, State0) ->
+  try
+    State = add_query_client(Ref, Subscription, State0),
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("add query client error: ~p, stack ~p",[E,S]),
+      {noreply, State0}
+  end;
+
 handle_cast({global_set, Ref, Tag, ReplyTo}, State0) ->
   try
     State = global_set(Tag, State0),
@@ -318,15 +328,10 @@ unsubscribe(
 %-------------------------------------------------------------------
 add_query(
     Ref,
-    #subscribe{
-      client = ClientID,
-      id = SubsID,
+    Subscription = #subscribe{
       conditions = Conditions,
       deps = Fields,
-      read = Read,
-      usergroups = UserGroups,
       params = #{
-        no_feedback := NoFeedback,
         stateless := Stateless
       }
     },
@@ -338,25 +343,15 @@ add_query(
 )->
   Set = init_query_set(Set0, maps:get(Ref, Queries0, undefined)),
 
-  Client = #q_client{
-    usergroups = UserGroups,
-    subs_id = SubsID,
-    no_feedback = NoFeedback,
-    read = Read
-  },
-
-  Clients = #{
-    ClientID => Client
-  },
-
-  Query = #query{
+  Query0 = #query{
     conditions = Conditions,
     fields = Fields,
-    clients = Clients,
+    clients = #{},
     set = Set
   },
 
-  Objects = add_query_to_objects(Ref, Query, Stateless, Objects0),
+  Objects = add_query_to_objects(Ref, Query0, Stateless, Objects0),
+  Query = add_client_to_query(Subscription, Query0),
 
   Queries = #{
     Ref => Query
@@ -386,6 +381,50 @@ init_query_set(
   );
 init_query_set(_NoWaitQuery, Set)->
   Set.
+
+add_query_client(
+    Ref,
+    Subscription,
+    State0 = #state{
+      queries = Queries0
+    }
+)->
+  case Queries0 of
+    #{ Ref := Query0}->
+      add_client_to_query(Subscription, Query0);
+    _->
+      ?LOGWARNING("attempt to add client to unknown query ~p",[Ref]),
+      State0
+  end.
+
+add_client_to_query(
+    #subscribe{
+      client = ClientID,
+      id = SubsID,
+      usergroups = UG,
+      read = Read,
+      params = #{
+        no_feedback := NoFeedback
+      }
+    },
+    Query0 = #query{
+      clients = Clients0
+    }
+)->
+  Client = #q_client{
+    usergroups = UG,
+    subs_id = SubsID,
+    no_feedback = NoFeedback,
+    read = Read
+  },
+
+  Clients = Clients0#{
+    ClientID => Client
+  },
+
+  Query0#query{
+    clients = Clients
+  }.
 
 %-------------------------------------------------------------------
 %  State transformations
@@ -936,7 +975,7 @@ trigger_object_create(
     #object{
       instance = Instance,
       fields = Fields = #{
-        <<".readgroups">> := ReadGroups
+        <<".readgroups">> := RG
       }
     },
     {
@@ -944,20 +983,20 @@ trigger_object_create(
       #q_client{
         subs_id = SubsID,
         read = Read,
-        usergroups = UserGroups
+        usergroups = UG
       }
     }
 )->
-  case ordsets:intersection( UserGroups, ReadGroups ) of
-    []->
-      % The the client has no access to the object
-      ignore;
-    _->
+  case check_access(UG, RG) of
+    true->
       ActualValues = ecomet_query:query_object(Instance, Fields),
       Update = Read( ActualValues ),
       OID = ecomet_object:get_oid(Instance),
 
-      catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update)
+      catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update);
+    _->
+      % The the client has no access to the object
+      ignore
   end.
 
 global_set(
