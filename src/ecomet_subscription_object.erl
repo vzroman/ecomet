@@ -79,6 +79,13 @@
   subs
 }).
 
+-record(q_client,{
+  usergroups,
+  subs_id,
+  no_feedback,
+  read
+}).
+
 -record(o_sub,{
   fields,
   read,
@@ -311,7 +318,18 @@ unsubscribe(
 %-------------------------------------------------------------------
 add_query(
     Ref,
-    Subscription,
+    #subscribe{
+      client = ClientID,
+      id = SubsID,
+      conditions = Conditions,
+      deps = Fields,
+      read = Read,
+      usergroups = UserGroups,
+      params = #{
+        no_feedback := NoFeedback,
+        stateless := Stateless
+      }
+    },
     Set0,
     State0 = #state{
       queries = Queries0,
@@ -320,8 +338,34 @@ add_query(
 )->
   Set = init_query_set(Set0, maps:get(Ref, Queries0, undefined)),
 
+  Client = #q_client{
+    usergroups = UserGroups,
+    subs_id = SubsID,
+    no_feedback = NoFeedback,
+    read = Read
+  },
 
-  todo.
+  Clients = #{
+    ClientID => Client
+  },
+
+  Query = #query{
+    conditions = Conditions,
+    fields = Fields,
+    clients = Clients,
+    set = Set
+  },
+
+  Objects = add_query_to_objects(Ref, Query, Stateless, Objects0),
+
+  Queries = #{
+    Ref => Query
+  },
+
+  State0#state{
+    queries = Queries,
+    objects = Objects
+  }.
 
 init_query_set(
     #wait_query{
@@ -401,6 +445,19 @@ init_object(
     }
 )->
   %---------Init new object---------------
+  Object0 = init_new_object(OID, SubsFields),
+
+  Object = add_object_client(ClientID, SubsID, UserGroups, Object0),
+
+  Objects = Objects0#{
+    OID => Object
+  },
+
+  State0#state{
+    objects = Objects
+  }.
+
+init_new_object(OID, SubsFields)->
   Instance = ecomet_object:construct( OID ),
   InitFields =
     lists:foldl(
@@ -417,22 +474,12 @@ init_object(
   Fields = ecomet:read_fields(Instance, InitFields),
   FieldsRef = maps:map(fun(_F,_V)->1 end, Fields),
 
-  Object0 = #object{
+  #object{
     instance = Instance,
     fields = Fields,
     fields_ref = FieldsRef,
     clients = #{},
     queries = ordsets:new()
-  },
-
-  Object = add_object_client(ClientID, SubsID, UserGroups, Object0),
-
-  Objects = Objects0#{
-    OID => Object
-  },
-
-  State0#state{
-    objects = Objects
   }.
 
 remove_object(
@@ -836,6 +883,81 @@ init_subscription(
     true->
       % The the client has no access to the object
       ignore
+  end.
+
+add_query_to_objects(
+    Ref,
+    #query{
+      fields = SubsFields,
+      set = Set,
+      clients = Clients
+    },
+    Stateless,
+    Objects0
+)->
+  [Client] = maps:to_list(Clients),
+
+  ecomet_resultset:foldl(
+    fun(OID, Acc)->
+      Object0 =
+        case Acc of
+          #{ OID := _Object0 }->
+            _Object0;
+          _->
+            init_new_object(OID, SubsFields)
+        end,
+      Object = add_query_to_object(Ref, Object0),
+      if
+        Stateless ->
+          ignore;
+        true->
+          trigger_object_create(Object, Client)
+      end,
+      Acc#{
+        OID => Object
+      }
+    end,
+    Objects0,
+    Set
+  ).
+
+add_query_to_object(
+    Ref,
+    Object0 = #object{
+      queries = Queries0
+    }
+)->
+  Queries = ordsets:add_element(Ref, Queries0),
+  Object0#object{
+    queries = Queries
+  }.
+
+trigger_object_create(
+    #object{
+      instance = Instance,
+      fields = Fields = #{
+        <<".readgroups">> := ReadGroups
+      }
+    },
+    {
+      ClientID,
+      #q_client{
+        subs_id = SubsID,
+        read = Read,
+        usergroups = UserGroups
+      }
+    }
+)->
+  case ordsets:intersection( UserGroups, ReadGroups ) of
+    []->
+      % The the client has no access to the object
+      ignore;
+    _->
+      ActualValues = ecomet_query:query_object(Instance, Fields),
+      Update = Read( ActualValues ),
+      OID = ecomet_object:get_oid(Instance),
+
+      catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update)
   end.
 
 global_set(
