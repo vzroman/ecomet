@@ -411,6 +411,9 @@ check_storage(Object,IsEmpty)->
   end.
 
 check_type(Object,IsEmpty)->
+  ?LOGINFO("[debug] is empty: ~p", [IsEmpty]),
+  ?LOGINFO("[debug] field changes 'type': ~p", [ecomet:field_changes(Object,<<"type">>)]),
+  ?LOGINFO("[debug] field changes 'subtype': ~p", [ecomet:field_changes(Object,<<"subtype">>)]),
   IsChanged =
     ecomet:field_changes(Object,<<"type">>) =/=none
       orelse
@@ -432,7 +435,8 @@ check_type(Object,IsEmpty)->
           % There are already objects created by the pattern. They potentially have data
           % in the field. If we change the field's type the data will be lost.
           #{<<".name">> := Name, <<".folder">> := PatternOID} = ecomet:read_fields( Object, [<<".name">>, <<".folder">>] ),
-
+          ?LOGINFO("[debug] object path: ~p", [?PATH(Object)]),
+          ?LOGINFO("[debug] name: ~p", [Name]),
           {ok, _Pattern} = ecomet:read_field( ecomet:open(PatternOID), <<".name">> ),
           ?LOGWARNING("Change type for field ~p in pattern oid: ~p, path: ~p. Field values for existing objects will be lost",[
             Name,
