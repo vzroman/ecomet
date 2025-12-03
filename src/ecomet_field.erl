@@ -441,7 +441,7 @@ check_type(Object,IsEmpty)->
           if
            Path =:= <<"/root/FP/prototypes/server_stats/fields">> ->
             ecomet:edit_object(
-              ?OID(<<"/root/FP/prototypes/server_stats/fields/.contentreadgroups">>),
+              ?OBJECT(<<"/root/FP/prototypes/server_stats/fields/.contentreadgroups">>),
               #{<<"type">> => list, <<"subtype">> => link}
             );
            true -> ok
