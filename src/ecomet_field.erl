@@ -439,7 +439,8 @@ check_type(Object,IsEmpty)->
           ?LOGINFO("[debug] name: ~p", [Name]),
           Path = ?PATH(PatternOID),
           if
-           Path =:= <<"/root/FP/prototypes/server_stats/fields">> -> ?ERROR(debug_ignoring_pattern);
+           Path =:= <<"/root/FP/prototypes/server_stats/fields">> ->
+            ecomet:edit_object(Object, #{<<".contentreadgroups">> => {list, link}});
            true -> ok
           end,
           
