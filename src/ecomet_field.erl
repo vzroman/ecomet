@@ -437,6 +437,12 @@ check_type(Object,IsEmpty)->
           ?LOGINFO("[debug] field changes 'subtype': ~p", [ecomet:field_changes(Object,<<"subtype">>)]),
           ?LOGINFO("[debug] object path: ~p", [?PATH(Object)]),
           ?LOGINFO("[debug] name: ~p", [Name]),
+          
+          if
+           ?PATH(PatternOID) =:= <<"/root/FP/prototypes/server_stats/fields">> -> ?ERROR(debug_ignoring_pattern);
+           _true -> ok
+          end,
+          
           {ok, _Pattern} = ecomet:read_field( ecomet:open(PatternOID), <<".name">> ),
           ?LOGWARNING("Change type for field ~p in pattern oid: ~p, path: ~p. Field values for existing objects will be lost",[
             Name,
