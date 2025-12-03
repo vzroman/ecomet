@@ -351,10 +351,11 @@ check_name(Object,IsEmpty)->
           % in the field. If we change the field's name the data will be lost.
           #{<<".folder">> := PatternOID} = ecomet:read_fields( Object, [<<".name">>, <<".folder">>] ),
 
-          {ok, Pattern} = ecomet:read_field( ecomet:open(PatternOID), <<".name">> ),
-          ?LOGWARNING("Change name for the field ~p in pattern ~p. Field values for existing objects will be lost",[
+          {ok, _Pattern} = ecomet:read_field( ecomet:open(PatternOID), <<".name">> ),
+          ?LOGWARNING("Change name for the field ~p in pattern: ~p, path: ~p. Field values for existing objects will be lost",[
             OldName,
-            Pattern
+            PatternOID,
+            ecomet:to_path(PatternOID)
           ]);
         true ->
           ok
