@@ -93,11 +93,6 @@
   oid
 }).
 
--record(q_sub,{
-  read,
-  no_feedback
-}).
-
 %%=================================================================
 %%        API
 %%=================================================================
@@ -461,15 +456,15 @@ remove_query_client(
   case Queries0 of
     #{ Ref := Query0}->
       Query = remove_client_from_query(ClientID, Query0),
-      if
-        map_size( Query#query.clients ) > 0 ->
+      case has_clients( Query ) of
+        true ->
           Queries = Queries0#{
             Ref => Query
           },
           State0#state{
             queries = Queries
           };
-        true ->
+        _->
           remove_query(Ref, State0)
       end;
     _->
@@ -670,12 +665,12 @@ remove_object(
   Object = remove_fields(SubsFields, Object1),
 
   Objects =
-    if
-      map_size(Object#object.clients) > 0->
+    case has_clients(Object) of
+      true ->
         Objects0#{
           OID => Object
         };
-      true->
+      _->
         maps:remove(OID, Objects0)
     end,
 
@@ -1058,14 +1053,14 @@ add_query_to_objects(
 )->
   ecomet_resultset:foldl(
     fun(OID, Acc)->
-      Object0 =
+      Object1 =
         case Acc of
-          #{ OID := _Object0 }->
-            _Object0;
+          #{ OID := Object0 }->
+            add_fields(SubsFields, Object0);
           _->
             init_new_object(OID, SubsFields)
         end,
-      Object = add_query_to_object(Ref, Object0),
+      Object = add_query_to_object(Ref, Object1),
       Acc#{
         OID => Object
       }
@@ -1086,8 +1081,16 @@ remove_query_from_objects(
     fun(OID, Acc)->
       case Acc of
         #{ OID := Object0 }->
-          Object= remove_query_from_object(Ref, Object0),
-          todo;
+          Object1 = remove_fields(SubsFields, Object0),
+          Object= remove_query_from_object(Ref, Object1),
+          case has_clients(Object) of
+            true ->
+              Acc#{
+                OID => Object
+              };
+            _->
+              maps:remove(OID, Acc)
+          end;
         _->
           ?LOGWARNING("attempt to remove query ~p from unknown object ~p",[Ref, OID]),
           Acc
@@ -1177,6 +1180,18 @@ check_access(UG, RG)->
     [] -> false;
     _->true
   end.
+
+has_clients(#object{
+  clients = Clients,
+  queries = Queries
+})->
+  map_size(Clients) > 0 orelse (not ordsets:is_empty(Queries));
+
+has_clients(#query{
+  clients = Clients
+})->
+  map_size(Clients) > 0.
+
 
 
 
