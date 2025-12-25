@@ -23,7 +23,7 @@
 -export([
   init_query/3,
   add_query_client/2,
-  remove_query_client/3,
+  remove_query_client/2,
   global_set/1,
   global_reset/1
 ]).
@@ -122,12 +122,12 @@ init_query(Ref, Subscription, InitSet)->
       fun(OID, Acc)->
         Worker = ?WORKER(OID),
         WorkerAcc0=
-        case Acc of
-          #{Worker := _WorkerAcc} ->
-            _WorkerAcc;
-          _->
-            ecomet_resultset:new()
-        end,
+          case Acc of
+            #{Worker := _WorkerAcc} ->
+              _WorkerAcc;
+            _->
+              ecomet_resultset:new()
+          end,
         Acc#{
           Worker => ecomet_resultset:add_oid(OID, WorkerAcc0)
         }
@@ -147,8 +147,8 @@ add_query_client(Ref, Subscription)->
   [gen_server:cast(?NAME(N), {add_query_client, Ref, Subscription}) || N <-ecomet_subscription_pool:get_workers()],
   ok.
 
-remove_query_client(Ref, ClientID, SubsID)->
-  [gen_server:cast(?NAME(N), {remove_query_client, Ref, ClientID, SubsID}) || N <-ecomet_subscription_pool:get_workers()],
+remove_query_client(Ref, ClientID)->
+  [gen_server:cast(?NAME(N), {remove_query_client, Ref, ClientID}) || N <-ecomet_subscription_pool:get_workers()],
   ok.
 
 global_set(Tag)->
@@ -226,6 +226,16 @@ handle_cast({init_query, Ref, Subscription, Set}, State0) ->
 handle_cast({add_query_client, Ref, Subscription}, State0) ->
   try
     State = add_query_client(Ref, Subscription, State0),
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("add query client error: ~p, stack ~p",[E,S]),
+      {noreply, State0}
+  end;
+
+handle_cast({remove_query_client, Ref, ClientID}, State0) ->
+  try
+    State = remove_query_client(Ref, ClientID, State0),
     {noreply, State}
   catch
     _:E:S->
@@ -341,7 +351,7 @@ add_query(
       objects = Objects0
     }
 )->
-  Set = init_query_set(Set0, maps:get(Ref, Queries0, undefined)),
+  Set = init_query_set(maps:get(Ref, Queries0, undefined), Set0),
 
   Query0 = #query{
     conditions = Conditions,
@@ -350,13 +360,38 @@ add_query(
     set = Set
   },
 
-  Objects = add_query_to_objects(Ref, Query0, Stateless, Objects0),
+  Objects = add_query_to_objects(Ref, Query0, Objects0),
   Query = add_client_to_query(Subscription, Query0),
 
   Queries = #{
     Ref => Query
   },
 
+  State = State0#state{
+    queries = Queries,
+    objects = Objects
+  },
+
+  if
+    Stateless =:= false ->
+      init_query_client(Ref, Subscription, State);
+    true ->
+      ignore
+  end,
+
+  State.
+
+remove_query(
+    Ref,
+    State0 = #state{
+      queries = Queries0,
+      objects = Objects0
+    }
+)->
+  Query = maps:get(Ref, Queries0),
+  Objects = remove_query_from_objects(Ref, Query, Objects0),
+
+  Queries = maps:remove(Ref, Queries0),
   State0#state{
     queries = Queries,
     objects = Objects
@@ -384,16 +419,61 @@ init_query_set(_NoWaitQuery, Set)->
 
 add_query_client(
     Ref,
-    Subscription,
+    Subscription = #subscribe{
+      params = #{
+        stateless := Stateless
+      }
+    },
     State0 = #state{
       queries = Queries0
     }
 )->
   case Queries0 of
     #{ Ref := Query0}->
-      add_client_to_query(Subscription, Query0);
+      Query = add_client_to_query(Subscription, Query0),
+      Queries = Queries0#{
+        Ref => Query
+      },
+      State = State0#state{
+        queries = Queries
+      },
+
+      if
+        Stateless =:= false ->
+          init_query_client(Ref, Subscription, State);
+        true ->
+          ignore
+      end,
+
+      State;
     _->
       ?LOGWARNING("attempt to add client to unknown query ~p",[Ref]),
+      State0
+  end.
+
+remove_query_client(
+    Ref,
+    ClientID,
+    State0 = #state{
+      queries = Queries0
+    }
+)->
+  case Queries0 of
+    #{ Ref := Query0}->
+      Query = remove_client_from_query(ClientID, Query0),
+      if
+        map_size( Query#query.clients ) > 0 ->
+          Queries = Queries0#{
+            Ref => Query
+          },
+          State0#state{
+            queries = Queries
+          };
+        true ->
+          remove_query(Ref, State0)
+      end;
+    _->
+      ?LOGWARNING("attempt to remove client from unknown query ~p",[Ref]),
       State0
   end.
 
@@ -425,6 +505,50 @@ add_client_to_query(
   Query0#query{
     clients = Clients
   }.
+
+remove_client_from_query(
+    ClientID,
+    Query0 = #query{
+      clients = QueryClients0
+    }
+)->
+  QueryClients0 = maps:remove(ClientID, QueryClients0),
+  Query0#query{
+    clients = QueryClients0
+  }.
+
+
+init_query_client(
+    Ref,
+    #subscribe{
+      client = ClientID
+    },
+    #state{
+      queries = Queries,
+      objects = Objects
+    }
+)->
+
+  #query{
+    clients = QueryClients,
+    set = Set
+  } = maps:get(Ref, Queries),
+
+  QueryClient = maps:get(ClientID, QueryClients),
+
+  ecomet_resultset:foldl(
+    fun(OID, Acc)->
+      Object = maps:get(OID, Objects),
+      trigger_object_create(Object, ClientID, QueryClient),
+      Acc
+    end,
+    undefined,
+    Set
+  ),
+
+  ok.
+
+
 
 %-------------------------------------------------------------------
 %  State transformations
@@ -928,14 +1052,10 @@ add_query_to_objects(
     Ref,
     #query{
       fields = SubsFields,
-      set = Set,
-      clients = Clients
+      set = Set
     },
-    Stateless,
     Objects0
 )->
-  [Client] = maps:to_list(Clients),
-
   ecomet_resultset:foldl(
     fun(OID, Acc)->
       Object0 =
@@ -946,12 +1066,6 @@ add_query_to_objects(
             init_new_object(OID, SubsFields)
         end,
       Object = add_query_to_object(Ref, Object0),
-      if
-        Stateless ->
-          ignore;
-        true->
-          trigger_object_create(Object, Client)
-      end,
       Acc#{
         OID => Object
       }
@@ -959,6 +1073,30 @@ add_query_to_objects(
     Objects0,
     Set
   ).
+
+remove_query_from_objects(
+    Ref,
+    #query{
+      fields = SubsFields,
+      set = Set
+    },
+    Objects0
+)->
+  ecomet_resultset:foldl(
+    fun(OID, Acc)->
+      case Acc of
+        #{ OID := Object0 }->
+          Object= remove_query_from_object(Ref, Object0),
+          todo;
+        _->
+          ?LOGWARNING("attempt to remove query ~p from unknown object ~p",[Ref, OID]),
+          Acc
+      end
+    end,
+    Objects0,
+    Set
+  ).
+
 
 add_query_to_object(
     Ref,
@@ -971,6 +1109,18 @@ add_query_to_object(
     queries = Queries
   }.
 
+remove_query_from_object(
+    Ref,
+    Object0 = #object{
+      queries = Queries0
+    }
+)->
+  Queries = ordsets:del_element(Ref, Queries0),
+  Object0#object{
+    queries = Queries
+  }.
+
+
 trigger_object_create(
     #object{
       instance = Instance,
@@ -978,13 +1128,11 @@ trigger_object_create(
         <<".readgroups">> := RG
       }
     },
-    {
-      ClientID,
-      #q_client{
-        subs_id = SubsID,
-        read = Read,
-        usergroups = UG
-      }
+    ClientID,
+    #q_client{
+      subs_id = SubsID,
+      read = Read,
+      usergroups = UG
     }
 )->
   case check_access(UG, RG) of

@@ -302,7 +302,7 @@ remove_query_client(
           _-> maps:remove(Key, Key2Ref0)
         end,
 
-      ecomet_subscription_object:remove_query_client(Ref, ClientID, SubsID),
+      ecomet_subscription_object:remove_query_client(Ref, ClientID),
 
       State0#state{
         queries = Queries,
