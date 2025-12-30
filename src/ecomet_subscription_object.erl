@@ -1333,8 +1333,8 @@ notify(
     objects = Objects
   },
 
-  queries_notify_create(Add, Log, State),
-  queries_notify_delete(Del, Log, State),
+  queries_notify_create(maps:keys(Add), Log, State),
+  queries_notify_delete(maps:keys(Del), Log, State),
 
   State;
 
@@ -1361,37 +1361,43 @@ notify(
       oid := OID
     },
     State0 = #state{
-      objects = Objects0,
-      queries = Queries0
+      objects = Objects
     }
 )->
-  case Objects0 of
+  case Objects of
     #{
-      OID := Object = #object{
+      OID := #object{
         clients = ObjectClients,
         queries = ObjectQueries
       }
     }->
+      queries_notify_delete(ObjectQueries, Log, State0),
+      clients_notify_delete(ObjectClients, Log, State0),
 
-      todo;
+      State1 = delete_object_from_queries(ObjectQueries, State0),
+      State = delete_object_from_clients(ObjectClients, State1),
+
+      State#state{
+        objects = maps:remove(OID, Objects)
+      };
     _->
       State0
   end.
 
 queries_notify_create(
-    Queries,
+    NotifyQueries,
     #{
       oid := OID,
       self := Actor
     },
     #state{
-      objects = Objects
+      objects = Objects,
+      queries = Queries
     }
 )->
   Object = maps:get(OID, Objects),
-
-  maps:foreach(
-    fun(_Ref, #query{ clients = Clients })->
+  [ begin
+      #query{ clients = Clients } = maps:get(Ref, Queries),
       maps:foreach(
         fun(ClientID, Client)->
           if
@@ -1403,37 +1409,36 @@ queries_notify_create(
         end,
         Clients
       )
-    end,
-    Queries
-  ).
+    end || Ref <- NotifyQueries],
+  ok.
 
 queries_notify_delete(
-    Queries,
+    NotifyQueries,
     #{
       oid := OID,
       self := Actor
     },
     #state{
-      objects = Objects
+      objects = Objects,
+      queries = Queries
     }
 )->
   Object = maps:get(OID, Objects),
-  maps:foreach(
-    fun(_Ref, #query{ clients = Clients })->
-      maps:foreach(
-        fun(ClientID, Client)->
-          if
-            ClientID =:= Actor, Client#q_client.no_feedback =:= true->
-              ignore;
-            true->
-              trigger_object_delete(Object, ClientID, Client)
-          end
-        end,
-        Clients
-      )
-    end,
-    Queries
-  ).
+  [begin
+     #query{ clients = Clients } = maps:get(Ref, Queries),
+     maps:foreach(
+       fun(ClientID, Client)->
+         if
+           ClientID =:= Actor, Client#q_client.no_feedback =:= true->
+             ignore;
+           true->
+             trigger_object_delete(Object, ClientID, Client)
+         end
+       end,
+       Clients
+     )
+   end || Ref <- NotifyQueries],
+  ok.
 
 check_queries(OID, Fields, Queries, QueriesToCheck)->
   lists:foldl(
