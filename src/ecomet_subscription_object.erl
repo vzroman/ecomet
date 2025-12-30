@@ -595,8 +595,6 @@ init_query_client(
 
   ok.
 
-
-
 %-------------------------------------------------------------------
 %  State transformations
 %-------------------------------------------------------------------
@@ -1225,6 +1223,29 @@ trigger_object_create(
       ignore
   end.
 
+trigger_object_delete(
+    #object{
+      instance = Instance,
+      fields = #{
+        <<".readgroups">> := RG
+      }
+    },
+    ClientID,
+    #q_client{
+      subs_id = SubsID,
+      usergroups = UG
+    }
+)->
+  case check_access(UG, RG) of
+    true->
+      OID = ecomet_object:get_oid(Instance),
+      catch ClientID ! ?SUBSCRIPTION(SubsID, delete, OID, #{});
+    _->
+      % The the client has no access to the object
+      ignore
+  end.
+
+
 global_set(
     Tag,
     State0 = #state{
@@ -1312,8 +1333,8 @@ notify(
     objects = Objects
   },
 
-  notify_create(Add, OID, State),
-  notify_delete(Del, OID, State),
+  queries_notify_create(Add, Log, State),
+  queries_notify_delete(Del, Log, State),
 
   State;
 
@@ -1332,7 +1353,87 @@ notify(
 
 
 
-  notify_monitor( OID, Log ).
+  notify_monitor( OID, Log );
+
+notify(
+    Log = #{
+      action := delete,
+      oid := OID
+    },
+    State0 = #state{
+      objects = Objects0,
+      queries = Queries0
+    }
+)->
+  case Objects0 of
+    #{
+      OID := Object = #object{
+        clients = ObjectClients,
+        queries = ObjectQueries
+      }
+    }->
+
+      todo;
+    _->
+      State0
+  end.
+
+queries_notify_create(
+    Queries,
+    #{
+      oid := OID,
+      self := Actor
+    },
+    #state{
+      objects = Objects
+    }
+)->
+  Object = maps:get(OID, Objects),
+
+  maps:foreach(
+    fun(_Ref, #query{ clients = Clients })->
+      maps:foreach(
+        fun(ClientID, Client)->
+          if
+            ClientID =:= Actor, Client#q_client.no_feedback =:= true->
+              ignore;
+            true->
+              trigger_object_create(Object, ClientID, Client)
+          end
+        end,
+        Clients
+      )
+    end,
+    Queries
+  ).
+
+queries_notify_delete(
+    Queries,
+    #{
+      oid := OID,
+      self := Actor
+    },
+    #state{
+      objects = Objects
+    }
+)->
+  Object = maps:get(OID, Objects),
+  maps:foreach(
+    fun(_Ref, #query{ clients = Clients })->
+      maps:foreach(
+        fun(ClientID, Client)->
+          if
+            ClientID =:= Actor, Client#q_client.no_feedback =:= true->
+              ignore;
+            true->
+              trigger_object_delete(Object, ClientID, Client)
+          end
+        end,
+        Clients
+      )
+    end,
+    Queries
+  ).
 
 check_queries(OID, Fields, Queries, QueriesToCheck)->
   lists:foldl(
@@ -1418,6 +1519,35 @@ add_queries_to_object(
   Objects0#{
     OID => Object
   }.
+
+remove_queries_from_object(
+    RemoveQueries,
+    OID,
+    Objects0
+)->
+  case Objects0 of
+    #{OID := Object0}->
+      Object =
+        maps:fold(
+          fun(Ref, #query{fields = SubsFields}, Acc)->
+            Acc1 = remove_fields(SubsFields, Acc),
+            remove_query_from_object(Ref, Acc1)
+          end,
+          Object0,
+          RemoveQueries
+        ),
+      case has_clients(Object) of
+        true ->
+          Objects0#{
+            OID => Object
+          };
+        _->
+          maps:remove(OID, Objects0)
+      end;
+    _->
+      Objects0
+  end.
+
 
 
 
