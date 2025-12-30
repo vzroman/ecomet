@@ -18,6 +18,14 @@
 ]).
 
 %%=================================================================
+%%        Transaction API
+%%=================================================================
+-export([
+  on_commit/1,
+  notify/1
+]).
+
+%%=================================================================
 %%        Query API
 %%=================================================================
 -export([
@@ -105,6 +113,22 @@ subscribe(
 
 unsubscribe(Client, SubsID)->
   [gen_server:cast(?NAME(N), {unsubscribe, Client, SubsID}) || N <-ecomet_subscription_pool:get_workers()],
+  ok.
+
+%%=================================================================
+%%        Transaction API
+%%=================================================================
+on_commit( Log ) when length(Log) > 0->
+  Nodes = ecomet_subscription_nodes:get_active(),
+  ecall:cast_all(Nodes, ?MODULE , notify,[ Log ] ),
+  notify( Log );
+on_commit( _Log )->
+  ignore.
+
+notify([#{oid := OID} = Log | Rest] )->
+  gen_server:cast(?WORKER(OID), {notify, Log}),
+  notify( Rest );
+notify([])->
   ok.
 
 %%=================================================================
@@ -197,6 +221,16 @@ handle_call(#subscribe{} = Subscription, _From, State0) ->
 handle_call(Request, _From, State) ->
   ?LOGWARNING("unexpected call request ~p", [Request]),
   {noreply, State}.
+
+handle_cast({notify, Log}, State0) ->
+  try
+    State = notify(Log, State0),
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("remove object subscription error: ~p, stack ~p",[E,S]),
+      {noreply, State0}
+  end;
 
 handle_cast({unsubscribe, Client, SubsID}, State0) ->
   try
@@ -346,7 +380,7 @@ add_query(
       objects = Objects0
     }
 )->
-  Set = init_query_set(maps:get(Ref, Queries0, undefined), Set0),
+  Set = init_query_set(maps:get(Ref, Queries0, undefined), Subscription, Set0),
 
   Query0 = #query{
     conditions = Conditions,
@@ -397,6 +431,10 @@ init_query_set(
       add = AddObjects,
       remove = RemoveObjects
     },
+    #subscribe{
+      conditions = Conditions,
+      deps = SubsFields
+    },
     Set0
 )->
   Set1 = lists:foldl(
@@ -405,11 +443,25 @@ init_query_set(
     RemoveObjects
   ),
   lists:foldl(
-    fun ecomet_resultset:add_oid/2,
+    fun(OID, RS)->
+      try
+        Object = ecomet_object:construct(OID),
+        Fields = ecomet:read_fields(Object, SubsFields),
+        case ecomet_resultset:direct(Conditions, Fields) of
+          true ->
+            ecomet_resultset:add_oid(OID, RS);
+          _->
+            ecomet_resultset:remove_oid(OID, RS)
+        end
+      catch
+        _:_->
+          ecomet_resultset:remove_oid(OID, RS)
+      end
+    end,
     Set1,
     AddObjects
   );
-init_query_set(_NoWaitQuery, Set)->
+init_query_set(_NoWaitQuery, _Subscription, Set)->
   Set.
 
 add_query_client(
@@ -579,7 +631,7 @@ add_object_sub(
   %---------Update already existing object---------------
   Object0 = maps:get(OID, Objects0),
 
-  Object1 = add_fields(SubsFields, Object0),
+  Object1 = add_fields(SubsFields, _UpdateFields = #{},Object0),
   Object = add_object_client(ClientID, SubsID, UserGroups, Object1),
 
   Objects = Objects0#{
@@ -603,7 +655,7 @@ init_object(
     }
 )->
   %---------Init new object---------------
-  Object0 = init_new_object(OID, SubsFields),
+  Object0 = init_new_object(OID, SubsFields, _UpdateFields = #{}),
 
   Object = add_object_client(ClientID, SubsID, UserGroups, Object0),
 
@@ -615,7 +667,7 @@ init_object(
     objects = Objects
   }.
 
-init_new_object(OID, SubsFields)->
+init_new_object(OID, SubsFields, UpdateFields)->
   Instance = ecomet_object:construct( OID ),
   InitFields =
     lists:foldl(
@@ -629,7 +681,17 @@ init_new_object(OID, SubsFields)->
       #{<<".readgroups">> => []},
       SubsFields),
 
-  Fields = ecomet:read_fields(Instance, InitFields),
+  Fields0 = maps:with(maps:keys(InitFields), UpdateFields),
+  Fields =
+    case maps:keys(InitFields) -- maps:keys(Fields0) of
+      [] ->
+        Fields0;
+      ToReadFields->
+        maps:merge(
+          ecomet:read_fields(Instance, maps:with(ToReadFields,InitFields)),
+          Fields0
+        )
+    end,
   FieldsRef = maps:map(fun(_F,_V)->1 end, Fields),
 
   #object{
@@ -681,6 +743,7 @@ remove_object(
 
 add_fields(
     SubsFields,
+    UpdateFields,
     Object0 = #object{
       instance = Instance,
       fields = Fields0,
@@ -693,10 +756,16 @@ add_fields(
       [] ->
         Fields0;
       NewFields->
-        maps:merge(
-          Fields0,
-          ecomet_object:read_fields(Instance, NewFields)
-        )
+        Fields1 = maps:merge(Fields0, maps:with(NewFields, UpdateFields)),
+        case NewFields -- maps:keys(UpdateFields) of
+          []->
+            Fields1;
+          ToReadFields->
+            maps:merge(
+              Fields1,
+              ecomet_object:read_fields(Instance, ToReadFields)
+            )
+        end
     end,
 
   FieldsRef =
@@ -1053,17 +1122,23 @@ add_query_to_objects(
 )->
   ecomet_resultset:foldl(
     fun(OID, Acc)->
-      Object1 =
-        case Acc of
-          #{ OID := Object0 }->
-            add_fields(SubsFields, Object0);
-          _->
-            init_new_object(OID, SubsFields)
-        end,
-      Object = add_query_to_object(Ref, Object1),
-      Acc#{
-        OID => Object
-      }
+      try
+        Object1 =
+          case Acc of
+            #{ OID := Object0 }->
+              add_fields(SubsFields, _UpdateFields = #{}, Object0);
+            _->
+              init_new_object(OID, SubsFields, _UpdateFields = #{})
+          end,
+        Object = add_query_to_object(Ref, Object1),
+        Acc#{
+          OID => Object
+        }
+      catch
+        _:R->
+          ?LOGINFO("~p ignore to add object to query, reason ~p",[OID, R]),
+          Acc
+      end
     end,
     Objects0,
     Set
@@ -1191,6 +1266,161 @@ has_clients(#query{
   clients = Clients
 })->
   map_size(Clients) > 0.
+
+
+%-------------------------------------------------------------------
+%  Notify
+%-------------------------------------------------------------------
+% Light update
+notify(
+    Log = #{
+      action := light_update,
+      oid := OID
+    },
+    State
+)->
+  todo;
+
+notify(
+    Log = #{
+      action := create,
+      oid := OID,
+      fields := Fields
+    },
+    State0 = #state{
+      global = Global,
+      queries = Queries0,
+      objects = Objects0
+    }
+)->
+
+  QueriesToCheck = ecomet_subscription_query:notify(Log, Global),
+  #{
+    wait := Wait,
+    add := Add,
+    del => Del
+  } = check_queries(OID, Fields, Queries0, QueriesToCheck),
+
+  Queries =
+    lists:foldl(fun maps:merge/2, Queries0, [Wait, Del, Add]),
+
+  Objects1 = add_queries_to_object(Add, OID, Fields, Objects0),
+  Objects = remove_queries_from_object(Del, OID, Objects1),
+
+  State = State0#state{
+    queries = Queries,
+    objects = Objects
+  },
+
+  notify_create(Add, OID, State),
+  notify_delete(Del, OID, State),
+
+  State;
+
+notify(
+    Log = #{
+      action := update,
+      oid := OID
+    },
+    State = #state{
+      global = Global
+    }
+)->
+
+  Queries = ecomet_subscription_query:notify(Log, Global),
+  check_queries(Queries, Log, State),
+
+
+
+  notify_monitor( OID, Log ).
+
+check_queries(OID, Fields, Queries, QueriesToCheck)->
+  lists:foldl(
+    fun(Ref, Acc = #{wait := WaitAcc, add := AddAcc, del := DelAcc})->
+      case Queries of
+        #{ Ref := Query0 = #query{ conditions = Conditions, set = Set0} }->
+          case {ecomet_resultset:direct(Conditions, Fields), ecomet_resultset:contains(OID, Set0)} of
+            {true, false}->
+              Set = ecomet_resultset:add_oid(OID, Set0),
+              Query = Query0#query{
+                set = Set
+              },
+              Acc#{
+                add => AddAcc#{ Ref => Query }
+              };
+            {false, true}->
+              Set = ecomet_resultset:remove_oid(OID, Set0),
+              Query = Query0#query{
+                set = Set
+              },
+              Acc#{
+                del => DelAcc#{ Ref => Query }
+              };
+            _->
+              Acc
+          end;
+        #{ Ref := WQ0 = #wait_query{ add = Set0 } }->
+          Set = ecomet_resultset:add_oid(OID, Set0),
+          WQ = WQ0#wait_query{ add = Set },
+          Acc#{
+            wait => WaitAcc#{ Ref => WQ }
+          };
+        _->
+          Set0 = ecomet_resultset:new(),
+          Set = ecomet_resultset:add_oid(OID, Set0),
+          WQ = #wait_query{
+            add = Set,
+            remove = Set0
+          },
+          Acc#{
+            wait => WaitAcc#{ Ref => WQ }
+          }
+      end
+    end,
+    #{
+      wait => #{},
+      add => #{},
+      del => #{}
+    },
+    QueriesToCheck
+  ).
+
+add_queries_to_object(
+    AddQueries,
+    OID,
+    UpdateFields,
+    Objects0
+)->
+  SubsFields =
+    maps:fold(
+      fun(_Ref, #query{fields = QueryFields}, Acc)->
+        ordsets:union(
+          ordsets:from_list(QueryFields),
+          Acc
+        )
+      end,
+      [],
+      AddQueries
+    ),
+
+  Object0 =
+    case Objects0 of
+      #{OID := ExistingObject} ->
+        add_fields(SubsFields, UpdateFields, ExistingObject);
+      _->
+        init_new_object(OID, SubsFields, UpdateFields)
+    end,
+
+  Object = Object0#object{
+    queries = ordsets:from_list(maps:keys(AddQueries))
+  },
+
+  Objects0#{
+    OID => Object
+  }.
+
+
+
 
 
 

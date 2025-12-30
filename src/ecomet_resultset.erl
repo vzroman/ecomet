@@ -30,6 +30,7 @@
 	new/0,
 	add_oid/2,
 	remove_oid/2,
+	contains/2,
 	new_branch/0,
 	execute/5,
 	no_transaction/5,
@@ -550,6 +551,29 @@ remove_oid( OID, RS )->
 		PBits =:= Empty -> RestDBs;
 		true ->
 			[ {DB, {PBits, PMap}} |RestDBs ]
+	end.
+
+contains( OID, RS )->
+	DB = ecomet_object:get_db_name( OID ),
+	case lists:keytake(DB,1,RS) of
+		{value, {_,{_PBits, PMap}}, _Rest}->
+			P=ecomet_object:get_pattern(OID),
+			case PMap of
+				#{ P := {_HBits, HMap}} ->
+					ObjectID=ecomet_object:get_id(OID),
+					H=ObjectID div ?BITSTRING_LENGTH,
+					case HMap of
+						#{H := LBits} ->
+							L=ObjectID rem ?BITSTRING_LENGTH,
+							ecomet_bitmap:get_bit(LBits, L);
+						_->
+							false
+					end;
+				_->
+					false
+			end;
+		false ->
+			false
 	end.
 
 %%=====================================================================

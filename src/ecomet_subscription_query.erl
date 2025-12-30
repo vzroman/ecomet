@@ -17,6 +17,13 @@
 ]).
 
 %%=================================================================
+%%        Transaction API
+%%=================================================================
+-export([
+  notify/2
+]).
+
+%%=================================================================
 %%        OTP API
 %%=================================================================
 -export([
@@ -68,6 +75,157 @@ subscribe(Subscription=#subscribe{ })->
 unsubscribe(Client, SubsID)->
   gen_server:cast(?MODULE, {unsubscribe, Client, SubsID}),
   ok.
+
+%%=================================================================
+%%        Transaction API
+%%=================================================================
+notify(
+    #{
+      action := create,
+      db := DB,
+      tags := Tags
+    },
+    Global
+)->
+  case Global of
+    ?EMPTY_SET->
+      [];
+    Global->
+      IndexDBs = index_dbs( DB ),
+      light_search(Global, IndexDBs, Tags)
+  end;
+
+notify(
+    #{
+      action := update,
+      db := DB,
+      tags := {TAdd, TOld, TDel}
+    },
+    Global
+)->
+  % Run the search of query subscriptions
+  case Global of
+    ?EMPTY_SET->
+      [];
+    Global->
+      TNewMask = ?SET_OR( TAdd, TOld ),
+      TOldMask = ?SET_OR( TDel, TOld ),
+      TMask = ?SET_OR( TNewMask, TDel ),
+      IndexDBs = index_dbs( DB ),
+      search(Global, IndexDBs, TMask, TNewMask, TOldMask)
+  end.
+
+index_dbs(DB)->
+  Tags = ecomet_schema:get_db_tags( DB ),
+  ordsets:from_list([DB|Tags]).
+
+light_search(Global, IndexDBs, Mask )->
+  case ?SET_AND(Mask,Global) of
+    ?EMPTY_SET ->
+      [];
+    XTags->
+      ?SET_FOLD(
+        fun(Tag, Acc)->
+          case ets:lookup(?S_INDEX,{tag,Tag}) of
+            [{_,Indexes}]->
+              maps:fold(
+                fun(#index{'&' = And,'!' = Not, db = DBs}, Queries, TagAcc)->
+                  case bitmap_search(Mask, And, Not) of
+                    true ->
+                      IsDB = DBs=:='*' orelse (ordsets:intersection( IndexDBs, DBs ) =/= []),
+                      if
+                        IsDB ->
+                          ordsets:union( TagAcc, Queries );
+                        true->
+                          TagAcc
+                      end;
+                    false ->
+                      TagAcc
+                  end
+                end,
+                Acc,
+                Indexes
+              );
+            []->
+              Acc
+          end
+        end,
+        _Acc = [],
+        XTags
+      )
+  end.
+
+search(Global, IndexDBs, TMask, TNewMask, TOldMask)->
+  case ?SET_AND(TMask,Global) of
+    ?EMPTY_SET ->
+      [];
+    XTags->
+      ?SET_FOLD(
+        fun(Tag, Acc)->
+          case ets:lookup(?S_INDEX,{tag,Tag}) of
+            [{_,Indexes}]->
+              maps:fold(
+                fun(#index{'&' = And,'!' = Not, db = DBs}, Queries, TagAcc)->
+                  case bitmap_search(TMask, TOldMask, TNewMask, And, Not) of
+                    true ->
+                      IsDB = DBs =:= '*' orelse (ordsets:intersection( IndexDBs, DBs ) =/= []),
+                      if
+                        IsDB ->
+                          ordsets:union( TagAcc, Queries );
+                        true ->
+                          TagAcc
+                      end;
+                    false ->
+                      TagAcc
+                  end
+                end,
+                Acc,
+                Indexes
+              );
+            []->
+               Acc
+          end
+        end,
+        _Acc = [],
+        XTags
+      )
+  end.
+
+bitmap_search(Mask, And, Not) ->
+  case ?SET_IS_SUBSET( And, Mask ) of
+    true->
+      ?SET_IS_DISJOINT(Mask, Not);
+    _->
+      false
+  end.
+
+bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
+  case ?SET_IS_SUBSET( And, Mask ) of
+    true->
+      case ?SET_IS_DISJOINT(Mask, Not) of
+        true -> true;
+        _ when TOldMask =:= ?EMPTY_SET ; TNewMask =:= ?EMPTY_SET ->
+          % The object is either created or deleted
+          false;
+        _ ->
+          case ?SET_IS_DISJOINT(TOldMask, Not) of
+            true ->
+              % The previous object satisfied to the NOT
+              true;
+            _ ->
+              % The previous object didn't satisfy to the NOT
+              case ?SET_IS_DISJOINT(TNewMask, Not) of
+                true ->
+                  % The actual object satisfies
+                  true;
+                _ ->
+                  % The actual object don't satisfy also
+                  false
+              end
+          end
+      end;
+    _-> false
+  end.
 
 %%=================================================================
 %%        OTP
