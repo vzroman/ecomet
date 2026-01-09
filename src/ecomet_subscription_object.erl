@@ -356,7 +356,7 @@ unsubscribe(
         }
       }
     }->
-      State1 = remove_object(ClientID, SubsID, State0),
+      State1 = remove_object_subscription(ClientID, SubsID, State0),
       remove_client(ClientID, SubsID, State1);
     _->
       State0
@@ -700,7 +700,7 @@ init_new_object(OID, SubsFields, UpdateFields)->
     queries = ordsets:new()
   }.
 
-remove_object(
+remove_object_subscription(
     ClientID,
     SubsID,
     State0 = #state{
@@ -1304,56 +1304,24 @@ notify(
 
 notify(
     Log = #{
-      action := create,
-      oid := OID,
-      fields := Fields
+      action := create
     },
-    State0 = #state{
-      global = Global,
-      queries = Queries0,
-      objects = Objects0
-    }
+    State0
 )->
-
-  QueriesToCheck = ecomet_subscription_query:notify(Log, Global),
-  #{
-    wait := Wait,
-    add := Add,
-    del => Del
-  } = check_queries(OID, Fields, Queries0, QueriesToCheck),
-
-  Queries =
-    lists:foldl(fun maps:merge/2, Queries0, [Wait, Del, Add]),
-
-  Objects1 = add_queries_to_object(Add, OID, Fields, Objects0),
-  Objects = remove_queries_from_object(Del, OID, Objects1),
-
-  State = State0#state{
-    queries = Queries,
-    objects = Objects
-  },
-
-  queries_notify_create(maps:keys(Add), Log, State),
-  queries_notify_delete(maps:keys(Del), Log, State),
-
+  State = update_queries( Log, State0 ),
   State;
 
 notify(
     Log = #{
-      action := update,
-      oid := OID
+      action := update
     },
-    State = #state{
-      global = Global
-    }
+    State0
 )->
 
-  Queries = ecomet_subscription_query:notify(Log, Global),
-  check_queries(Queries, Log, State),
+  State1 = notify_update(Log, State0),
+  State = update_queries(Log, State1),
 
-
-
-  notify_monitor( OID, Log );
+  State;
 
 notify(
     Log = #{
@@ -1383,6 +1351,62 @@ notify(
     _->
       State0
   end.
+
+notify_update(
+    Log = #{
+      oid := OID,
+      fields := Fields = #{ <<".readgroups">> := _}
+    },
+    State0
+)->
+  % TODO. Rights change
+  State0;
+
+notify_update(
+    #{
+      oid := OID,
+      fields := Fields
+    },
+    State0
+)->
+
+  State0.
+
+update_queries(
+    Log = #{
+      action := update,
+      oid := OID,
+      fields := Fields
+    },
+    State0 = #state{
+      global = Global,
+      queries = Queries0,
+      objects = Objects0
+    }
+)->
+  QueriesToCheck = ecomet_subscription_query:notify(Log, Global),
+  #{
+    wait := Wait,
+    add := Add,
+    del => Del
+  } = check_queries(OID, Fields, Queries0, QueriesToCheck),
+
+  Queries =
+    lists:foldl(fun maps:merge/2, Queries0, [Wait, Del, Add]),
+
+  Objects1 = add_queries_to_object(Add, OID, Fields, Objects0),
+  Objects = remove_queries_from_object(Del, OID, Objects1),
+
+  State = State0#state{
+    queries = Queries,
+    objects = Objects
+  },
+
+  queries_notify_delete(maps:keys(Del), Log, State),
+  queries_notify_create(maps:keys(Add), Log, State),
+
+  State.
+
 
 queries_notify_create(
     NotifyQueries,
