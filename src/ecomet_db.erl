@@ -170,6 +170,7 @@ wait_dbs( DBs )->
 create( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
+  ?LOGINFO("[debug] params: ~p", [Params]),
   maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
     try
       TypeRef = M:create( type_params(T, Ps, OtherParams) ),
