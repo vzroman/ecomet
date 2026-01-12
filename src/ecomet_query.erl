@@ -233,7 +233,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
 compile_subscribe_read([<<".oid">>],_Formatter)->
   {
     [],
-    fun(_Object)-> #{} end
+    fun(_Updates, _Fields)-> #{} end
   };
 compile_subscribe_read(['*'],Formatter) when is_function(Formatter,2)->
   ReadField =
@@ -244,14 +244,36 @@ compile_subscribe_read(['*'],Formatter) when is_function(Formatter,2)->
     end,
 
   Read =
-    fun(Object)->
-      maps:map(fun(Field,_)-> ReadField(Object,Field) end,Object)
+    fun(Updates, Fields)->
+      lists:foldl(
+        fun
+          (Field, Acc) when is_binary(Field)->
+            Value = ReadField(Fields, Field),
+            Acc#{ Field => Value };
+          (_Field, Acc)->
+            % Skip virtual fields
+            Acc
+        end,
+        #{},
+        Updates
+      )
     end,
   {['*'], Read};
 compile_subscribe_read(['*'],_Formatter)->
   Read =
-    fun(Object)->
-      maps:map(fun(Field,_)-> maps:get(Field,Object,none) end,Object)
+    fun(Updates, Fields)->
+      lists:foldl(
+        fun
+          (Field, Acc) when is_binary(Field)->
+            Value = maps:get(Field, Fields, none),
+            Acc#{ Field => Value };
+          (_Field, Acc)->
+            % Skip virtual fields
+            Acc
+        end,
+        #{},
+        Updates
+      )
     end,
   { ['*'], Read };
 
@@ -266,16 +288,15 @@ compile_subscribe_read(Fields,Formatter)->
     end,[],ReadMap),
 
   Read =
-    fun(Object)->
-      Changed = ordsets:from_list( maps:keys( Object )),
+    fun(Updates, Fields)->
       maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
-        case ordsets:intersection(Changed,Args) of
+        case ordsets:intersection(Updates, Args) of
           []->
             % If the changes are not among the function arguments list the field is not affected
             Acc;
           _->
             % The value has to be recalculated
-            Acc#{Alias=>Fun(Object)}
+            Acc#{Alias=>Fun(Fields)}
         end
       end,#{},ReadMap)
     end,
