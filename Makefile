@@ -1,10 +1,9 @@
-REBAR3 := $(shell which rebar3)
 
 compile:
-	$(REBAR3) compile
+	./rebar3 compile
 
 ct: compile
-	$(REBAR3) ct --spec=./test/module/test.spec
+	./rebar3 ct --spec=./test/module/test.spec
 
 clean_build:
 	@rm -rf _build
