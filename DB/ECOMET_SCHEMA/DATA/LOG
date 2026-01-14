@@ -1,0 +1,39 @@
+2026/01/14-11:01:57.089395 795ab3e00640                        Version: 2.0.36 (enterprise edition)
+2026/01/14-11:01:57.089432 795ab3e00640             Options.comparator: leveldb.InternalKeyComparator
+2026/01/14-11:01:57.089439 795ab3e00640      Options.create_if_missing: 0
+2026/01/14-11:01:57.089443 795ab3e00640        Options.error_if_exists: 0
+2026/01/14-11:01:57.089480 795ab3e00640        Options.paranoid_checks: 0
+2026/01/14-11:01:57.089484 795ab3e00640     Options.verify_compactions: 0
+2026/01/14-11:01:57.089488 795ab3e00640                    Options.env: 0x795a90005090
+2026/01/14-11:01:57.089492 795ab3e00640               Options.info_log: 0x795a9003bd50
+2026/01/14-11:01:57.089496 795ab3e00640      Options.write_buffer_size: 62914560
+2026/01/14-11:01:57.089500 795ab3e00640         Options.max_open_files: 1000
+2026/01/14-11:01:57.089504 795ab3e00640            Options.block_cache: 0x7959a000c830
+2026/01/14-11:01:57.089518 795ab3e00640             Options.block_size: 4096
+2026/01/14-11:01:57.089522 795ab3e00640       Options.block_size_steps: 16
+2026/01/14-11:01:57.089526 795ab3e00640 Options.block_restart_interval: 16
+2026/01/14-11:01:57.089545 795ab3e00640            Options.compression: 0
+2026/01/14-11:01:57.089550 795ab3e00640          Options.filter_policy: NULL
+2026/01/14-11:01:57.089555 795ab3e00640              Options.is_repair: false
+2026/01/14-11:01:57.089559 795ab3e00640         Options.is_internal_db: false
+2026/01/14-11:01:57.089562 795ab3e00640      Options.total_leveldb_mem: 0
+2026/01/14-11:01:57.089565 795ab3e00640  Options.block_cache_threshold: 33554432
+2026/01/14-11:01:57.089568 795ab3e00640  Options.limited_developer_mem: false
+2026/01/14-11:01:57.089571 795ab3e00640              Options.mmap_size: 0
+2026/01/14-11:01:57.089574 795ab3e00640       Options.delete_threshold: 1000
+2026/01/14-11:01:57.089577 795ab3e00640       Options.fadvise_willneed: false
+2026/01/14-11:01:57.089580 795ab3e00640      Options.tiered_slow_level: 0
+2026/01/14-11:01:57.089583 795ab3e00640     Options.tiered_fast_prefix: /home/alihan/Workspace/ecomet/DB/ECOMET_SCHEMA/DATA
+2026/01/14-11:01:57.089587 795ab3e00640     Options.tiered_slow_prefix: /home/alihan/Workspace/ecomet/DB/ECOMET_SCHEMA/DATA
+2026/01/14-11:01:57.089590 795ab3e00640                         crc32c: hardware
+2026/01/14-11:01:57.089593 795ab3e00640   Options.cache_object_warming: true
+2026/01/14-11:01:57.089596 795ab3e00640        Options.ExpiryActivated: false
+2026/01/14-11:01:57.089599 795ab3e00640          Options.expiry_module: NULL
+2026/01/14-11:01:57.089602 795ab3e00640                File cache size: 0
+2026/01/14-11:01:57.089605 795ab3e00640               Block cache size: 0
+2026/01/14-11:01:57.090197 795ab3e00640 Recovering log #3
+2026/01/14-11:01:57.107567 795ab3e00640 Level-0 table #5: started
+2026/01/14-11:01:57.108717 795ab3e00640 Level-0 table #5: 95400 bytes, 89 keys OK
+2026/01/14-11:01:57.110088 795ab3e00640 Delete type=3 #2
+2026/01/14-11:01:57.110125 795ab3e00640 Delete type=0 #3
+2026/01/14-11:01:57.112545 795ab3e00640 No cache warming file detected.

@@ -1,0 +1,39 @@
+2026/01/14-11:01:57.000385 795a6b400640                        Version: 2.0.36 (enterprise edition)
+2026/01/14-11:01:57.000431 795a6b400640             Options.comparator: leveldb.InternalKeyComparator
+2026/01/14-11:01:57.000434 795a6b400640      Options.create_if_missing: 0
+2026/01/14-11:01:57.000436 795a6b400640        Options.error_if_exists: 0
+2026/01/14-11:01:57.000438 795a6b400640        Options.paranoid_checks: 0
+2026/01/14-11:01:57.000440 795a6b400640     Options.verify_compactions: 0
+2026/01/14-11:01:57.000441 795a6b400640                    Options.env: 0x795a90005090
+2026/01/14-11:01:57.000443 795a6b400640               Options.info_log: 0x7959ac002a70
+2026/01/14-11:01:57.000445 795a6b400640      Options.write_buffer_size: 62914560
+2026/01/14-11:01:57.000447 795a6b400640         Options.max_open_files: 1000
+2026/01/14-11:01:57.000449 795a6b400640            Options.block_cache: 0x7959ac001be0
+2026/01/14-11:01:57.000451 795a6b400640             Options.block_size: 4096
+2026/01/14-11:01:57.000459 795a6b400640       Options.block_size_steps: 16
+2026/01/14-11:01:57.000461 795a6b400640 Options.block_restart_interval: 16
+2026/01/14-11:01:57.000463 795a6b400640            Options.compression: 0
+2026/01/14-11:01:57.000465 795a6b400640          Options.filter_policy: NULL
+2026/01/14-11:01:57.000467 795a6b400640              Options.is_repair: false
+2026/01/14-11:01:57.000470 795a6b400640         Options.is_internal_db: false
+2026/01/14-11:01:57.000472 795a6b400640      Options.total_leveldb_mem: 0
+2026/01/14-11:01:57.000474 795a6b400640  Options.block_cache_threshold: 33554432
+2026/01/14-11:01:57.000476 795a6b400640  Options.limited_developer_mem: false
+2026/01/14-11:01:57.000478 795a6b400640              Options.mmap_size: 0
+2026/01/14-11:01:57.000480 795a6b400640       Options.delete_threshold: 1000
+2026/01/14-11:01:57.000482 795a6b400640       Options.fadvise_willneed: false
+2026/01/14-11:01:57.000484 795a6b400640      Options.tiered_slow_level: 0
+2026/01/14-11:01:57.000485 795a6b400640     Options.tiered_fast_prefix: ./DB/ECOMET/OID/DATA
+2026/01/14-11:01:57.000487 795a6b400640     Options.tiered_slow_prefix: ./DB/ECOMET/OID/DATA
+2026/01/14-11:01:57.000488 795a6b400640                         crc32c: hardware
+2026/01/14-11:01:57.000490 795a6b400640   Options.cache_object_warming: true
+2026/01/14-11:01:57.000491 795a6b400640        Options.ExpiryActivated: false
+2026/01/14-11:01:57.000493 795a6b400640          Options.expiry_module: NULL
+2026/01/14-11:01:57.000494 795a6b400640                File cache size: 186642432
+2026/01/14-11:01:57.000496 795a6b400640               Block cache size: 188739584
+2026/01/14-11:01:57.001245 795a6b400640 Recovering log #3
+2026/01/14-11:01:57.017832 795a6b400640 Level-0 table #5: started
+2026/01/14-11:01:57.020021 795a6b400640 Level-0 table #5: 276 bytes, 6 keys OK
+2026/01/14-11:01:57.022527 795a6b400640 Delete type=3 #2
+2026/01/14-11:01:57.022566 795a6b400640 Delete type=0 #3
+2026/01/14-11:01:57.025688 795a6b400640 No cache warming file detected.

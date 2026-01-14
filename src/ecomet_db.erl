@@ -170,7 +170,7 @@ wait_dbs( DBs )->
 create( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
-  ?LOGINFO("[debug] params: ~p", [Params]),
+  LogRef = ecomet_log:create(Params),
   maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
     try
       TypeRef = M:create( type_params(T, Ps, OtherParams) ),
@@ -188,11 +188,12 @@ create( Params )->
         end, Acc),
         throw(E)
     end
-  end,#{}, TypesParams ).
+  end,#{}, maps:merge(TypesParams, LogRef) ).
 
 open( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
+  LogRef = ecomet_log:open(Params),
   maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
     try
       TypeRef = M:open( type_params(T, Ps, OtherParams) ),
@@ -209,7 +210,7 @@ open( Params )->
         end, Acc),
         throw(E)
     end
-  end,#{}, TypesParams ).
+  end,#{}, maps:merge(TypesParams, LogRef) ).
 
 type_params(Type, Params, #{dir := Dir} = OtherParams )->
   maps:merge( OtherParams#{ dir => Dir ++ "/" ++ atom_to_list(Type) }, maps:without([dir],Params) ).
