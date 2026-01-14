@@ -171,46 +171,50 @@ create( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
   LogRef = ecomet_log:create(Params),
-  maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
-    try
-      TypeRef = M:create( type_params(T, Ps, OtherParams) ),
-      Acc#{ T => {M,TypeRef}}
-    catch
-      _:E->
-        ?LOGERROR("~p type database create error ~p",[T,E]),
-        maps:map(fun(_T,{_M,_Ref})->
-          try
-            _M:close( _Ref ),
-            _M:remove( type_params(_T, maps:get(_T,TypesParams), OtherParams) )
-          catch
-            _:_E-> ?LOGERROR("~p type database rollback create error ~p",[_T,_E])
-          end
-        end, Acc),
-        throw(E)
-    end
-  end,#{}, maps:merge(TypesParams, LogRef) ).
+  Refs =
+    maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
+      try
+        TypeRef = M:create( type_params(T, Ps, OtherParams) ),
+        Acc#{ T => {M,TypeRef}}
+      catch
+        _:E->
+          ?LOGERROR("~p type database create error ~p",[T,E]),
+          maps:map(fun(_T,{_M,_Ref})->
+            try
+              _M:close( _Ref ),
+              _M:remove( type_params(_T, maps:get(_T,TypesParams), OtherParams) )
+            catch
+              _:_E-> ?LOGERROR("~p type database rollback create error ~p",[_T,_E])
+            end
+          end, Acc),
+          throw(E)
+      end
+    end,#{}, TypesParams ),
+  maps:merge(Refs, LogRef).
 
 open( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
   LogRef = ecomet_log:open(Params),
-  maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
-    try
-      TypeRef = M:open( type_params(T, Ps, OtherParams) ),
-      Acc#{ T => {M, TypeRef} }
-    catch
-      _:E->
-        ?LOGERROR("~p type database open error ~p",[T,E]),
-        maps:map(fun(_T,{_M,_Ref})->
-          try
-            _M:close( _Ref )
-          catch
-            _:_E-> ?LOGERROR("~p type database rollback open error ~p",[_T,_E])
-          end
-        end, Acc),
-        throw(E)
-    end
-  end,#{}, maps:merge(TypesParams, LogRef) ).
+  Refs =
+    maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
+      try
+        TypeRef = M:open( type_params(T, Ps, OtherParams) ),
+        Acc#{ T => {M, TypeRef} }
+      catch
+        _:E->
+          ?LOGERROR("~p type database open error ~p",[T,E]),
+          maps:map(fun(_T,{_M,_Ref})->
+            try
+              _M:close( _Ref )
+            catch
+              _:_E-> ?LOGERROR("~p type database rollback open error ~p",[_T,_E])
+            end
+          end, Acc),
+          throw(E)
+      end
+    end,#{}, maps:merge(TypesParams, LogRef) ),
+  maps:merge(Refs, LogRef).
 
 type_params(Type, Params, #{dir := Dir} = OtherParams )->
   maps:merge( OtherParams#{ dir => Dir ++ "/" ++ atom_to_list(Type) }, maps:without([dir],Params) ).
