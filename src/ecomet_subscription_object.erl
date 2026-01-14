@@ -1379,13 +1379,22 @@ notify(
 
 notify(
     Log = #{
+      oid := OID,
       action := update
     },
-    State0
+    State0 = #state{
+      objects = Objects
+    }
 )->
 
-  State1 = notify_update(Log, State0),
-  State = update_queries(Log, State1),
+  State =
+    case maps:is_key(OID, Objects) of
+      true ->
+        State1 = notify_update(Log, State0),
+        update_queries(Log, State1);
+      _->
+        State0
+    end,
 
   State;
 
@@ -1421,11 +1430,42 @@ notify(
 notify_update(
     Log = #{
       oid := OID,
-      fields := Fields = #{ <<".readgroups">> := _}
+      fields := Fields = #{ <<".readgroups">> := _ }
     },
-    State0
+    State0 = #state{
+      objects = Objects0
+    }
 )->
-  % TODO. Rights change
+  % TODO
+  Object0 = #object{
+    clients = ObjectClients0
+  }= maps:get(OID, Objects0),
+
+  Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
+
+  ObjectClients = maps:map(
+    fun(ClientID, #o_client{
+      access = HasAccess,
+      subs = ClientObjectSubs
+    })->
+      if
+        HasAccess ->
+          Client = maps:get(ClientID, _Clients),
+          [client_notify_subscription(
+            Log,
+            ClientID,
+            SubsID,
+            Updates,
+            Client,
+            Object
+          ) || SubsID <- ClientObjectSubs];
+        true->
+          ignore
+      end
+    end,
+    ObjectClients
+  ),
+
   State0;
 
 notify_update(
@@ -1498,6 +1538,40 @@ update_queries(
   queries_notify_create(maps:keys(Add), Log, State),
 
   State.
+clients_notify_delete(
+    ObjectClients,
+    Log = #{
+      oid := OID
+    },
+    #state{
+      clients = Clients,
+      objects = Objects
+    }
+)->
+  Object = maps:get(OID, Objects),
+  Updates = #{},
+  maps:foreach(
+    fun(ClientID, #o_client{
+      access = HasAccess,
+      subs = ClientObjectSubs
+    })->
+      if
+        HasAccess ->
+          Client = maps:get(ClientID, Clients),
+          [client_notify_subscription(
+            Log,
+            ClientID,
+            SubsID,
+            Updates,
+            Client,
+            Object
+          ) || SubsID <- ClientObjectSubs];
+        true->
+          ignore
+      end
+    end,
+    ObjectClients
+  ).
 
 clients_notify_update(
     Log = #{
@@ -1536,7 +1610,10 @@ clients_notify_update(
   ok.
 
 client_notify_subscription(
-    #{ self := Actor },
+    #{
+      self := Actor,
+      action := Action
+    },
     ClientID,
     SubsID,
     Updates,
@@ -1558,21 +1635,30 @@ client_notify_subscription(
     ClientID =:= Actor, NoFeedback =:= true->
       ignore;
     true->
-      SubscriptionUpdates =
-        case ordsets:is_element('*', SubsFields) of
-          true ->
-            Updates;
-          _->
-            ordsets:intersection(Updates, SubsFields)
-        end,
       if
-        length(SubscriptionUpdates) > 0->
+        Action =:= update; Action=:=light_update ->
+          SubscriptionUpdates =
+            case ordsets:is_element('*', SubsFields) of
+              true ->
+                Updates;
+              _->
+                ordsets:intersection(Updates, SubsFields)
+            end,
+          if
+            length(SubscriptionUpdates) > 0->
+              Update = Read( Updates, Fields ),
+              OID = ecomet_object:get_oid(Instance),
+              catch ClientID ! ?SUBSCRIPTION(SubsID, update, OID, Update);
+            true ->
+              ignore
+          end;
+        Action =:= create ->
           Update = Read( Updates, Fields ),
           OID = ecomet_object:get_oid(Instance),
-
-          catch ClientID ! ?SUBSCRIPTION(SubsID, update, OID, Update);
-        true ->
-          ignore
+          catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update);
+        Action =:= delete ->
+          OID = ecomet_object:get_oid(Instance),
+          catch ClientID ! ?SUBSCRIPTION(SubsID, delete, OID, #{})
       end
   end.
 
