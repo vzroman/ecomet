@@ -430,7 +430,7 @@ commit(Ref, Data, Delete, IndexLog)->
   ?LOGINFO("[debug] start commit!"),
   
   ?LOGINFO("[debug] reference: ~p", [Ref]),
-  ?LOGINFO("[debug] data: ~p", [Ref]),
+  ?LOGINFO("[debug] data: ~p", [Data]),
   ?LOGINFO("[debug] delete: ~p", [Delete]),
   ?LOGINFO("[debug] index log: ~p", [IndexLog]),
 
