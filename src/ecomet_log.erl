@@ -104,7 +104,7 @@ try_open(RootDirectory) ->
       write = maps:to_list(Write)
     },
   rollback_log(Reference),
-  Reference.
+  #{log => {?MODULE, Reference}}.
 
 open_database(Directory, Options) ->
   case rocksdb:open(Directory, maps:to_list(Options)) of
