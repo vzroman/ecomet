@@ -9,6 +9,12 @@
   close/1
 ]).
 
+-export([
+  prepare_rollback/3,
+  execute_rollback/1,
+  commit/2
+]).
+
 create(#{dir := RootDirectory}) ->
   try
     try_create(RootDirectory)
@@ -51,8 +57,8 @@ open(InvalidParams) ->
     #{params => InvalidParams}
   }).
 
-close(#reference{database = Log, directory = Directory}) ->
-  case rocksdb:close(Log) of
+close(#reference{database = DB, directory = Directory}) ->
+  case rocksdb:close(DB) of
     ok ->
       ok;
     {error, Error} ->
@@ -61,6 +67,35 @@ close(#reference{database = Log, directory = Directory}) ->
         #{error => Error, directory => Directory}
       })
   end.
+
+prepare_rollback(Ref, Write, Delete) ->
+  % TODO.
+  Data = encode_data(Write, Delete),
+  filter_data(Data, Ref).
+
+commit(
+  #reference{
+    database = Log,
+    write = Write
+  },
+  TRef
+) ->
+  case TRef of
+    ignore -> ok;
+    _Exists -> ok = rocksdb:write(Log, [{delete, TRef}], Write)
+  end.
+  
+execute_rollback(#reference{database = DB, read = Read, write = Write}) ->
+  rocksdb:fold(
+    DB,
+    fun({TRef, Rollback}, _Acc) ->
+      % TODO. Apply rollback.
+      rocksdb:write(DB, [{delete, TRef}], Write),
+      ok
+    end,
+    ok,
+    Read
+  ).
 
 try_create(RootDirectory) ->
   #{
@@ -103,7 +138,7 @@ try_open(RootDirectory) ->
       read = maps:to_list(Read),
       write = maps:to_list(Write)
     },
-  rollback_log(Reference),
+  % TODO. rollback_log(Reference),
   #{log => {?MODULE, Reference}}.
 
 open_database(Directory, Options) ->
@@ -144,12 +179,6 @@ open_database(Directory, Options) ->
         #{error => Error, directory => Directory}
       })
   end.
-
-rollback_log(#reference{database = Log, read = ReadParams, write = WriteParams}) ->
-  rocksdb:fold(Log,
-    fun({TRef, _Rollback}, _Acc) ->
-      rocksdb:write(Log, [{delete, TRef}], WriteParams)
-    end, ok, ReadParams).
 
 ensure_dir(Path) ->
   case filelib:is_file(Path) of
@@ -192,3 +221,29 @@ remove_recursive(Path) ->
           end
       end
   end.
+  
+encode_data(_Write = [{K, V} | Rest], Delete) ->
+  [{put, ?ENCODE_KEY(K), ?ENCODE_VALUE(V)} | encode_data(Rest, Delete)];
+encode_data(_Write = [], _Delete = [K | Rest]) ->
+  [{delete, ?ENCODE_KEY(K)} | encode_data([], Rest)];
+encode_data(_Write = [], _Delete = []) ->
+  [].
+
+filter_data([{put, K, V} | Rest], #reference{database = DB, read = Params} = Ref) ->
+  case rocksdb:get(DB, K, Params) of
+    {ok, V} ->
+      filter_data(Rest, Ref);
+    {ok, V0} ->
+      [{put, K, V0} | filter_data(Rest, Ref)];
+    _ ->
+      [{delete, K} | filter_data(Rest, Ref)]
+  end;
+filter_data([{delete, K} | Rest], #reference{database = DB, read = Params} = Ref) ->
+  case rocksdb:get(DB, K, Params) of
+    {ok, V} ->
+      [{put, K, V} | filter_data(Rest, Ref)];
+    _ ->
+      filter_data(Rest, Ref)
+  end;
+filter_data([], _Ref) ->
+  [].

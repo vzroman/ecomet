@@ -447,20 +447,29 @@ commit(Ref, Data, Delete, IndexLog)->
   % Order commit the heavier types go first
   CommitOrder = [ ramdisc, disc, ram ],
   Ordered = CommitOrder -- ( CommitOrder -- Storages ),
-  ?LOGINFO("[debug] storages ordered: ~p", [Ordered]),
-
-  [ begin
-      { Module, TRef } = maps:get(T, Ref),
-      TData = maps:get( T, Data, none ),
-      TDelete = maps:get( T, Delete, none ),
-      TIndexLog = maps:get( T, IndexLog, none ),
-      ?LOGINFO("[debug] T ref: ~p", [TRef]),
-      ?LOGINFO("[debug] T module: ~p", [Module]),
-      ?LOGINFO("[debug] T data: ~p", [TData]),
-      ?LOGINFO("[debug] T delete: ~p", [TDelete]),
-      ?LOGINFO("[debug] T index log: ~p", [TIndexLog]),
-      commit( TRef, Module, TData, TDelete, TIndexLog )
-    end || T <- Ordered],
+  
+  {LogModule, LogRef} = maps:get(log, Ref),
+  {ok, Unlock} = elock:lock(?LOCKS, LogRef, _IsShared = false, _Timeout = infinity),
+  try
+    Rollback = LogModule:prepare_rollback(Ref, Data, Delete, IndexLog),
+    try
+      [begin
+        {Module, TRef} = maps:get(T, Ref),
+        TData = maps:get(T, Data, none),
+        TDelete = maps:get(T, Delete, none),
+        TIndexLog = maps:get(T, IndexLog, none),
+        commit(TRef, Module, TData, TDelete, TIndexLog)
+       end || T <- Ordered]
+    catch
+      _Class:_Error:_Stack ->
+        % TODO. PRINT ERROR.
+        catch LogModule:execute_rollback(LogRef, Ref, LogCommit),
+        throw(todo)
+    end,
+    ok = LogModule:commit(LogRef, LogCommit)
+  after
+    Unlock()
+  end,
 
   ?LOGINFO("[debug] finish commit!"),
   ok.
@@ -524,9 +533,19 @@ commit(Ref, Module, Data, Delete, IndexLog)->
     Unlock()
   end.
 
-two_phase_commit( Ref, Data, Delete, IndexLog )->
-  % TODO
-  commit( Ref, Data, Delete, IndexLog ).
+% TODO. WIP. Not finished.
+two_phase_commit(Ref, Data, Delete, IndexLog) ->
+  {LogModule, LogRef} = maps:get(log, Ref),
+  TRef = LogModule:prepare(LogRef, Ref, Data, Delete, IndexLog),
+  try
+    ok = commit(Ref, Data, Delete, IndexLog),
+    ok = LogModule:commit(LogRef, TRef)
+  catch
+    _Class:_Error:_Stack ->
+      % TODO. Print error.
+      catch LogModule:rollback(LogRef, Ref, TRef),
+      throw(todo)
+  end.
 
 prepare_write( Write )->
   lists:foldl(fun( { #key{ type = T, storage = S, key = K }, V}, {DAcc, IAcc})->
