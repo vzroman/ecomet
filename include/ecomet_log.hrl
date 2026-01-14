@@ -10,8 +10,6 @@
 -define(DECODE_VALUE(V), binary_to_term(V)).
 -define(ENCODE_VALUE(V), term_to_binary(V)).
 
--define(GET_ENVIRONMENT(Key, Value, Default), application:get_env(Key, Value, Default)).
-
 -record(reference, {
   directory,
   database,

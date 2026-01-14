@@ -63,11 +63,13 @@ close(#reference{database = Log, directory = Directory}) ->
   end.
 
 try_create(RootDirectory) ->
-  #{
-    options := Options,
-    read := Read,
-    write := Write
-  } = ?GET_ENVIRONMENT(?MODULE, rocksdb, undefined),
+  {ok, #{
+    rocksdb := #{
+      options := Options,
+      read := Read,
+      write := Write
+    }
+  }} = ?ENV(log, undefined),
   ensure_dir(?LOG_DIRECTORY(RootDirectory)),
   Reference =
     #reference{
@@ -79,11 +81,13 @@ try_create(RootDirectory) ->
   #{log => {?MODULE, Reference}}.
 
 try_open(RootDirectory) ->
-  #{
-    options := Options,
-    read := Read,
-    write := Write
-  } = ?GET_ENVIRONMENT(?MODULE, rocksdb, undefined),
+  {ok, #{
+    rocksdb := #{
+      options := Options,
+      read := Read,
+      write := Write
+    }
+  }} = ?ENV(log, undefined),
   LogDirectory = ?LOG_DIRECTORY(RootDirectory),
   case filelib:is_dir(LogDirectory) of
     true ->
