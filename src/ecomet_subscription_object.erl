@@ -101,6 +101,20 @@
   oid
 }).
 
+-record(notification,{
+  oid,
+  client_id,
+  subs_id,
+  access,
+  actor,
+  action,
+  no_feedback,
+  updates,
+  subs_fields,
+  read,
+  fields
+}).
+
 %%=================================================================
 %%        API
 %%=================================================================
@@ -228,7 +242,7 @@ handle_cast({notify, Log}, State0) ->
     {noreply, State}
   catch
     _:E:S->
-      ?LOGERROR("remove object subscription error: ~p, stack ~p",[E,S]),
+      ?LOGERROR("notify error: log ~p, error ~p, stack ~p",[Log,E,S]),
       {noreply, State0}
   end;
 
@@ -599,12 +613,31 @@ init_query_client(
     set = Set
   } = maps:get(Ref, Queries),
 
-  QueryClient = maps:get(ClientID, QueryClients),
+  #q_client{
+    subs_id = SubsID,
+    usergroups = UG,
+    read = Read
+  } = maps:get(ClientID, QueryClients),
+
+  Notification = #notification{
+    client_id = ClientID,
+    subs_id = SubsID,
+    action = create,
+    read = Read
+  },
 
   ecomet_resultset:foldl(
     fun(OID, Acc)->
-      Object = maps:get(OID, Objects),
-      trigger_object_create(Object, ClientID, QueryClient),
+      #object{
+        fields = Fields = #{
+          <<".readgroups">> := RG
+        }
+      } = maps:get(OID, Objects),
+      send_notification(Notification#notification{
+        oid = OID,
+        access = check_access(UG, RG),
+        fields = Fields
+      }),
       Acc
     end,
     undefined,
@@ -701,7 +734,7 @@ init_new_object(OID, SubsFields, UpdateFields)->
     ),
 
   Fields0 = maps:with(maps:keys(InitFields), UpdateFields),
-  Fields =
+  Fields1 =
     case maps:keys(InitFields) -- maps:keys(Fields0) of
       [] ->
         Fields0;
@@ -711,6 +744,8 @@ init_new_object(OID, SubsFields, UpdateFields)->
           Fields0
         )
     end,
+
+  Fields = ecomet_query:query_object(Instance, Fields1),
   FieldsRef = maps:map(fun(_F,_V)->1 end, Fields),
 
   #object{
@@ -793,8 +828,11 @@ add_fields(
   FieldsRef =
     lists:foldl(
       fun
-        (<<".readgroups">>,Acc)->
-          % readgroups is always active
+        (Field,Acc) when
+          Field=:= <<".readgroups">>;
+          Field=:= <<".oid">>;
+          Field=:= object->
+          % system fields are always active
           Acc;
         (F, Acc)->
         case Acc of
@@ -828,8 +866,11 @@ remove_fields(
   FieldsRef =
     lists:foldl(
       fun
-        (<<".readgroups">>, Acc)->
-          % readgroups is always active
+        (Field, Acc) when
+          Field =:= <<".readgroups">>;
+          Field =:= <<".oid">>;
+          Field =:= object->
+          % system fields are always active
           Acc;
         (F, Acc)->
         case Acc of
@@ -1119,7 +1160,6 @@ init_subscription(
     }
 )->
   #object{
-    instance = Instance,
     fields = Fields,
     clients = #{
       ClientID := #o_client{
@@ -1128,27 +1168,25 @@ init_subscription(
     }
   } = maps:get(OID, Objects),
 
-  if
-    HasAccess =:= true ->
-      % Send create to the client
-      #client{
-        subs = #{
-          SubsID:=#o_sub{
-            read = Read
-          }
-        }
-      } = maps:get(ClientID, Clients),
+  % Send create to the client
+  #client{
+    subs = #{
+      SubsID:=#o_sub{
+        read = Read
+      }
+    }
+  } = maps:get(ClientID, Clients),
 
-      ActualValues = ecomet_query:query_object(Instance, Fields),
-      AllFields = ordsets:from_list(maps:keys(ActualValues)),
-      Update = Read(AllFields, ActualValues),
+  send_notification(#notification{
+    oid = OID,
+    client_id = ClientID,
+    subs_id = SubsID,
+    access = HasAccess,
+    action = create,
+    read = Read,
+    fields = Fields
 
-      catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update),
-      ok;
-    true->
-      % The the client has no access to the object
-      ignore
-  end.
+  }).
 
 add_query_to_objects(
     Ref,
@@ -1236,82 +1274,6 @@ remove_query_from_object(
     queries = Queries
   }.
 
-
-trigger_object_create(
-    #object{
-      instance = Instance,
-      fields = Fields = #{
-        <<".readgroups">> := RG
-      }
-    },
-    ClientID,
-    #q_client{
-      subs_id = SubsID,
-      read = Read,
-      usergroups = UG
-    }
-)->
-  case check_access(UG, RG) of
-    true->
-      ActualValues = ecomet_query:query_object(Instance, Fields),
-      AllFields = ordsets:from_list(maps:keys(ActualValues)),
-      Update = Read(AllFields, ActualValues),
-      OID = ecomet_object:get_oid(Instance),
-
-      catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update);
-    _->
-      % The the client has no access to the object
-      ignore
-  end.
-
-trigger_object_delete(
-    #object{
-      instance = Instance,
-      fields = #{
-        <<".readgroups">> := RG
-      }
-    },
-    ClientID,
-    #q_client{
-      subs_id = SubsID,
-      usergroups = UG
-    }
-)->
-  case check_access(UG, RG) of
-    true->
-      OID = ecomet_object:get_oid(Instance),
-      catch ClientID ! ?SUBSCRIPTION(SubsID, delete, OID, #{});
-    _->
-      % The the client has no access to the object
-      ignore
-  end.
-
-trigger_object_update(
-    Updates,
-    #object{
-      instance = Instance,
-      fields = Fields = #{
-        <<".readgroups">> := RG
-      }
-    },
-    ClientID,
-    #q_client{
-      subs_id = SubsID,
-      read = Read,
-      usergroups = UG
-    }
-)->
-  case check_access(UG, RG) of
-    true->
-      Update = Read( Updates, Fields ),
-      OID = ecomet_object:get_oid(Instance),
-
-      catch ClientID ! ?SUBSCRIPTION(SubsID, update, OID, Update);
-    _->
-      % The the client has no access to the object
-      ignore
-  end.
-
 global_set(
     Tag,
     State0 = #state{
@@ -1364,9 +1326,18 @@ notify(
       action := light_update,
       oid := OID
     },
-    State
+    State0 = #state{
+      objects = Objects
+    }
 )->
-  todo;
+  State =
+    case maps:is_key(OID, Objects) of
+      true ->
+        notify_update(Log, State0);
+      _->
+        State0
+    end,
+  State;
 
 notify(
     Log = #{
@@ -1409,13 +1380,13 @@ notify(
 )->
   case Objects of
     #{
-      OID := #object{
+      OID := Object = #object{
         clients = ObjectClients,
         queries = ObjectQueries
       }
     }->
-      queries_notify_delete(ObjectQueries, Log, State0),
-      clients_notify_delete(ObjectClients, Log, State0),
+      queries_notify(ObjectQueries, Log, State0),
+      clients_notify(Log, Object, State0),
 
       State1 = delete_object_from_queries(ObjectQueries, State0),
       State = delete_object_from_clients(ObjectClients, State1),
@@ -1427,46 +1398,155 @@ notify(
       State0
   end.
 
-notify_update(
-    Log = #{
-      oid := OID,
-      fields := Fields = #{ <<".readgroups">> := _ }
-    },
-    State0 = #state{
-      objects = Objects0
-    }
-)->
-  % TODO
-  Object0 = #object{
-    clients = ObjectClients0
-  }= maps:get(OID, Objects0),
-
-  Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
-
-  ObjectClients = maps:map(
-    fun(ClientID, #o_client{
-      access = HasAccess,
-      subs = ClientObjectSubs
-    })->
-      if
-        HasAccess ->
-          Client = maps:get(ClientID, _Clients),
-          [client_notify_subscription(
-            Log,
-            ClientID,
-            SubsID,
-            Updates,
-            Client,
-            Object
-          ) || SubsID <- ClientObjectSubs];
-        true->
-          ignore
-      end
-    end,
-    ObjectClients
-  ),
-
-  State0;
+%%notify_update(
+%%    Log = #{
+%%      oid := OID,
+%%      self := Actor,
+%%      fields := ObjectUpdates = #{
+%%        <<".readgroups">> := RG
+%%      }
+%%    },
+%%    State0 = #state{
+%%      objects = Objects0,
+%%      queries = Queries,
+%%      clients = Clients
+%%    }
+%%)->
+%%  Object0 = #object{
+%%    fields = Fields0 = #{
+%%      <<".readgroups">> := RG0
+%%    },
+%%    clients = ObjectClients0,
+%%    queries = ObjectQueries
+%%  }= maps:get(OID, Objects0),
+%%
+%%
+%%  Fields = maps:merge(
+%%    Fields0,
+%%    maps:with(maps:keys(Fields0), ObjectUpdates)
+%%  ),
+%%
+%%  Object1 = Object0#object{
+%%    fields = Fields
+%%  },
+%%
+%%
+%%  Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
+%%
+%%  %---------Notify Object Clients----------------------
+%%  ObjectClients =
+%%    maps:fold(
+%%      fun(
+%%          ClientID,
+%%          ObjectClient0 = #o_client{
+%%            access = HasAccess0,
+%%            subs = ClientObjectSubs
+%%          },
+%%          Acc
+%%      )->
+%%        Client = #client{
+%%          usergroups = UG
+%%        } = maps:get(ClientID, Clients),
+%%
+%%        HasAccess = check_access(UG, RG),
+%%        LogAction =
+%%          if
+%%            HasAccess =:= true, HasAccess0 =:= false ->
+%%              Log#{ action => create };
+%%            HasAccess =:= false, HasAccess0 =:= true ->
+%%              Log#{ action => delete };
+%%            true->
+%%              Log
+%%          end,
+%%
+%%        [client_notify_subscription(
+%%          LogAction,
+%%          ClientID,
+%%          SubsID,
+%%          Updates,
+%%          Client,
+%%          Object1
+%%        ) || SubsID <- ClientObjectSubs],
+%%
+%%        ObjectClient = ObjectClient0#o_client{
+%%          access = HasAccess
+%%        },
+%%        Acc#{
+%%          ClientID => ObjectClient
+%%        }
+%%      end,
+%%      #{},
+%%      ObjectClients0
+%%    ),
+%%
+%%  Object = Object1#object{
+%%    clients = ObjectClients
+%%  },
+%%
+%%
+%%  %--------Notify Query Clients--------------------------
+%%  [ begin
+%%      #query{
+%%        clients = QueryClients
+%%      } = maps:get(Q, Queries),
+%%
+%%      maps:foreach(
+%%        fun(
+%%            ClientID,
+%%            #q_client{
+%%              no_feedback = NoFeedback,
+%%              usergroups = UG
+%%            }
+%%        ) ->
+%%
+%%          if
+%%            ClientID =:= Actor, NoFeedback =:= true->
+%%              ignore;
+%%            true->
+%%              case {check_access(UG, RG0), check_access(UG, RG)} of
+%%                {}
+%%              end
+%%          end
+%%        end,
+%%        QueryClients
+%%      )
+%%    end || Q <- ObjectQueries ],
+%%
+%%
+%%  clients_notify_update(Log, Object, State),
+%%  queries_notify_update(Log, Object, State),
+%%
+%%
+%%  %-------------phase 1. notify delete---------------------
+%%
+%%
+%%
+%%
+%%
+%%  ObjectClients = maps:map(
+%%    fun(ClientID, #o_client{
+%%      access = HasAccess,
+%%      subs = ClientObjectSubs
+%%    })->
+%%      if
+%%        HasAccess ->
+%%          Client = maps:get(ClientID, _Clients),
+%%          [client_notify_subscription(
+%%            Log,
+%%            ClientID,
+%%            SubsID,
+%%            Updates,
+%%            Client,
+%%            Object
+%%          ) || SubsID <- ClientObjectSubs];
+%%        true->
+%%          ignore
+%%      end
+%%    end,
+%%    ObjectClients
+%%  ),
+%%
+%%  State0;
 
 notify_update(
     Log = #{
@@ -1499,14 +1579,13 @@ notify_update(
     objects = Objects
   },
 
-  clients_notify_update(Log, Object, State),
-  queries_notify_update(Log, Object, State),
+  clients_notify(Log, Object, State),
+  queries_notify(Log, Object, State),
 
   State.
 
 update_queries(
     Log = #{
-      action := update,
       oid := OID,
       fields := Fields
     },
@@ -1534,57 +1613,39 @@ update_queries(
     objects = Objects
   },
 
-  queries_notify_delete(maps:keys(Del), Log, State),
-  queries_notify_create(maps:keys(Add), Log, State),
+  LogDelete = Log#{ action => delete },
+  queries_notify(maps:keys(Del), LogDelete, State),
+
+  LogCreate = Log#{ action => create },
+  queries_notify(maps:keys(Add), LogCreate, State),
 
   State.
-clients_notify_delete(
-    ObjectClients,
-    Log = #{
-      oid := OID
-    },
-    #state{
-      clients = Clients,
-      objects = Objects
-    }
-)->
-  Object = maps:get(OID, Objects),
-  Updates = #{},
-  maps:foreach(
-    fun(ClientID, #o_client{
-      access = HasAccess,
-      subs = ClientObjectSubs
-    })->
-      if
-        HasAccess ->
-          Client = maps:get(ClientID, Clients),
-          [client_notify_subscription(
-            Log,
-            ClientID,
-            SubsID,
-            Updates,
-            Client,
-            Object
-          ) || SubsID <- ClientObjectSubs];
-        true->
-          ignore
-      end
-    end,
-    ObjectClients
-  ).
 
-clients_notify_update(
-    Log = #{
+clients_notify(
+    #{
+      oid := OID,
+      self := Actor,
+      action := Action,
       fields := ObjectUpdates
     },
-    Object = #object{
-      clients = ObjectClients
+    #object{
+      clients = ObjectClients,
+      fields = Fields
     },
     #state{
       clients = Clients
     }
 )->
   Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
+
+  Notification = #notification{
+    oid = OID,
+    actor = Actor,
+    action = Action,
+    updates = Updates,
+    fields = Fields
+  },
+
   maps:foreach(
     fun(ClientID, #o_client{
       access = HasAccess,
@@ -1592,15 +1653,26 @@ clients_notify_update(
     })->
       if
         HasAccess ->
-          Client = maps:get(ClientID, Clients),
-          [client_notify_subscription(
-            Log,
-            ClientID,
-            SubsID,
-            Updates,
-            Client,
-            Object
-          ) || SubsID <- ClientObjectSubs];
+          #client{
+            subs = ClientSubs
+          } = maps:get(ClientID, Clients),
+
+          [begin
+             #o_sub{
+               fields = SubsFields,
+               read = Read,
+               no_feedback = NoFeedback
+             } = maps:get(SubsID, ClientSubs),
+
+             send_notification(Notification#notification{
+               client_id = ClientID,
+               subs_id = SubsID,
+               access = true,
+               no_feedback = NoFeedback,
+               subs_fields = SubsFields,
+               read = Read
+            })
+           end || SubsID <- ClientObjectSubs];
         true->
           ignore
       end
@@ -1609,34 +1681,27 @@ clients_notify_update(
   ),
   ok.
 
-client_notify_subscription(
-    #{
-      self := Actor,
-      action := Action
-    },
-    ClientID,
-    SubsID,
-    Updates,
-    #client{
-      subs = ClientSubs
-    },
-    #object{
-      instance = Instance,
-      fields = Fields
-    }
-)->
-
-  #o_sub{
-    fields = SubsFields,
-    read = Read,
-    no_feedback = NoFeedback
-  } = maps:get(SubsID, ClientSubs),
+send_notification(#notification{
+  oid = OID,
+  client_id = ClientID,
+  subs_id = SubsID,
+  access = HasAccess,
+  actor = Actor,
+  action = Action,
+  no_feedback = NoFeedback,
+  updates = Updates,
+  subs_fields = SubsFields,
+  read = Read,
+  fields = Fields
+})->
   if
+    HasAccess =/= true ->
+      ignore;
     ClientID =:= Actor, NoFeedback =:= true->
       ignore;
     true->
       if
-        Action =:= update; Action=:=light_update ->
+        Action=:=light_update; Action =:= update ->
           SubscriptionUpdates =
             case ordsets:is_element('*', SubsFields) of
               true ->
@@ -1647,120 +1712,78 @@ client_notify_subscription(
           if
             length(SubscriptionUpdates) > 0->
               Update = Read( Updates, Fields ),
-              OID = ecomet_object:get_oid(Instance),
               catch ClientID ! ?SUBSCRIPTION(SubsID, update, OID, Update);
             true ->
               ignore
           end;
         Action =:= create ->
-          Update = Read( Updates, Fields ),
-          OID = ecomet_object:get_oid(Instance),
+          AllFields = ordsets:from_list(maps:keys(Fields)),
+          Update = Read(AllFields, Fields),
           catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update);
         Action =:= delete ->
-          OID = ecomet_object:get_oid(Instance),
           catch ClientID ! ?SUBSCRIPTION(SubsID, delete, OID, #{})
       end
-  end.
+  end,
+  ok.
 
-queries_notify_create(
+
+queries_notify(
     NotifyQueries,
     #{
       oid := OID,
-      self := Actor
+      self := Actor,
+      action := Action,
+      fields := ObjectUpdates
     },
     #state{
       objects = Objects,
       queries = Queries
     }
 )->
-  Object = maps:get(OID, Objects),
+  #object{
+    fields = Fields = #{
+      <<".readgroups">> := RG
+    }
+  } = maps:get(OID, Objects),
+
+  Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
+
+  Notification = #notification{
+    oid = OID,
+    actor = Actor,
+    action = Action,
+    fields = Fields,
+    updates = Updates
+  },
   [ begin
-      #query{ clients = Clients } = maps:get(Ref, Queries),
+      #query{
+        clients = Clients,
+        fields = SubsFields
+      } = maps:get(Ref, Queries),
       maps:foreach(
-        fun(ClientID, Client)->
-          if
-            ClientID =:= Actor, Client#q_client.no_feedback =:= true->
-              ignore;
-            true->
-              trigger_object_create(Object, ClientID, Client)
-          end
+        fun(
+            ClientID,
+            #q_client{
+              usergroups = UG,
+              subs_id = SubsID,
+              no_feedback = NoFeedback,
+              read = Read
+            }
+        )->
+          send_notification(Notification#notification{
+            client_id = ClientID,
+            subs_id = SubsID,
+            access = check_access(UG, RG),
+            no_feedback = NoFeedback,
+            read = Read,
+            subs_fields = SubsFields
+          })
         end,
         Clients
       )
     end || Ref <- NotifyQueries],
   ok.
 
-queries_notify_delete(
-    NotifyQueries,
-    #{
-      oid := OID,
-      self := Actor
-    },
-    #state{
-      objects = Objects,
-      queries = Queries
-    }
-)->
-  Object = maps:get(OID, Objects),
-  [begin
-     #query{ clients = Clients } = maps:get(Ref, Queries),
-     maps:foreach(
-       fun(ClientID, Client)->
-         if
-           ClientID =:= Actor, Client#q_client.no_feedback =:= true->
-             ignore;
-           true->
-             trigger_object_delete(Object, ClientID, Client)
-         end
-       end,
-       Clients
-     )
-   end || Ref <- NotifyQueries],
-  ok.
-
-queries_notify_update(
-    #{
-      self := Actor,
-      fields := ObjectUpdates
-    },
-    Object = #object{
-      queries = ObjectQueries
-    },
-    #state{
-      queries = Queries
-    }
-)->
-  Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
-  [begin
-     #query{
-       clients = QueryClients,
-       fields = SubsFields
-     } = maps:get(QRef, Queries),
-     QueryUpdates =
-       case ordsets:is_element('*', SubsFields) of
-         true ->
-           Updates;
-         _->
-           ordsets:intersection(Updates, SubsFields)
-       end,
-     if
-       length(QueryUpdates) > 0 ->
-         maps:foreach(
-           fun(ClientID, Client)->
-             if
-               ClientID =:= Actor, Client#q_client.no_feedback =:= true->
-                 ignore;
-               true->
-                 trigger_object_update(QueryUpdates, Object, ClientID, Client)
-             end
-           end,
-           QueryClients
-         );
-       true ->
-         ignore
-     end
-   end|| QRef <- ObjectQueries ],
-  ok.
 
 check_queries(OID, Fields, Queries, QueriesToCheck)->
   lists:foldl(
