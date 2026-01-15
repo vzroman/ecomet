@@ -10,11 +10,17 @@
 -define(DECODE_VALUE(V), binary_to_term(V)).
 -define(ENCODE_VALUE(V), term_to_binary(V)).
 
--record(reference, {
+-record(log, {
   directory,
   database,
   read,
   write
+}).
+
+-record(rollback, {
+  ref,
+  data,
+  index
 }).
 
 -endif.

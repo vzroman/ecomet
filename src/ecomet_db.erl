@@ -445,32 +445,28 @@ commit(Ref, Data, Delete, IndexLog)->
   % Order commit the heavier types go first
   CommitOrder = [ ramdisc, disc, ram ],
   Ordered = CommitOrder -- ( CommitOrder -- Storages ),
-  
-  [begin
-     {Module, TRef} = maps:get(T, Ref),
-     TData = maps:get(T, Data, none),
-     TDelete = maps:get(T, Delete, none),
-     TIndexLog = maps:get(T, IndexLog, none),
-     commit(TRef, Module, TData, TDelete, TIndexLog)
-   end || T <- Ordered],
-   
-%%  {LogModule, LogRef} = maps:get(log, Ref),
-%%  {ok, Unlock} = elock:lock(?LOCKS, LogRef, _IsShared = false, _Timeout = infinity),
-%%  try
-%%    Rollback = LogModule:prepare_rollback(Ref, Data, Delete, IndexLog),
-%%    try
-%%
-%%    catch
-%%      _Class:_Error:_Stack ->
-%%        % TODO. PRINT ERROR.
-%%        catch LogModule:execute_rollback(LogRef, Ref, LogCommit),
-%%        throw(todo)
-%%    end,
-%%    ok = LogModule:commit(LogRef, LogCommit)
-%%  after
-%%    Unlock()
-%%  end,
 
+  LogRef = maps:get(log, Ref),
+  Rollback = ecomet_log:prepare_rollback(LogRef, Ordered, Data, Delete, IndexLog),
+  try
+    [begin
+       {Module, TRef} = maps:get(T, Ref),
+       TData = maps:get(T, Data, none),
+       TDelete = maps:get(T, Delete, none),
+       TIndexLog = maps:get(T, IndexLog, none),
+       commit(TRef, Module, TData, TDelete, TIndexLog)
+     end || T <- Ordered],
+    ecomet_log:commit(LogRef, Rollback)
+  catch
+    _Class:Error:Stacktrace ->
+      ?LOGERROR("failed to commit, error: ~p, stacktrace: ~p", [Error, Stacktrace]),
+      ok = ecomet_log:rollback(Ref, Rollback),
+      throw({
+        commit_failed,
+        #{error => Error, stacktrace => Stacktrace}
+      })
+  end,
+  
   ?LOGINFO("[debug] finish commit!"),
   ok.
 

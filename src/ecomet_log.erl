@@ -10,8 +10,8 @@
 ]).
 
 -export([
-  prepare_rollback/3,
-  execute_rollback/1,
+  prepare_rollback/5,
+  rollback/2,
   commit/2
 ]).
 
@@ -57,7 +57,7 @@ open(InvalidParams) ->
     #{params => InvalidParams}
   }).
 
-close(#reference{database = DB, directory = Directory}) ->
+close(#log{database = DB, directory = Directory}) ->
   case rocksdb:close(DB) of
     ok ->
       ok;
@@ -68,34 +68,62 @@ close(#reference{database = DB, directory = Directory}) ->
       })
   end.
 
-prepare_rollback(Ref, Write, Delete) ->
-  % TODO.
-  Data = encode_data(Write, Delete),
-  filter_data(Data, Ref).
+prepare_rollback(
+  #log{
+    database = DB,
+    write = WriteParams
+  } = LogRef,
+  Ordered,
+  Write,
+  Delete,
+  IndexLog
+) ->
+  RollbackData =
+    [begin
+      StorageData = maps:get(StorageType, Write, none),
+      StorageDelete = maps:get(StorageType, Delete, none),
+      {StorageType, prepare_rollback_data(encode_data(StorageData, StorageDelete), LogRef)}
+     end || StorageType <- Ordered],
+  RollbackIndex = prepare_rollback_index(IndexLog),
+  TRef = ?ENCODE_KEY(make_ref()),
+  ok = rocksdb:write(DB, [{put, TRef, ?ENCODE_VALUE(RollbackData)}], WriteParams),
+  #rollback{
+    ref = TRef,
+    index = RollbackIndex
+  }.
+
+rollback(
+  #{
+    log := #log{
+      database = DB,
+      read = ReadParams,
+      write = WriteParams
+    }
+  } = Refs,
+  #rollback{ref = TRef, index = IndexLog}
+) ->
+  case rocksdb:get(DB, TRef, ReadParams) of
+    {ok, Rollback} ->
+      [begin
+        {Module, StorageRef} = maps:get(StorageType, Refs, undefined),
+        StorageIndexLog = maps:get(StorageType, IndexLog),
+        commit_single_storage(Module, StorageRef, StorageRollback, StorageIndexLog)
+       end || {StorageType, StorageRollback} <- ?DECODE_VALUE(Rollback)],
+      ok = rocksdb:write(DB, [{delete, TRef}], WriteParams);
+    _Ignore ->
+      ok
+  end.
 
 commit(
-  #reference{
+  #log{
     database = Log,
     write = Write
   },
-  TRef
+  #rollback{
+    ref = TRef
+  }
 ) ->
-  case TRef of
-    ignore -> ok;
-    _Exists -> ok = rocksdb:write(Log, [{delete, TRef}], Write)
-  end.
-  
-execute_rollback(#reference{database = DB, read = Read, write = Write}) ->
-  rocksdb:fold(
-    DB,
-    fun({TRef, Rollback}, _Acc) ->
-      % TODO. Apply rollback.
-      rocksdb:write(DB, [{delete, TRef}], Write),
-      ok
-    end,
-    ok,
-    Read
-  ).
+  ok = rocksdb:write(Log, [{delete, TRef}], Write).
 
 try_create(RootDirectory) ->
   #{
@@ -107,7 +135,7 @@ try_create(RootDirectory) ->
   } = ?ENV(log, undefined),
   ensure_dir(?LOG_DIRECTORY(RootDirectory)),
   Reference =
-    #reference{
+    #log{
       directory = RootDirectory,
       database = open_database(?LOG_DIRECTORY(RootDirectory), Options),
       read = maps:to_list(Read),
@@ -132,7 +160,7 @@ try_open(RootDirectory) ->
       throw({directory_not_exists, #{directory => LogDirectory}})
   end,
   Reference =
-    #reference{
+    #log{
       directory = RootDirectory,
       database = open_database(LogDirectory, Options),
       read = maps:to_list(Read),
@@ -221,29 +249,85 @@ remove_recursive(Path) ->
           end
       end
   end.
-  
+
+prepare_rollback_data([{put, K, V} | Rest], #log{database = DB, read = Params} = Ref) ->
+  case rocksdb:get(DB, K, Params) of
+    {ok, V} ->
+      prepare_rollback_data(Rest, Ref);
+    {ok, V0} ->
+      [{put, K, V0} | prepare_rollback_data(Rest, Ref)];
+    _ ->
+      [{delete, K} | prepare_rollback_data(Rest, Ref)]
+  end;
+prepare_rollback_data([{delete, K} | Rest], #log{database = DB, read = Params} = Ref) ->
+  case rocksdb:get(DB, K, Params) of
+    {ok, V} ->
+      [{put, K, V} | prepare_rollback_data(Rest, Ref)];
+    _ ->
+      prepare_rollback_data(Rest, Ref)
+  end;
+prepare_rollback_data([], _Ref) ->
+  [].
+
+prepare_rollback_index(IndexLog) ->
+  maps:fold(
+    fun(Storage, Indexes, Acc) ->
+      InverseIndexes =
+        [begin
+           NewValue =
+             case Value of
+               true -> false;
+               false -> true
+             end,
+           {Key, NewValue}
+         end || {Key, Value} <- Indexes],
+      Acc#{Storage => InverseIndexes}
+    end,
+    #{},
+    IndexLog
+  ).
+
 encode_data(_Write = [{K, V} | Rest], Delete) ->
   [{put, ?ENCODE_KEY(K), ?ENCODE_VALUE(V)} | encode_data(Rest, Delete)];
 encode_data(_Write = [], _Delete = [K | Rest]) ->
   [{delete, ?ENCODE_KEY(K)} | encode_data([], Rest)];
 encode_data(_Write = [], _Delete = []) ->
   [].
+  
+%% Only WRITE commit (no index, no delete)
+commit_single_storage(Ref, Module, Data, _IndexLog = none) ->
+  Module:write( Ref, Data);
 
-filter_data([{put, K, V} | Rest], #reference{database = DB, read = Params} = Ref) ->
-  case rocksdb:get(DB, K, Params) of
-    {ok, V} ->
-      filter_data(Rest, Ref);
-    {ok, V0} ->
-      [{put, K, V0} | filter_data(Rest, Ref)];
-    _ ->
-      [{delete, K} | filter_data(Rest, Ref)]
+%% WRITE and DELETE with NO INDEX
+commit_single_storage(Ref, Module, Data, _IndexLog = none) ->
+  Module:write( Ref, Data);
+
+%% DELETE commit with index
+commit_single_storage(Ref, Module, _Data = none, IndexLog) ->
+  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
+  try
+    case ecomet_index:prepare_write(Module, Ref, IndexLog) of
+      {IndexWrite, IndexDel} when length(IndexWrite) > 0 ->
+        Module:commit(Ref, IndexWrite, IndexDel);
+      {_IndexWrite, IndexDel} ->
+        Module:delete(Ref, IndexDel)
+    end
+  after
+    Unlock()
   end;
-filter_data([{delete, K} | Rest], #reference{database = DB, read = Params} = Ref) ->
-  case rocksdb:get(DB, K, Params) of
-    {ok, V} ->
-      [{put, K, V} | filter_data(Rest, Ref)];
-    _ ->
-      filter_data(Rest, Ref)
-  end;
-filter_data([], _Ref) ->
-  [].
+
+commit_single_storage(Ref, Module, Data, IndexLog) ->
+  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
+  try
+    {IndexWrite, IndexDel} = ecomet_index:prepare_write(Module, Ref, IndexLog),
+    if
+      length(IndexDel) =:= 0 ->
+        Module:write(Ref, Data ++ IndexWrite);
+      length(IndexWrite) =:= 0 ->
+        Module:commit(Ref, Data, IndexDel);
+      true ->
+        Module:commit(Ref, Data ++ IndexWrite, IndexDel)
+    end
+  after
+    Unlock()
+  end.
