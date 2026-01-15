@@ -409,9 +409,14 @@ commit(Ref, KVs, Keys) when map_size( Ref ) =:= 1->
   commit( Ref, Data, Delete, IndexLog );
 
 commit(Ref, KVs, Keys)->
-
+  ?LOGINFO("[debug][init] REF: ~p", [Ref]),
+  ?LOGINFO("[debug][init] KVs: ~p", [KVs]),
+  ?LOGINFO("[debug][init] KEYS: ~p", [Keys]),
   {Data, IndexLog} = prepare_write( KVs ),
+  ?LOGINFO("[debug][init] data: ~p", [Data]),
+  ?LOGINFO("[debug][init] index log: ~p", [IndexLog]),
   Delete = prepare_delete( Keys ),
+  ?LOGINFO("[debug][init] delete: ~p", [Delete]),
   case needs_log( Data, Delete ) of
     false -> commit( Ref, Data, Delete, IndexLog );
     true -> two_phase_commit( Ref, Data, Delete, IndexLog )
@@ -427,13 +432,6 @@ rollback( _Ref, _TRef )->
   ok.
 
 commit(Ref, Data, Delete, IndexLog)->
-  ?LOGINFO("[debug] start commit!"),
-  
-  ?LOGINFO("[debug] reference: ~p", [Ref]),
-  ?LOGINFO("[debug] data: ~p", [Data]),
-  ?LOGINFO("[debug] delete: ~p", [Delete]),
-  ?LOGINFO("[debug] index log: ~p", [IndexLog]),
-
   Storages = get_commit_storages( Data, Delete ),
   case Storages -- maps:keys( Ref ) of
     [] -> ok;
@@ -448,28 +446,30 @@ commit(Ref, Data, Delete, IndexLog)->
   CommitOrder = [ ramdisc, disc, ram ],
   Ordered = CommitOrder -- ( CommitOrder -- Storages ),
   
-  {LogModule, LogRef} = maps:get(log, Ref),
-  {ok, Unlock} = elock:lock(?LOCKS, LogRef, _IsShared = false, _Timeout = infinity),
-  try
-    Rollback = LogModule:prepare_rollback(Ref, Data, Delete, IndexLog),
-    try
-      [begin
-        {Module, TRef} = maps:get(T, Ref),
-        TData = maps:get(T, Data, none),
-        TDelete = maps:get(T, Delete, none),
-        TIndexLog = maps:get(T, IndexLog, none),
-        commit(TRef, Module, TData, TDelete, TIndexLog)
-       end || T <- Ordered]
-    catch
-      _Class:_Error:_Stack ->
-        % TODO. PRINT ERROR.
-        catch LogModule:execute_rollback(LogRef, Ref, LogCommit),
-        throw(todo)
-    end,
-    ok = LogModule:commit(LogRef, LogCommit)
-  after
-    Unlock()
-  end,
+  [begin
+     {Module, TRef} = maps:get(T, Ref),
+     TData = maps:get(T, Data, none),
+     TDelete = maps:get(T, Delete, none),
+     TIndexLog = maps:get(T, IndexLog, none),
+     commit(TRef, Module, TData, TDelete, TIndexLog)
+   end || T <- Ordered],
+   
+%%  {LogModule, LogRef} = maps:get(log, Ref),
+%%  {ok, Unlock} = elock:lock(?LOCKS, LogRef, _IsShared = false, _Timeout = infinity),
+%%  try
+%%    Rollback = LogModule:prepare_rollback(Ref, Data, Delete, IndexLog),
+%%    try
+%%
+%%    catch
+%%      _Class:_Error:_Stack ->
+%%        % TODO. PRINT ERROR.
+%%        catch LogModule:execute_rollback(LogRef, Ref, LogCommit),
+%%        throw(todo)
+%%    end,
+%%    ok = LogModule:commit(LogRef, LogCommit)
+%%  after
+%%    Unlock()
+%%  end,
 
   ?LOGINFO("[debug] finish commit!"),
   ok.
