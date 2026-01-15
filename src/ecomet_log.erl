@@ -6,7 +6,8 @@
 -export([
   create/1,
   open/1,
-  close/1
+  close/1,
+  remove/1
 ]).
 
 -export([
@@ -67,6 +68,13 @@ close(#log{database = DB, directory = Directory}) ->
         #{error => Error, directory => Directory}
       })
   end.
+  
+remove(#{dir := Directory}) ->
+ #{
+    destroy_attempts := Attempts,
+    rocksdb := #{options := Options}
+  } = ?ENV(log, undefined),
+  try_remove(Directory, Attempts, Options).
 
 prepare_rollback(
   #log{
@@ -168,6 +176,25 @@ try_open(RootDirectory) ->
     },
   % TODO. rollback_log(Reference),
   #{log => {?MODULE, Reference}}.
+
+try_remove(Directory, Attempts, Options) when Attempts > 0 ->
+  try
+    remove_recursive(Directory)
+  catch
+    _Class:Error:Stacktrace ->
+      ?LOGERROR("attempt to remove ~s failed, error: ~p, stack: ~p", [
+        Directory,
+        Error,
+        Stacktrace
+      ]),
+      try_remove(Directory, Attempts - 1, Options)
+  end;
+try_remove(Directory, 0, Options) ->
+  ?LOGERROR("failed to remove directory: ~p, options: ~p", [Directory, Options]),
+  throw({
+    remove_failed,
+    #{directory => Directory, options => Options}
+  }).
 
 open_database(Directory, Options) ->
   case rocksdb:open(Directory, maps:to_list(Options)) of

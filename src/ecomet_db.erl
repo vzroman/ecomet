@@ -456,7 +456,7 @@ commit(Ref, Data, Delete, IndexLog)->
        TIndexLog = maps:get(T, IndexLog, none),
        commit(TRef, Module, TData, TDelete, TIndexLog)
      end || T <- Ordered],
-    ecomet_log:commit(LogRef, Rollback)
+    ok = ecomet_log:commit(LogRef, Rollback)
   catch
     _Class:Error:Stacktrace ->
       ?LOGERROR("failed to commit, error: ~p, stacktrace: ~p", [Error, Stacktrace]),
