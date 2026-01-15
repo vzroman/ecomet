@@ -233,7 +233,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
 compile_subscribe_read([<<".oid">>],_Formatter)->
   {
     [],
-    fun(_Updates, _Fields)-> #{} end
+    fun(_Updates, _FieldsValues)-> #{} end
   };
 compile_subscribe_read(['*'],Formatter) when is_function(Formatter,2)->
   ReadField =
@@ -244,11 +244,11 @@ compile_subscribe_read(['*'],Formatter) when is_function(Formatter,2)->
     end,
 
   Read =
-    fun(Updates, Fields)->
+    fun(Updates, FieldsValues)->
       lists:foldl(
         fun
           (Field, Acc) when is_binary(Field)->
-            Value = ReadField(Fields, Field),
+            Value = ReadField(FieldsValues, Field),
             Acc#{ Field => Value };
           (_Field, Acc)->
             % Skip virtual fields
@@ -261,11 +261,11 @@ compile_subscribe_read(['*'],Formatter) when is_function(Formatter,2)->
   {['*'], Read};
 compile_subscribe_read(['*'],_Formatter)->
   Read =
-    fun(Updates, Fields)->
+    fun(Updates, FieldsValues)->
       lists:foldl(
         fun
           (Field, Acc) when is_binary(Field)->
-            Value = maps:get(Field, Fields, none),
+            Value = maps:get(Field, FieldsValues, none),
             Acc#{ Field => Value };
           (_Field, Acc)->
             % Skip virtual fields
@@ -288,7 +288,7 @@ compile_subscribe_read(Fields,Formatter)->
     end,[],ReadMap),
 
   Read =
-    fun(Updates, Fields)->
+    fun(Updates, FieldsValues)->
       maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
         case ordsets:intersection(Updates, Args) of
           []->
@@ -296,7 +296,7 @@ compile_subscribe_read(Fields,Formatter)->
             Acc;
           _->
             % The value has to be recalculated
-            Acc#{Alias=>Fun(Fields)}
+            Acc#{Alias=>Fun(FieldsValues)}
         end
       end,#{},ReadMap)
     end,
