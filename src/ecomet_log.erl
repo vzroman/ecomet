@@ -1,7 +1,16 @@
+%%% +--------------------------------------------------------------+
+%%% | Copyright (c) 2026, Faceplate LTD. All Rights Reserved.      |
+%%% | Author: Tokenov Alikhan, alikhantokenov@gmail.com            |
+%%% +--------------------------------------------------------------+
+
 -module(ecomet_log).
 
 -include("ecomet.hrl").
 -include("ecomet_log.hrl").
+
+%%% +--------------------------------------------------------------+
+%%% |                         Service API                          |
+%%% +--------------------------------------------------------------+
 
 -export([
   create/1,
@@ -10,6 +19,10 @@
   remove/1
 ]).
 
+%%% +--------------------------------------------------------------+
+%%% |                        Transaction API                       |
+%%% +--------------------------------------------------------------+
+
 -export([
   rollback_recovery/2,
   rollback_prepare/5,
@@ -17,6 +30,11 @@
   commit/2
 ]).
 
+%%% +--------------------------------------------------------------+
+%%% |                    Service API Implementation                |
+%%% +--------------------------------------------------------------+
+
+% TODO: API DOC
 create(#{dir := RootDirectory}) ->
   try
     try_create(RootDirectory)
@@ -37,7 +55,8 @@ create(InvalidParams) ->
     dir_required,
     #{params => InvalidParams}
   }).
-
+  
+% TODO: API DOC
 open(#{dir := RootDirectory}) ->
   try
     try_open(RootDirectory)
@@ -59,6 +78,7 @@ open(InvalidParams) ->
     #{params => InvalidParams}
   }).
 
+% TODO: API DOC
 close(#log{database = DB, directory = Directory}) ->
   case rocksdb:close(DB) of
     ok ->
@@ -70,6 +90,7 @@ close(#log{database = DB, directory = Directory}) ->
       })
   end.
   
+% TODO: API DOC
 remove(#{dir := Directory}) ->
  #{
     destroy_attempts := Attempts,
@@ -77,6 +98,11 @@ remove(#{dir := Directory}) ->
   } = ?ENV(log, undefined),
   try_remove(Directory, Attempts, Options).
 
+%%% +--------------------------------------------------------------+
+%%% |                 Transaction API Implementation               |
+%%% +--------------------------------------------------------------+
+
+% TODO: API DOC. REFACTORING.
 rollback_prepare(
   #log{
     database = DB,
@@ -100,29 +126,8 @@ rollback_prepare(
     ref = TRef,
     index = RollbackIndex
   }.
-
-rollback(
-  #{
-    log := #log{
-      database = DB,
-      read = ReadParams,
-      write = WriteParams
-    }
-  } = Refs,
-  #rollback{ref = TRef, index = IndexLog}
-) ->
-  case rocksdb:get(DB, TRef, ReadParams) of
-    {ok, Rollback} ->
-      [begin
-        {Module, StorageRef} = maps:get(StorageType, Refs, undefined),
-        StorageIndexLog = maps:get(StorageType, IndexLog),
-        commit_single_storage(Module, StorageRef, StorageRollback, StorageIndexLog)
-       end || {StorageType, StorageRollback} <- ?DECODE_VALUE(Rollback)],
-      ok = rocksdb:write(DB, [{delete, TRef}], WriteParams);
-    _Ignore ->
-      ok
-  end.
   
+% TODO: API DOC. REFACTORING.
 rollback_recovery(
   #log{
     database = DB,
@@ -145,6 +150,30 @@ rollback_recovery(
     ReadParams
   ).
 
+% TODO: API DOC. REFACTORING.
+rollback(
+  #{
+    log := #log{
+      database = DB,
+      read = ReadParams,
+      write = WriteParams
+    }
+  } = Refs,
+  #rollback{ref = TRef, index = IndexLog}
+) ->
+  case rocksdb:get(DB, TRef, ReadParams) of
+    {ok, Rollback} ->
+      [begin
+        {Module, StorageRef} = maps:get(StorageType, Refs, undefined),
+        StorageIndexLog = maps:get(StorageType, IndexLog),
+        commit_single_storage(Module, StorageRef, StorageRollback, StorageIndexLog)
+       end || {StorageType, StorageRollback} <- ?DECODE_VALUE(Rollback)],
+      ok = rocksdb:write(DB, [{delete, TRef}], WriteParams);
+    _Ignore ->
+      ok
+  end.
+
+% TODO: API DOC. REFACTORING.
 commit(
   #log{
     database = Log,
@@ -155,6 +184,10 @@ commit(
   }
 ) ->
   ok = rocksdb:write(Log, [{delete, TRef}], Write).
+
+%%% +--------------------------------------------------------------+
+%%% |                      Internal functions                      |
+%%% +--------------------------------------------------------------+
 
 try_create(RootDirectory) ->
   #{
@@ -344,6 +377,7 @@ encode_data(_Write = [], _Delete = [K | Rest]) ->
 encode_data(_Write = [], _Delete = []) ->
   [].
   
+% TODO. This is temporary placement of the function to test it. Move it to ecomet_db.
 %% Only WRITE commit (no index, no delete)
 commit_single_storage(Ref, Module, Data, _IndexLog = none) ->
   Module:write( Ref, Data);
