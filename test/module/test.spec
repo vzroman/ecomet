@@ -10,6 +10,7 @@
     %,ecomet_resultset_SUITE
     %,ecomet_query_SUITE
 
-    ecomet_subscription_pool_SUITE
+    %ecomet_subscription_pool_SUITE
+    ecomet_subscription_query_SUITE
 ]}.
 

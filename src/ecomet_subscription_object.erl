@@ -165,7 +165,7 @@ init_query(Ref, Subscription, InitSet)->
           Worker => ecomet_resultset:add_oid(OID, WorkerAcc0)
         }
       end,
-      _Acc = undefined,
+      _Acc = #{},
       InitSet
     ),
 
