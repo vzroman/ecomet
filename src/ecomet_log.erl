@@ -305,7 +305,7 @@ log_get(
   try
     case rocksdb:get(DB, TRef, ReadParams) of
       {ok, Result} ->
-        Result;
+        {ok, Result};
       _Ignore ->
         ok
     end
