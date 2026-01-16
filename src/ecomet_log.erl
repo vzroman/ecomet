@@ -108,10 +108,7 @@ remove(#{dir := Directory}) ->
 %%   3. Return rollback reference to be used by commit or rollback.
 rollback_prepare(
   #{
-    log := #log{
-      database = DB,
-      write = WriteParams
-    }
+    log := Log
   } = Refs,
   Ordered,
   Write,
@@ -121,7 +118,7 @@ rollback_prepare(
   RollbackData = [prepare_rollback_data(StorageType, Refs, Write, Delete) || StorageType <- Ordered],
   RollbackIndex = prepare_rollback_index(IndexLog),
   TRef = ?ENCODE_KEY(make_ref()),
-  ok = rocksdb:write(DB, [{put, TRef, ?ENCODE_VALUE(RollbackData)}], WriteParams),
+  log_write(Log, [{put, TRef, ?ENCODE_VALUE(RollbackData)}]),
   #rollback{
     ref = TRef,
     index = RollbackIndex
@@ -134,9 +131,8 @@ rollback_prepare(
 rollback_recovery(
   #log{
     database = DB,
-    read = ReadParams,
-    write = WriteParams
-  },
+    read = ReadParams
+  } = Log,
   Refs
 ) ->
   rocksdb:fold(
@@ -146,7 +142,7 @@ rollback_recovery(
         {Module, StorageRef} = maps:get(Type, Refs),
         ecomet_db:commit(StorageRef, Module, Write, Delete, _Index = none)
        end || #storage_rollback{type = Type, write = Write, delete = Delete} <- ?DECODE_VALUE(Rollback)],
-      ok = rocksdb:write(DB, [{delete, TRef}], WriteParams),
+      log_write(Log, [{delete, TRef}]),
       ok
     end,
     ok,
@@ -160,22 +156,18 @@ rollback_recovery(
 %%   4. If no rollback data exists, do nothing
 rollback(
   #{
-    log := #log{
-      database = DB,
-      read = ReadParams,
-      write = WriteParams
-    }
+    log := Log
   } = Refs,
   #rollback{ref = TRef, index = IndexLog}
 ) ->
-  case rocksdb:get(DB, TRef, ReadParams) of
+  case log_get(Log, TRef) of
     {ok, Rollback} ->
       [begin
         {Module, StorageRef} = maps:get(Type, Refs, undefined),
         Index = maps:get(Type, IndexLog, none),
         ecomet_db:commit(StorageRef, Module, Write, Delete, Index)
        end || #storage_rollback{type = Type, write = Write, delete = Delete} <- ?DECODE_VALUE(Rollback)],
-      ok = rocksdb:write(DB, [{delete, TRef}], WriteParams);
+      log_write(Log, [{delete, TRef}]);
     _Ignore ->
       ok
   end.
@@ -184,16 +176,13 @@ rollback(
 %% If all storages committed successfully.
 commit(
   #{
-    log := #log{
-      database = Log,
-      write = Write
-    }
+    log := Log
   },
   #rollback{
     ref = TRef
   }
 ) ->
-  ok = rocksdb:write(Log, [{delete, TRef}], Write).
+  log_write(Log, [{delete, TRef}]).
 
 %%% +--------------------------------------------------------------+
 %%% |                      Internal functions                      |
@@ -297,6 +286,47 @@ open_database(Directory, Options) ->
       ?LOGERROR("failed to open directory: ~s, error: ~p", [Directory, Error]),
       throw({
         database_open_failed,
+        #{error => Error, directory => Directory}
+      })
+  end.
+
+log_get(
+  #log{
+    directory = Directory,
+    database = DB,
+    read = ReadParams
+  },
+  TRef
+) ->
+  try
+    case rocksdb:get(DB, TRef, ReadParams) of
+      {ok, Result} ->
+        Result;
+      _Ignore ->
+        ok
+    end
+  catch
+    _:Error ->
+      throw({
+        log_read_failed,
+        #{error => Error, directory => Directory}
+      })
+  end.
+
+log_write(
+  #log{
+    directory = Directory,
+    database = DB,
+    write = Write
+  },
+  Data
+) ->
+  try
+    ok = rocksdb:write(DB, Data, Write)
+  catch
+    _:Error ->
+      throw({
+        log_write_failed,
         #{error => Error, directory => Directory}
       })
   end.
