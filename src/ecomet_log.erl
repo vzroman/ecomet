@@ -40,7 +40,7 @@ create(#{dir := RootDirectory}) ->
     try_create(RootDirectory)
   catch
     _Class:Error:Stacktrace ->
-      ?LOGERROR("failed to create log in directory ~ts, reason: ~p, stacktrace: ~p", [
+      ?LOGERROR("failed to create log in directory ~ts, error: ~p, stacktrace: ~p", [
         RootDirectory,
         Error,
         Stacktrace
@@ -62,7 +62,7 @@ open(#{dir := RootDirectory}) ->
     try_open(RootDirectory)
   catch
     _Class:Error:Stacktrace ->
-      ?LOGERROR("failed to open log in directory ~ts, reason: ~p, stacktrace: ~p", [
+      ?LOGERROR("failed to open log in directory ~ts, error: ~p, stacktrace: ~p", [
         RootDirectory,
         Error,
         Stacktrace
@@ -84,6 +84,10 @@ close(#log{database = DB, directory = Directory}) ->
     ok ->
       ok;
     {error, Error} ->
+      ?LOGERROR("failed to close log in directory: ~p, error: ~p", [
+        Directory,
+        Error
+      ]),
       throw({
         close_failed,
         #{error => Error, directory => Directory}
