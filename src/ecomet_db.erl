@@ -214,6 +214,7 @@ open( Params )->
           throw(E)
       end
     end,#{}, maps:merge(TypesParams, LogRef) ),
+  ok = ecomet_log:rollback_recovery(LogRef, Refs),
   maps:merge(Refs, LogRef).
 
 type_params(Type, Params, #{dir := Dir} = OtherParams )->

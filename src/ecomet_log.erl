@@ -11,7 +11,8 @@
 ]).
 
 -export([
-  prepare_rollback/5,
+  rollback_recovery/2,
+  rollback_prepare/5,
   rollback/2,
   commit/2
 ]).
@@ -76,7 +77,7 @@ remove(#{dir := Directory}) ->
   } = ?ENV(log, undefined),
   try_remove(Directory, Attempts, Options).
 
-prepare_rollback(
+rollback_prepare(
   #log{
     database = DB,
     write = WriteParams
@@ -121,6 +122,28 @@ rollback(
     _Ignore ->
       ok
   end.
+  
+rollback_recovery(
+  #log{
+    database = DB,
+    read = ReadParams,
+    write = WriteParams
+  },
+  Refs
+) ->
+  rocksdb:fold(
+    DB,
+    fun({TRef, Rollback}, _Acc)->
+      [begin
+        {Module, StorageRef} = maps:get(StorageType, Refs, undefined),
+        commit_single_storage(Module, StorageRef, StorageRollback, _IndexLog = none)
+       end || {StorageType, StorageRollback} <- ?DECODE_VALUE(Rollback)],
+      ok = rocksdb:write(DB, [{delete, TRef}], WriteParams),
+      ok
+    end,
+    ok,
+    ReadParams
+  ).
 
 commit(
   #log{
