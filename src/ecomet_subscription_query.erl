@@ -307,12 +307,29 @@ code_change(_OldVsn, State, _Extra) ->
 %  Add new subscription
 %-------------------------------------------------------------------
 add_subscription(
-    Subscription,
-    State0
+    Subscription = #subscribe{
+      client = ClientID,
+      id = SubsID
+    },
+    State0 = #state{
+      clients = Clients
+    }
 )->
 
-  State1 = add_query_client(Subscription, State0),
-  State = add_client(Subscription, State1),
+  State =
+    case Clients of
+      #{
+        ClientID := #client{
+          subs = #{
+            SubsID := _
+          }
+        }
+      } ->
+        throw({not_unique_subscription, SubsID});
+      _->
+        State1 = add_query_client(Subscription, State0),
+        add_client(Subscription, State1)
+    end,
 
   State.
 

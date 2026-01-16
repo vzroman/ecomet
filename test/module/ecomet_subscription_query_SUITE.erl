@@ -1,6 +1,7 @@
 
 -module(ecomet_subscription_query_SUITE).
 
+-include_lib("ecomet.hrl").
 -include_lib("ecomet_test.hrl").
 -include_lib("ecomet_subscription.hrl").
 
@@ -83,20 +84,23 @@ end_per_testcase(_,_Config)->
 %--------------------------------------------------------------
 transform_test(_Config) ->
 
-  meck:new(ecomet_subscription_pool, [passthrough]),
-  meck:expect(ecomet_subscription_pool, get_workers, fun ?MODULE:pool_get_workers/0),
-  meck:expect(ecomet_subscription_pool, get_size, fun ?MODULE:pool_get_size/0),
 
   meck:new(ecomet_query, [passthrough]),
   meck:expect(ecomet_query, get, fun ?MODULE:query_get/3),
 
+  {ok, _} = ecomet_subscription_sup:start_link(),
+  QueryServer = whereis(ecomet_subscription_query),
+  State0 = sys:get_state(QueryServer),
+  ?assertEqual(
+    #state{
+      queries = #{},
+      key2ref = #{},
+      clients = #{}
+    },
+    State0
+  ),
 
-  {ok, State0 = #state{
-    queries = #{},
-    key2ref = #{},
-    clients = #{}
-  }} = ecomet_subscription_query:init([]),
-
+  %---------------First subscription----------------------------
   Client1 = spawn_link(
     fun()->
       timer:sleep(infinity)
@@ -120,15 +124,17 @@ transform_test(_Config) ->
   },
   Key1 = ?key(Subscribe1),
 
+  ok = ecomet_subscription_query:subscribe(Subscribe1),
 
-  State1 = #state{
+  State1 = sys:get_state(QueryServer),
+  ?LOGDEBUG("State1 ~p",[State1]),
+
+  #state{
     queries = Queries1,
     key2ref = KeyRef1,
     clients = Clients1
-  } = ecomet_subscription_query:add_subscription(
-    Subscribe1,
-    State0
-  ),
+  } = State1,
+
   #{Key1 := Ref1} = KeyRef1,
 
   ?assertEqual(
@@ -149,7 +155,7 @@ transform_test(_Config) ->
   ),
 
   #{
-    Client1 := #client{
+    Client1 := C1 = #client{
       monitor_ref = Client1MRef
     }
   } = Clients1,
@@ -165,16 +171,137 @@ transform_test(_Config) ->
     Clients1
   ),
 
+  {monitors, Monitors1} = erlang:process_info(QueryServer, monitors),
+  ?assertEqual(true, lists:member({process,Client1}, Monitors1)),
+
+  %---------------Second subscription----------------------------
+  Client2 = spawn_link(
+    fun()->
+      timer:sleep(infinity)
+    end
+  ),
+  ok = ecomet_subscription_query:subscribe(Subscribe1#subscribe{
+    client = Client2
+  }),
+
+  State2 = sys:get_state(QueryServer),
+  ?LOGDEBUG("State2 ~p",[State2]),
+
+  #state{
+    queries = Queries2,
+    key2ref = KeyRef1,
+    clients = Clients2
+  } = State2,
+
+  ?assertEqual(
+    #{
+      Ref1 => Query1#query{
+        count = 2
+      }
+    },
+    Queries2
+  ),
+
+  #{
+    Client2 := C2 = #client{
+      monitor_ref = Client2MRef
+    }
+  } = Clients2,
+
+  ?assertEqual(
+    #{
+      Client1 => C1,
+      Client2 => #client{
+        monitor_ref = Client2MRef,
+        subs = #{
+          id1 => Ref1
+        }
+      }
+    },
+    Clients2
+  ),
+
+  {monitors, Monitors2} = erlang:process_info(QueryServer, monitors),
+  ?assertEqual(true, lists:member({process,Client1}, Monitors2)),
+  ?assertEqual(true, lists:member({process,Client2}, Monitors2)),
+
+  %---------------Third subscription----------------------------
+  ?assertEqual(
+    {error,{not_unique_subscription, id1}},
+    ecomet_subscription_query:subscribe(Subscribe1#subscribe{
+      client = Client2,
+      conditions = {<<"f2">>,'=', value2}
+    })
+  ),
+  Subscribe3 = Subscribe1#subscribe{
+    id = id2,
+    client = Client2,
+    conditions = {<<"f2">>,'=', value2}
+  },
+  Key3 = ?key(Subscribe3),
+
+  ok = ecomet_subscription_query:subscribe(Subscribe3),
+
+  State3 = sys:get_state(QueryServer),
+  ?LOGDEBUG("State3 ~p",[State3]),
+
+
+  #state{
+    queries = Queries3,
+    key2ref = KeyRef3,
+    clients = Clients3
+  } = State3,
+
+  #{Key3 := Ref3} = KeyRef3,
+  ?assertEqual(
+    #{
+      Key1 => Ref1,
+      Key3 => Ref3
+    },
+    KeyRef3
+  ),
+
+  #{
+    Ref3 := Query3 = #query{
+      key = Key3,
+      count = 1,
+      index = _
+    }
+  }= Queries3,
+
+  ?assertEqual(
+    #{
+      Ref1 => Query1#query{
+        count = 2
+      },
+      Ref3 => Query3
+    },
+    Queries3
+  ),
+
+  ?assertEqual(
+    #{
+      Client1 => #client{
+        monitor_ref = Client1MRef,
+        subs = #{
+          id1 => Ref1
+        }
+      },
+      Client2 => #client{
+        monitor_ref = Client2MRef,
+        subs = #{
+          id1 => Ref1,
+          id2 => Ref3
+        }
+      }
+    },
+    Clients3
+  ),
+
   ok.
 
 %--------------------------------------------------------------
 % Mocking
 %--------------------------------------------------------------
-pool_get_workers()->
-  [].
-
-pool_get_size()->
-  0.
-
 query_get(_DBs,_Fields, _Conditions)->
   ecomet_resultset:new().

@@ -346,7 +346,7 @@ add_subscription(
       }
     } ->
       % The subscription already exists, ignore
-      State0;
+      throw({not_unique_subscription, SubsID});
     _->
       State1 = add_object(Subscription, State0),
       State = add_client(Subscription, State1),
