@@ -150,7 +150,7 @@ rollback_recovery(
     fun({TRef, Rollback}, _Acc)->
       [begin
         {Module, StorageRef} = maps:get(StorageType, Refs, undefined),
-        commit_single_storage(StorageRef, Module, StorageRollback, _IndexLog = none)
+        ecomet_db:commit(StorageRef, Module, StorageRollback, _Delete = none, _IndexLog = none)
        end || {StorageType, StorageRollback} <- ?DECODE_VALUE(Rollback)],
       ok = rocksdb:write(DB, [{delete, TRef}], WriteParams),
       ok
@@ -179,7 +179,7 @@ rollback(
       [begin
         {Module, StorageRef} = maps:get(StorageType, Refs, undefined),
         StorageIndexLog = maps:get(StorageType, IndexLog),
-        commit_single_storage(StorageRef, Module, StorageRollback, StorageIndexLog)
+        ecomet_db:commit(StorageRef, Module, StorageRollback, _Delete = none, StorageIndexLog)
        end || {StorageType, StorageRollback} <- ?DECODE_VALUE(Rollback)],
       ok = rocksdb:write(DB, [{delete, TRef}], WriteParams);
     _Ignore ->
@@ -408,34 +408,3 @@ prepare_rollback_data(Module, StorageRef, Write, Delete) ->
     ),
     
   UndoDelete.
-  
-% TODO. This is temporary placement of the function to test it. Move it to ecomet_db.
-commit_single_storage(Ref, Module, Data, _IndexLog = none) ->
-  Module:write(Ref, Data);
-commit_single_storage(Ref, Module, _Data = none, IndexLog) ->
-  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
-  try
-    case ecomet_index:prepare_write(Module, Ref, IndexLog) of
-      {IndexWrite, IndexDel} when length(IndexWrite) > 0 ->
-        Module:commit(Ref, IndexWrite, IndexDel);
-      {_IndexWrite, IndexDel} ->
-        Module:delete(Ref, IndexDel)
-    end
-  after
-    Unlock()
-  end;
-commit_single_storage(Ref, Module, Data, IndexLog) ->
-  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
-  try
-    {IndexWrite, IndexDel} = ecomet_index:prepare_write(Module, Ref, IndexLog),
-    if
-      length(IndexDel) =:= 0 ->
-        Module:write(Ref, Data ++ IndexWrite);
-      length(IndexWrite) =:= 0 ->
-        Module:commit(Ref, Data, IndexDel);
-      true ->
-        Module:commit(Ref, Data ++ IndexWrite, IndexDel)
-    end
-  after
-    Unlock()
-  end.

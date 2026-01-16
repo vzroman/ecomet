@@ -63,6 +63,7 @@
 %%	TRANSACTION API
 -export([
   commit/3,
+  commit/5,
   commit1/3,
   commit2/2,
   rollback/2
@@ -529,19 +530,21 @@ commit(Ref, Module, Data, Delete, IndexLog)->
     Unlock()
   end.
 
-% TODO. WIP. Not finished.
 two_phase_commit(Ref, Data, Delete, IndexLog) ->
-  {LogModule, LogRef} = maps:get(log, Ref),
-  TRef = LogModule:prepare(LogRef, Ref, Data, Delete, IndexLog),
-  try
-    ok = commit(Ref, Data, Delete, IndexLog),
-    ok = LogModule:commit(LogRef, TRef)
-  catch
-    _Class:_Error:_Stack ->
-      % TODO. Print error.
-      catch LogModule:rollback(LogRef, Ref, TRef),
-      throw(todo)
-  end.
+  commit(Ref, Data, Delete, IndexLog).
+  
+% TODO. WIP. Not finished.
+%%  {LogModule, LogRef} = maps:get(log, Ref),
+%%  TRef = LogModule:prepare(LogRef, Ref, Data, Delete, IndexLog),
+%%  try
+%%    ok = commit(Ref, Data, Delete, IndexLog),
+%%    ok = LogModule:commit(LogRef, TRef)
+%%  catch
+%%    _Class:_Error:_Stack ->
+%%      % TODO. Print error.
+%%      catch LogModule:rollback(LogRef, Ref, TRef),
+%%      throw(todo)
+%%  end.
 
 prepare_write( Write )->
   lists:foldl(fun( { #key{ type = T, storage = S, key = K }, V}, {DAcc, IAcc})->
