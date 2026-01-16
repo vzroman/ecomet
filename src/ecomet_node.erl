@@ -51,7 +51,6 @@
 -export([
   check_id/1,
   check_name/1,
-  register_node/1,
   unregister_node/1
 ]).
 -endif.

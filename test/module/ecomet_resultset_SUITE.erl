@@ -182,7 +182,7 @@ end_per_suite(Config)->
     {<<".pattern">>,':=',PatternID4},
     {<<".pattern">>,':=',PatternID5}
   ]}),
-  ?BACKEND_STOP(30000),
+  ?BACKEND_STOP(),
   ok.
 
 init_per_group(search,Config)->

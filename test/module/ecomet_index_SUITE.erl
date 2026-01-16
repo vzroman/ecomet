@@ -109,7 +109,7 @@ init_per_suite(Config)->
 
 end_per_suite(Config)->
   ?SUITE_PROCESS_STOP(?GET(suite_pid,Config)),
-  ?BACKEND_STOP(30000),
+  ?BACKEND_STOP(),
   ok.
 
 init_per_group(concurrent,Config)->
