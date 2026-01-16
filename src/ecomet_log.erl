@@ -123,7 +123,8 @@ rollback_prepare(
       {Module, StorageRef} = maps:get(StorageType, Refs),
       StorageData = maps:get(StorageType, Write, none),
       StorageDelete = maps:get(StorageType, Delete, none),
-      {StorageType, prepare_rollback_data(Module, StorageRef, StorageData, StorageDelete)}
+      {StorageRollback, StorageDelete} = prepare_rollback_data(Module, StorageRef, StorageData, StorageDelete),
+      {StorageType, StorageRollback, StorageDelete}
      end || StorageType <- Ordered],
   RollbackIndex = prepare_rollback_index(IndexLog),
   TRef = ?ENCODE_KEY(make_ref()),
