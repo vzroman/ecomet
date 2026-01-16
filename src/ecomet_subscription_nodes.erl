@@ -39,7 +39,7 @@ get_active()->
 %%        OTP
 %%=================================================================
 start_link(IsActive)->
-  gen_server:start_link(?MODULE, [], [IsActive]).
+  gen_server:start_link(?MODULE, [IsActive], []).
 
 
 init([IsActive]) ->

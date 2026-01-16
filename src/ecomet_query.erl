@@ -31,7 +31,7 @@
   run_statements/1,
   get/3,get/4,
   subscribe/4,subscribe/5,
-  unsubscribe/1,
+  unsubscribe/1, unsubscribe/2,
   set/3,set/4,
   insert/2,
   delete/2,delete/3,
@@ -219,7 +219,7 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
 
   {Deps, Read} = compile_subscribe_read(Fields,Formatter),
 
-  ecomet_subscription:subscribe(#subscribe{
+  Subscribe = #subscribe{
     id = ID,
     client = Client,
     dbs = DBs,
@@ -227,7 +227,18 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
     deps = Deps,
     conditions = Conditions,
     params = Params
-  }).
+  },
+
+  case Conditions of
+    {<<".oid">>,'=',_} ->
+      ecomet_subscription_object:subscribe(Subscribe);
+    {<<".path">>,'=',Path} ->
+      ecomet_subscription_object:subscribe(Subscribe#subscribe{
+        conditions = {<<".oid">>,'=',?OID(Path)}
+      });
+    _->
+      ecomet_subscription_query:subscribe(Subscribe)
+  end.
 
 
 compile_subscribe_read([<<".oid">>],_Formatter)->
@@ -304,7 +315,10 @@ compile_subscribe_read(Fields,Formatter)->
 
 
 unsubscribe(ID)->
-  ecomet_subscription:unsubscribe( ID ).
+  unsubscribe(_Client = self(), ID).
+unsubscribe(Client, ID)->
+  ecomet_subscription_object:unsubscribe(Client, ID),
+  ecomet_subscription_query:unsubscribe(Client, ID).
 
 %%=====================================================================
 %%	SET

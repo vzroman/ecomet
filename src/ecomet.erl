@@ -172,8 +172,9 @@ get_sessions()->
 get_sessions(User)->
   ecomet_session:get_sessions(User).
 
-get_session_subscriptions( SessionId )->
-  ecomet_subscription:get_subscriptions( SessionId ).
+get_session_subscriptions( _SessionId )->
+  % TODO
+  [].
 
 spawn_session( Fun )->
   ecomet_user:spawn_session( Fun ).

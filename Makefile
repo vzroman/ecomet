@@ -8,6 +8,7 @@ ct: compile
 
 clean_build:
 	@rm -rf _build
+	@rm -rf rebar.lock
 
 clean_db:
 	@rm -rf DB

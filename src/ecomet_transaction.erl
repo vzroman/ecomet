@@ -321,7 +321,7 @@ tcommit( #state{ log = Log0, on_commit = OnCommit, owner = Owner })->
   Log =
     [ L#{ self => Owner } || L <- Log0 ],
 
-  catch ecomet_router:on_commit( Log ),
+  catch ecomet_subscription_object:on_commit( Log ),
 
   % Run on commit actions
   [ catch F() || F <- lists:reverse(OnCommit) ],

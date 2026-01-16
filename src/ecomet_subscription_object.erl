@@ -207,7 +207,7 @@ wait_confirm(_Rest, _Ref)->
 %%        OTP
 %%=================================================================
 start_link(N)->
-  gen_server:start_link(?NAME(N), ?MODULE, [], []).
+  gen_server:start_link({local,?NAME(N)}, ?MODULE, [], []).
 
 
 init([]) ->

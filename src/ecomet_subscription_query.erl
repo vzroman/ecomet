@@ -231,7 +231,7 @@ bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
 %%        OTP
 %%=================================================================
 start_link()->
-  gen_server:start_link(?MODULE, ?MODULE, [], []).
+  gen_server:start_link({local,?MODULE}, ?MODULE, [], []).
 
 
 init([]) ->
@@ -587,9 +587,6 @@ remove_client(
     }
   else
     _->
-      ?LOGWARNING("Attempt to remove not registered subscription client pid ~p, subscription id ~p",[
-        ClientID, SubsID
-      ]),
       State0
   end.
 
