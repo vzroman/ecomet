@@ -102,7 +102,10 @@ remove(#{dir := Directory}) ->
 %%% |                 Transaction API Implementation               |
 %%% +--------------------------------------------------------------+
 
-% TODO: API DOC. REFACTORING.
+%% Create rollback before applying upcoming commits.
+%%   1. For each storage, generate rollback data & index.
+%%   2. Store rollback payload in RocksDB under a new TRef so it can be replayed on DB open.
+%%   3. Return rollback reference to be used by commit or rollback.
 rollback_prepare(
   #{
     log := #log{
@@ -130,7 +133,10 @@ rollback_prepare(
     index = RollbackIndex
   }.
   
-% TODO: API DOC. REFACTORING.
+%% Recovery from log when DB opened.
+%%   1. Scan all rollback entries in RocksDB Log.
+%%   2. Re-apply each storage rollback (no index log available during recovery).
+%%   3. Delete the rollback entry after it is successfully executed.
 rollback_recovery(
   #log{
     database = DB,
@@ -153,7 +159,11 @@ rollback_recovery(
     ReadParams
   ).
 
-% TODO: API DOC. REFACTORING.
+%% Rollback a previously stored transaction.
+%%   1. Load rollback data from RocksDB using TRef
+%%   2. For each storage, apply its rollback via storage commit
+%%   3. Remove the rollback entry from RocksDB once finished
+%%   4. If no rollback data exists, do nothing
 rollback(
   #{
     log := #log{
@@ -176,7 +186,8 @@ rollback(
       ok
   end.
 
-% TODO: API DOC. REFACTORING.
+%% Finalize commit by removing rollback entry.
+%% If all storages committed successfully.
 commit(
   #{
     log := #log{
