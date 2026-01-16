@@ -375,7 +375,7 @@ prepare_rollback_data(Module, StorageRef, Write, Delete) ->
   % Returns: [{Key1, Value1}, ..., {KeyN, ValueN}]
   ReadData = maps:from_list(Module:read(StorageRef, Keys)),
   
-  % Undo for 'write' / 'put' operation
+  % Undo for 'write' operation
   UndoWrite =
     lists:foldl(
       fun({Key, Value}, Acc) ->
@@ -383,9 +383,9 @@ prepare_rollback_data(Module, StorageRef, Write, Delete) ->
           #{Key := Value} ->
             Acc;
           #{Key := ReadValue} ->
-            [{put, ?ENCODE_KEY(Key), ?ENCODE_VALUE(ReadValue)} | Acc];
+            [{Key, ReadValue} | Acc];
           _Other ->
-            [{delete, ?ENCODE_KEY(Key)}]
+            [Key | Acc]
         end
       end,
       [],
@@ -398,7 +398,7 @@ prepare_rollback_data(Module, StorageRef, Write, Delete) ->
       fun(Key, Acc) ->
         case maps:find(Key, ReadData) of
           #{Key := ReadValue} ->
-            [{put, ?ENCODE_KEY(Key), ?ENCODE_VALUE(ReadValue)} | Acc];
+            [{Key, ReadValue} | Acc];
           _Other ->
             Acc
         end
@@ -407,4 +407,12 @@ prepare_rollback_data(Module, StorageRef, Write, Delete) ->
       Delete
     ),
     
-  UndoDelete.
+  lists:partition(
+    fun
+      ({_Key, _Value}) ->
+        true;
+      (_) ->
+        false
+    end,
+    UndoDelete
+  ).
