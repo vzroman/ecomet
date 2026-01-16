@@ -23,4 +23,10 @@
   index
 }).
 
+-record(storage_rollback, {
+  type,
+  write,
+  delete
+}).
+
 -endif.

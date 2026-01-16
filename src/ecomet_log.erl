@@ -118,14 +118,7 @@ rollback_prepare(
   Delete,
   IndexLog
 ) ->
-  RollbackData =
-    [begin
-      {Module, StorageRef} = maps:get(StorageType, Refs),
-      StorageData = maps:get(StorageType, Write, none),
-      StorageDelete = maps:get(StorageType, Delete, none),
-      {StorageRollback, StorageDelete} = prepare_rollback_data(Module, StorageRef, StorageData, StorageDelete),
-      {StorageType, StorageRollback, StorageDelete}
-     end || StorageType <- Ordered],
+  RollbackData = [prepare_rollback_data(StorageType, Refs, Write, Delete) || StorageType <- Ordered],
   RollbackIndex = prepare_rollback_index(IndexLog),
   TRef = ?ENCODE_KEY(make_ref()),
   ok = rocksdb:write(DB, [{put, TRef, ?ENCODE_VALUE(RollbackData)}], WriteParams),
@@ -150,9 +143,9 @@ rollback_recovery(
     DB,
     fun({TRef, Rollback}, _Acc)->
       [begin
-        {Module, StorageRef} = maps:get(StorageType, Refs, undefined),
-        ecomet_db:commit(StorageRef, Module, StorageRollback, _Delete = none, _IndexLog = none)
-       end || {StorageType, StorageRollback} <- ?DECODE_VALUE(Rollback)],
+        {Module, StorageRef} = maps:get(Type, Refs),
+        ecomet_db:commit(StorageRef, Module, Write, Delete, _Index = none)
+       end || #storage_rollback{type = Type, write = Write, delete = Delete} <- ?DECODE_VALUE(Rollback)],
       ok = rocksdb:write(DB, [{delete, TRef}], WriteParams),
       ok
     end,
@@ -178,10 +171,10 @@ rollback(
   case rocksdb:get(DB, TRef, ReadParams) of
     {ok, Rollback} ->
       [begin
-        {Module, StorageRef} = maps:get(StorageType, Refs, undefined),
-        StorageIndexLog = maps:get(StorageType, IndexLog),
-        ecomet_db:commit(StorageRef, Module, StorageRollback, _Delete = none, StorageIndexLog)
-       end || {StorageType, StorageRollback} <- ?DECODE_VALUE(Rollback)],
+        {Module, StorageRef} = maps:get(Type, Refs, undefined),
+        Index = maps:get(Type, IndexLog, none),
+        ecomet_db:commit(StorageRef, Module, Write, Delete, Index)
+       end || #storage_rollback{type = Type, write = Write, delete = Delete} <- ?DECODE_VALUE(Rollback)],
       ok = rocksdb:write(DB, [{delete, TRef}], WriteParams);
     _Ignore ->
       ok
@@ -368,9 +361,13 @@ prepare_rollback_index(IndexLog) ->
     IndexLog
   ).
 
-prepare_rollback_data(Module, StorageRef, Write, Delete) ->
-  WriteKeys = [K || {K, _} <- Write],
-  Keys = lists:usort(WriteKeys ++ Delete),
+prepare_rollback_data(StorageType, Refs, Write, Delete) ->
+  {Module, StorageRef} = maps:get(StorageType, Refs),
+  StorageWrite = maps:get(StorageType, Write, none),
+  StorageDelete = maps:get(StorageType, Delete, none),
+  
+  WriteKeys = [K || {K, _} <- StorageWrite],
+  Keys = lists:usort(WriteKeys ++ StorageDelete),
   
   % Read old values from storage, preserves the key order
   % Returns: [{Key1, Value1}, ..., {KeyN, ValueN}]
@@ -390,7 +387,7 @@ prepare_rollback_data(Module, StorageRef, Write, Delete) ->
         end
       end,
       [],
-      Write
+      StorageWrite
     ),
   
   % Undo for 'delete' operation
@@ -405,15 +402,22 @@ prepare_rollback_data(Module, StorageRef, Write, Delete) ->
         end
       end,
       UndoWrite,
-      Delete
+      StorageDelete
     ),
-    
-  lists:partition(
-    fun
-      ({_Key, _Value}) ->
-        true;
-      (_) ->
-        false
-    end,
-    UndoDelete
-  ).
+  
+  {Writes, Deletes} =
+    lists:partition(
+      fun
+        ({_Key, _Value}) ->
+          true;
+        (_) ->
+          false
+      end,
+      UndoDelete
+    ),
+
+  #storage_rollback{
+    type = StorageType,
+    write = Writes,
+    delete = Deletes
+  }.
