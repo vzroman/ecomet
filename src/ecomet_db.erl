@@ -170,7 +170,7 @@ wait_dbs( DBs )->
 create( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
-  LogRef = ecomet_log:create(Params),
+  Log = ecomet_log:create(Params),
   Refs =
     maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
       try
@@ -190,12 +190,12 @@ create( Params )->
           throw(E)
       end
     end,#{}, TypesParams ),
-  maps:merge(Refs, LogRef).
+  Refs#{log => Log}.
 
 open( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
-  LogRef = ecomet_log:open(Params),
+  Log = ecomet_log:open(Params),
   Refs =
     maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
       try
@@ -213,9 +213,9 @@ open( Params )->
           end, Acc),
           throw(E)
       end
-    end,#{}, maps:merge(TypesParams, LogRef) ),
-  ok = ecomet_log:rollback_recovery(LogRef, Refs),
-  maps:merge(Refs, LogRef).
+    end,#{}, maps:merge(TypesParams, Log) ),
+  ok = ecomet_log:rollback_recovery(Log, Refs),
+  Refs#{log => Log}.
 
 type_params(Type, Params, #{dir := Dir} = OtherParams )->
   maps:merge( OtherParams#{ dir => Dir ++ "/" ++ atom_to_list(Type) }, maps:without([dir],Params) ).
@@ -447,8 +447,7 @@ commit(Ref, Data, Delete, IndexLog)->
   CommitOrder = [ ramdisc, disc, ram ],
   Ordered = CommitOrder -- ( CommitOrder -- Storages ),
 
-  LogRef = maps:get(log, Ref),
-  Rollback = ecomet_log:prepare_rollback(LogRef, Ordered, Data, Delete, IndexLog),
+  Rollback = ecomet_log:rollback_prepare(Ref, Ordered, Data, Delete, IndexLog),
   try
     [begin
        {Module, TRef} = maps:get(T, Ref),
@@ -457,7 +456,7 @@ commit(Ref, Data, Delete, IndexLog)->
        TIndexLog = maps:get(T, IndexLog, none),
        commit(TRef, Module, TData, TDelete, TIndexLog)
      end || T <- Ordered],
-    ok = ecomet_log:commit(LogRef, Rollback)
+    ok = ecomet_log:commit(Ref, Rollback)
   catch
     _Class:Error:Stacktrace ->
       ?LOGERROR("failed to commit, error: ~p, stacktrace: ~p", [Error, Stacktrace]),

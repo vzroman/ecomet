@@ -104,10 +104,12 @@ remove(#{dir := Directory}) ->
 
 % TODO: API DOC. REFACTORING.
 rollback_prepare(
-  #log{
-    database = DB,
-    write = WriteParams
-  } = LogRef,
+  #{
+    log := #log{
+      database = DB,
+      write = WriteParams
+    }
+  } = Refs,
   Ordered,
   Write,
   Delete,
@@ -115,9 +117,10 @@ rollback_prepare(
 ) ->
   RollbackData =
     [begin
+      {Module, StorageRef} = maps:get(StorageType, Refs),
       StorageData = maps:get(StorageType, Write, none),
       StorageDelete = maps:get(StorageType, Delete, none),
-      {StorageType, prepare_rollback_data(encode_data(StorageData, StorageDelete), LogRef)}
+      {StorageType, prepare_rollback_data(Module, StorageRef, StorageData, StorageDelete)}
      end || StorageType <- Ordered],
   RollbackIndex = prepare_rollback_index(IndexLog),
   TRef = ?ENCODE_KEY(make_ref()),
@@ -141,7 +144,7 @@ rollback_recovery(
     fun({TRef, Rollback}, _Acc)->
       [begin
         {Module, StorageRef} = maps:get(StorageType, Refs, undefined),
-        commit_single_storage(Module, StorageRef, StorageRollback, _IndexLog = none)
+        commit_single_storage(StorageRef, Module, StorageRollback, _IndexLog = none)
        end || {StorageType, StorageRollback} <- ?DECODE_VALUE(Rollback)],
       ok = rocksdb:write(DB, [{delete, TRef}], WriteParams),
       ok
@@ -166,7 +169,7 @@ rollback(
       [begin
         {Module, StorageRef} = maps:get(StorageType, Refs, undefined),
         StorageIndexLog = maps:get(StorageType, IndexLog),
-        commit_single_storage(Module, StorageRef, StorageRollback, StorageIndexLog)
+        commit_single_storage(StorageRef, Module, StorageRollback, StorageIndexLog)
        end || {StorageType, StorageRollback} <- ?DECODE_VALUE(Rollback)],
       ok = rocksdb:write(DB, [{delete, TRef}], WriteParams);
     _Ignore ->
@@ -175,9 +178,11 @@ rollback(
 
 % TODO: API DOC. REFACTORING.
 commit(
-  #log{
-    database = Log,
-    write = Write
+  #{
+    log := #log{
+      database = Log,
+      write = Write
+    }
   },
   #rollback{
     ref = TRef
@@ -333,25 +338,6 @@ remove_recursive(Path) ->
       end
   end.
 
-prepare_rollback_data([{put, K, V} | Rest], #log{database = DB, read = Params} = Ref) ->
-  case rocksdb:get(DB, K, Params) of
-    {ok, V} ->
-      prepare_rollback_data(Rest, Ref);
-    {ok, V0} ->
-      [{put, K, V0} | prepare_rollback_data(Rest, Ref)];
-    _ ->
-      [{delete, K} | prepare_rollback_data(Rest, Ref)]
-  end;
-prepare_rollback_data([{delete, K} | Rest], #log{database = DB, read = Params} = Ref) ->
-  case rocksdb:get(DB, K, Params) of
-    {ok, V} ->
-      [{put, K, V} | prepare_rollback_data(Rest, Ref)];
-    _ ->
-      prepare_rollback_data(Rest, Ref)
-  end;
-prepare_rollback_data([], _Ref) ->
-  [].
-
 prepare_rollback_index(IndexLog) ->
   maps:fold(
     fun(Storage, Indexes, Acc) ->
@@ -370,23 +356,51 @@ prepare_rollback_index(IndexLog) ->
     IndexLog
   ).
 
-encode_data(_Write = [{K, V} | Rest], Delete) ->
-  [{put, ?ENCODE_KEY(K), ?ENCODE_VALUE(V)} | encode_data(Rest, Delete)];
-encode_data(_Write = [], _Delete = [K | Rest]) ->
-  [{delete, ?ENCODE_KEY(K)} | encode_data([], Rest)];
-encode_data(_Write = [], _Delete = []) ->
-  [].
+prepare_rollback_data(Module, StorageRef, Write, Delete) ->
+  WriteKeys = [K || {K, _} <- Write],
+  Keys = lists:usort(WriteKeys ++ Delete),
+  
+  % Read old values from storage, preserves the key order
+  % Returns: [{Key1, Value1}, ..., {KeyN, ValueN}]
+  ReadData = maps:from_list(Module:read(StorageRef, Keys)),
+  
+  % Undo for 'write' / 'put' operation
+  UndoWrite =
+    lists:foldl(
+      fun({Key, Value}, Acc) ->
+        case ReadData of
+          #{Key := Value} ->
+            Acc;
+          #{Key := ReadValue} ->
+            [{put, ?ENCODE_KEY(Key), ?ENCODE_VALUE(ReadValue)} | Acc];
+          _Other ->
+            [{delete, ?ENCODE_KEY(Key)}]
+        end
+      end,
+      [],
+      Write
+    ),
+  
+  % Undo for 'delete' operation
+  UndoDelete =
+    lists:foldl(
+      fun(Key, Acc) ->
+        case maps:find(Key, ReadData) of
+          #{Key := ReadValue} ->
+            [{put, ?ENCODE_KEY(Key), ?ENCODE_VALUE(ReadValue)} | Acc];
+          _Other ->
+            Acc
+        end
+      end,
+      UndoWrite,
+      Delete
+    ),
+    
+  UndoDelete.
   
 % TODO. This is temporary placement of the function to test it. Move it to ecomet_db.
-%% Only WRITE commit (no index, no delete)
 commit_single_storage(Ref, Module, Data, _IndexLog = none) ->
-  Module:write( Ref, Data);
-
-%% WRITE and DELETE with NO INDEX
-commit_single_storage(Ref, Module, Data, _IndexLog = none) ->
-  Module:write( Ref, Data);
-
-%% DELETE commit with index
+  Module:write(Ref, Data);
 commit_single_storage(Ref, Module, _Data = none, IndexLog) ->
   {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
   try
@@ -399,7 +413,6 @@ commit_single_storage(Ref, Module, _Data = none, IndexLog) ->
   after
     Unlock()
   end;
-
 commit_single_storage(Ref, Module, Data, IndexLog) ->
   {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
   try
