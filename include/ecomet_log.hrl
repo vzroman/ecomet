@@ -19,7 +19,6 @@
 
 -record(rollback, {
   ref,
-  data,
   index
 }).
 
