@@ -395,10 +395,12 @@ prepare_rollback_index(IndexLog) ->
     IndexLog
   ).
 
+% Format of write: [{K1, V1}, ..., {KN, VN}]
+% Format of delete: [K1, ..., KN]
 prepare_rollback_data(StorageType, Refs, Write, Delete) ->
   {Module, StorageRef} = maps:get(StorageType, Refs),
-  StorageWrite = maps:get(StorageType, Write, none),
-  StorageDelete = maps:get(StorageType, Delete, none),
+  StorageWrite = maps:get(StorageType, Write, []),
+  StorageDelete = maps:get(StorageType, Delete, []),
   
   WriteKeys = [K || {K, _} <- StorageWrite],
   Keys = lists:usort(WriteKeys ++ StorageDelete),
@@ -428,7 +430,7 @@ prepare_rollback_data(StorageType, Refs, Write, Delete) ->
   UndoDelete =
     lists:foldl(
       fun(Key, Acc) ->
-        case maps:find(Key, ReadData) of
+        case ReadData of
           #{Key := ReadValue} ->
             [{Key, ReadValue} | Acc];
           _Other ->
