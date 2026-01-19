@@ -75,9 +75,8 @@ remove(InvalidParams) ->
 %%% +--------------------------------------------------------------+
 
 %% Create rollback before applying upcoming commits.
-%%   1. For each storage, generate rollback data & index.
-%%   2. Store rollback payload in RocksDB under a new TRef so it can be replayed on DB open.
-%%   3. Return rollback reference to be used by commit or rollback.
+%%  - Generate a rollback for each storage.
+%%  - Return the transaction reference (TRef) required to commit or rollback.
 rollback_prepare(
   Refs,
   Storages,
@@ -94,10 +93,10 @@ rollback_prepare(
   log_write(Log, [{put, TRef, ?ENCODE_VALUE(RollbackList)}]),
   TRef.
   
-%% Recovery from log when DB opened.
-%%   1. Scan all rollback entries in RocksDB Log.
-%%   2. Re-apply each storage rollback (no index log available during recovery).
-%%   3. Delete the rollback entry after it is successfully executed.
+%% Recover from the log after the DB is opened.
+%%  - Scan all rollback entries in RocksDB Log.
+%%  - Apply each rollback for each storage.
+%%  - Delete the transaction reference (TRef) after successful execution.
 rollback_recovery(Refs) ->
   #log{database = DB, read = ReadParams} = Log = get_ref(Refs),
   rocksdb:fold(
@@ -120,11 +119,10 @@ rollback_recovery(Refs) ->
     ReadParams
   ).
 
-%% Rollback a previously stored transaction.
-%%   1. Load rollback data from RocksDB using TRef
-%%   2. For each storage, apply its rollback via storage commit
-%%   3. Remove the rollback entry from RocksDB once finished
-%%   4. If no rollback data exists, do nothing
+%% Roll back a transaction by TRef.
+%%  - Load rollback data from RocksDB.
+%%  - Apply rollbacks for each storage.
+%%  - Delete the transaction reference (TRef) on success.
 rollback(Refs, TRef) ->
   Log = get_ref(Refs),
   case log_get(Log, TRef) of
@@ -144,7 +142,7 @@ rollback(Refs, TRef) ->
       ok
   end.
 
-%% Finalize commit by removing rollback entry.
+%% Finalize commit by removing transaction reference (TRef).
 %% If all storages committed successfully.
 commit(Refs, TRef) ->
   Log = get_ref(Refs),
