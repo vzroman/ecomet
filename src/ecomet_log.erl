@@ -34,73 +34,41 @@
 %%% |                    Service API Implementation                |
 %%% +--------------------------------------------------------------+
 
-% TODO: API DOC
 create(#{dir := RootDirectory}) ->
-  try
-    try_create(RootDirectory)
-  catch
-    _Class:Error:Stacktrace ->
-      ?LOGERROR("failed to create log in directory ~ts, error: ~p, stacktrace: ~p", [
-        RootDirectory,
-        Error,
-        Stacktrace
-      ]),
-      throw({
-        create_failed,
-        #{directory => RootDirectory, error => Error}
-      })
-  end;
+  try_create(RootDirectory);
 create(InvalidParams) ->
   throw({
     dir_required,
     #{params => InvalidParams}
   }).
-  
-% TODO: API DOC
+
 open(#{dir := RootDirectory}) ->
-  try
-    try_open(RootDirectory)
-  catch
-    _Class:Error:Stacktrace ->
-      ?LOGERROR("failed to open log in directory ~ts, error: ~p, stacktrace: ~p", [
-        RootDirectory,
-        Error,
-        Stacktrace
-      ]),
-      throw({
-        open_failed,
-        #{directory => RootDirectory, error => Error}
-      })
-  end;
+  try_open(RootDirectory);
 open(InvalidParams) ->
   throw({
     dir_required,
     #{params => InvalidParams}
   }).
 
-% TODO: API DOC
-close(#log{database = DB, directory = Directory}) ->
-  case rocksdb:close(DB) of
-    ok ->
-      ok;
-    {error, Error} ->
-      ?LOGERROR("failed to close log in directory: ~p, error: ~p", [
-        Directory,
-        Error
-      ]),
-      throw({
-        close_failed,
-        #{error => Error, directory => Directory}
-      })
-  end.
+close(#log{} = Log) ->
+  try_close(Log);
+close(InvalidArg) ->
+  throw({
+    invalid_args,
+    #{args => InvalidArg}
+  }).
   
-% TODO: API DOC
 remove(#{dir := Directory}) ->
  #{
     destroy_attempts := Attempts,
     rocksdb := #{options := Options}
   } = ?ENV(log, undefined),
-  try_remove(Directory, Attempts, Options).
+  try_remove(Directory, Attempts, Options);
+remove(InvalidParams) ->
+  throw({
+    dir_required,
+    #{params => InvalidParams}
+  }).
 
 %%% +--------------------------------------------------------------+
 %%% |                 Transaction API Implementation               |
@@ -115,17 +83,16 @@ rollback_prepare(
   Storages,
   Write,
   Delete,
-  IndexLog
+  Index
 ) ->
   Log = get_ref(Refs),
-  RollbackData = [prepare_rollback_data(StorageType, Refs, Write, Delete) || StorageType <- Storages],
-  RollbackIndex = prepare_rollback_index(IndexLog),
+  RollbackList =
+    [begin
+      prepare_rollback(StorageType, Refs, Write, Delete, inverse_index(Index))
+     end || StorageType <- Storages],
   TRef = ?ENCODE_KEY(make_ref()),
-  log_write(Log, [{put, TRef, ?ENCODE_VALUE(RollbackData)}]),
-  #rollback{
-    ref = TRef,
-    index = RollbackIndex
-  }.
+  log_write(Log, [{put, TRef, ?ENCODE_VALUE(RollbackList)}]),
+  TRef.
   
 %% Recovery from log when DB opened.
 %%   1. Scan all rollback entries in RocksDB Log.
@@ -137,9 +104,15 @@ rollback_recovery(Refs) ->
     DB,
     fun({TRef, Rollback}, _Acc)->
       [begin
+        #storage_rollback{
+          type = Type,
+          write = Write,
+          delete = Delete,
+          index = Index
+        } = StorageRollback,
         {Module, StorageRef} = maps:get(Type, Refs),
-        ecomet_db:commit(StorageRef, Module, Write, Delete, _Index = none)
-       end || #storage_rollback{type = Type, write = Write, delete = Delete} <- ?DECODE_VALUE(Rollback)],
+        ecomet_db:commit(StorageRef, Module, Write, Delete, Index)
+       end || StorageRollback <- ?DECODE_VALUE(Rollback)],
       log_write(Log, [{delete, TRef}]),
       ok
     end,
@@ -152,18 +125,20 @@ rollback_recovery(Refs) ->
 %%   2. For each storage, apply its rollback via storage commit
 %%   3. Remove the rollback entry from RocksDB once finished
 %%   4. If no rollback data exists, do nothing
-rollback(
-  Refs,
-  #rollback{ref = TRef, index = IndexLog}
-) ->
+rollback(Refs, TRef) ->
   Log = get_ref(Refs),
   case log_get(Log, TRef) of
     {ok, Rollback} ->
       [begin
+        #storage_rollback{
+          type = Type,
+          write = Write,
+          delete = Delete,
+          index = Index
+        } = StorageRollback,
         {Module, StorageRef} = maps:get(Type, Refs),
-        Index = maps:get(Type, IndexLog, none),
         ecomet_db:commit(StorageRef, Module, Write, Delete, Index)
-       end || #storage_rollback{type = Type, write = Write, delete = Delete} <- ?DECODE_VALUE(Rollback)],
+       end || StorageRollback <- ?DECODE_VALUE(Rollback)],
       log_write(Log, [{delete, TRef}]);
     _Ignore ->
       ok
@@ -171,10 +146,7 @@ rollback(
 
 %% Finalize commit by removing rollback entry.
 %% If all storages committed successfully.
-commit(
-  Refs,
-  #rollback{ref = TRef}
-) ->
+commit(Refs, TRef) ->
   Log = get_ref(Refs),
   log_write(Log, [{delete, TRef}]).
 
@@ -183,47 +155,88 @@ commit(
 %%% +--------------------------------------------------------------+
 
 try_create(RootDirectory) ->
-  #{
-    rocksdb := #{
-      options := Options,
-      read := Read,
-      write := Write
-    }
-  } = ?ENV(log, undefined),
-  ensure_dir(?LOG_DIRECTORY(RootDirectory)),
-  Reference =
-    #log{
-      directory = RootDirectory,
-      database = open_database(?LOG_DIRECTORY(RootDirectory), Options),
-      read = maps:to_list(Read),
-      write = maps:to_list(Write)
-    },
-  #{log => {?MODULE, Reference}}.
+  try
+    #{
+      rocksdb := #{
+        options := Options,
+        read := Read,
+        write := Write
+      }
+    } = ?ENV(log, undefined),
+    ensure_dir(?LOG_DIRECTORY(RootDirectory)),
+    Reference =
+      #log{
+        directory = RootDirectory,
+        database = open_database(?LOG_DIRECTORY(RootDirectory), Options),
+        read = maps:to_list(Read),
+        write = maps:to_list(Write)
+      },
+    #{log => {?MODULE, Reference}}
+  catch
+    _Class:Error:Stacktrace ->
+      ?LOGERROR("failed to create log in directory ~ts, error: ~p, stacktrace: ~p", [
+        RootDirectory,
+        Error,
+        Stacktrace
+      ]),
+      throw({
+        create_failed,
+        #{directory => RootDirectory, error => Error}
+      })
+  end.
 
 try_open(RootDirectory) ->
-  #{
-    rocksdb := #{
-      options := Options,
-      read := Read,
-      write := Write
-    }
-  } = ?ENV(log, undefined),
-  LogDirectory = ?LOG_DIRECTORY(RootDirectory),
-  case filelib:is_dir(LogDirectory) of
-    true ->
+  try
+    #{
+      rocksdb := #{
+        options := Options,
+        read := Read,
+        write := Write
+      }
+    } = ?ENV(log, undefined),
+    LogDirectory = ?LOG_DIRECTORY(RootDirectory),
+    case filelib:is_dir(LogDirectory) of
+      true ->
+        ok;
+      false ->
+        ?LOGERROR("folder ~s not found or not a directory", [LogDirectory]),
+        throw({directory_not_exists, #{directory => LogDirectory}})
+    end,
+    Reference =
+      #log{
+        directory = RootDirectory,
+        database = open_database(LogDirectory, Options),
+        read = maps:to_list(Read),
+        write = maps:to_list(Write)
+      },
+    #{log => {?MODULE, Reference}}
+  catch
+    _Class:Error:Stacktrace ->
+      ?LOGERROR("failed to open log in directory ~ts, error: ~p, stacktrace: ~p", [
+        RootDirectory,
+        Error,
+        Stacktrace
+      ]),
+      throw({
+        open_failed,
+        #{directory => RootDirectory, error => Error}
+      })
+  end.
+  
+try_close(#log{database = DB, directory = Directory}) ->
+  case rocksdb:close(DB) of
+    ok ->
       ok;
-    false ->
-      ?LOGERROR("folder ~s not found or not a directory", [LogDirectory]),
-      throw({directory_not_exists, #{directory => LogDirectory}})
-  end,
-  Reference =
-    #log{
-      directory = RootDirectory,
-      database = open_database(LogDirectory, Options),
-      read = maps:to_list(Read),
-      write = maps:to_list(Write)
-    },
-  #{log => {?MODULE, Reference}}.
+    {error, Error} ->
+      ?LOGERROR("failed to close log in directory: ~p, error: ~p", [
+        Directory,
+        Error
+      ]),
+      throw({
+        close_failed,
+        #{error => Error, directory => Directory}
+      })
+  end.
 
 try_remove(Directory, Attempts, Options) when Attempts > 0 ->
   try
@@ -366,7 +379,17 @@ remove_recursive(Path) ->
       end
   end.
 
-prepare_rollback_index(IndexLog) ->
+%% Index log format:
+%% #{
+%%   StorageType1 => [
+%%     {K1, V1},  %% V1 is a boolean
+%%     ...
+%%     {KN, VN}
+%%   ],
+%%   ...
+%%   StorageTypeN => ...
+%% }
+inverse_index(IndexLog) ->
   maps:fold(
     fun(Storage, Indexes, Acc) ->
       InverseIndexes =
@@ -384,12 +407,14 @@ prepare_rollback_index(IndexLog) ->
     IndexLog
   ).
 
-% Format of write: [{K1, V1}, ..., {KN, VN}]
-% Format of delete: [K1, ..., KN]
-prepare_rollback_data(StorageType, Refs, Write, Delete) ->
+%% Format of write: [{K1, V1}, ..., {KN, VN}]
+%% Format of delete: [K1, ..., KN]
+prepare_rollback(StorageType, Refs, WriteIn, DeleteIn, IndexIn) ->
   {Module, StorageRef} = maps:get(StorageType, Refs),
-  StorageWrite = maps:get(StorageType, Write, []),
-  StorageDelete = maps:get(StorageType, Delete, []),
+  
+  StorageWrite = maps:get(StorageType, WriteIn, []),
+  StorageDelete = maps:get(StorageType, DeleteIn, []),
+  StorageIndex = maps:get(StorageType, IndexIn, none),
   
   WriteKeys = [K || {K, _} <- StorageWrite],
   Keys = lists:usort(WriteKeys ++ StorageDelete),
@@ -430,7 +455,7 @@ prepare_rollback_data(StorageType, Refs, Write, Delete) ->
       StorageDelete
     ),
   
-  {Writes, Deletes} =
+  {WriteOut, DeleteOut} =
     lists:partition(
       fun
         ({_Key, _Value}) ->
@@ -443,9 +468,15 @@ prepare_rollback_data(StorageType, Refs, Write, Delete) ->
 
   #storage_rollback{
     type = StorageType,
-    write = Writes,
-    delete = Deletes
+    write = check_length(WriteOut),
+    delete = check_length(DeleteOut),
+    index = StorageIndex
   }.
 
 get_ref(#{log := {?MODULE, Log}}) ->
   Log.
+  
+check_length(List) when length(List) > 0 ->
+  List;
+check_length(_) ->
+  none.

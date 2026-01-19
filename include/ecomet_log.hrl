@@ -17,15 +17,11 @@
   write
 }).
 
--record(rollback, {
-  ref,
-  index
-}).
-
 -record(storage_rollback, {
   type,
   write,
-  delete
+  delete,
+  index
 }).
 
 -endif.
