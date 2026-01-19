@@ -112,13 +112,13 @@ remove(#{dir := Directory}) ->
 %%   3. Return rollback reference to be used by commit or rollback.
 rollback_prepare(
   Refs,
-  Ordered,
+  Storages,
   Write,
   Delete,
   IndexLog
 ) ->
   Log = get_ref(Refs),
-  RollbackData = [prepare_rollback_data(StorageType, Refs, Write, Delete) || StorageType <- Ordered],
+  RollbackData = [prepare_rollback_data(StorageType, Refs, Write, Delete) || StorageType <- Storages],
   RollbackIndex = prepare_rollback_index(IndexLog),
   TRef = ?ENCODE_KEY(make_ref()),
   log_write(Log, [{put, TRef, ?ENCODE_VALUE(RollbackData)}]),
