@@ -191,7 +191,7 @@ create( Params )->
           throw(E)
       end
     end,#{}, TypesParams ),
-  Refs#{log => Log}.
+  maps:merge(Refs, Log).
 
 open( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
@@ -215,8 +215,9 @@ open( Params )->
           throw(E)
       end
     end,#{}, maps:merge(TypesParams, Log) ),
-  ok = ecomet_log:rollback_recovery(Log, Refs),
-  Refs#{log => Log}.
+  AllRefs = maps:merge(Refs, Log),
+  ok = ecomet_log:rollback_recovery(AllRefs),
+  AllRefs.
 
 type_params(Type, Params, #{dir := Dir} = OtherParams )->
   maps:merge( OtherParams#{ dir => Dir ++ "/" ++ atom_to_list(Type) }, maps:without([dir],Params) ).

@@ -24,7 +24,7 @@
 %%% +--------------------------------------------------------------+
 
 -export([
-  rollback_recovery/2,
+  rollback_recovery/1,
   rollback_prepare/5,
   rollback/2,
   commit/2
@@ -111,14 +111,13 @@ remove(#{dir := Directory}) ->
 %%   2. Store rollback payload in RocksDB under a new TRef so it can be replayed on DB open.
 %%   3. Return rollback reference to be used by commit or rollback.
 rollback_prepare(
-  #{
-    log := Log
-  } = Refs,
+  Refs,
   Ordered,
   Write,
   Delete,
   IndexLog
 ) ->
+  Log = get_ref(Refs),
   RollbackData = [prepare_rollback_data(StorageType, Refs, Write, Delete) || StorageType <- Ordered],
   RollbackIndex = prepare_rollback_index(IndexLog),
   TRef = ?ENCODE_KEY(make_ref()),
@@ -132,13 +131,8 @@ rollback_prepare(
 %%   1. Scan all rollback entries in RocksDB Log.
 %%   2. Re-apply each storage rollback (no index log available during recovery).
 %%   3. Delete the rollback entry after it is successfully executed.
-rollback_recovery(
-  #log{
-    database = DB,
-    read = ReadParams
-  } = Log,
-  Refs
-) ->
+rollback_recovery(Refs) ->
+  #log{database = DB, read = ReadParams} = Log = get_ref(Refs),
   rocksdb:fold(
     DB,
     fun({TRef, Rollback}, _Acc)->
@@ -159,15 +153,14 @@ rollback_recovery(
 %%   3. Remove the rollback entry from RocksDB once finished
 %%   4. If no rollback data exists, do nothing
 rollback(
-  #{
-    log := Log
-  } = Refs,
+  Refs,
   #rollback{ref = TRef, index = IndexLog}
 ) ->
+  Log = get_ref(Refs),
   case log_get(Log, TRef) of
     {ok, Rollback} ->
       [begin
-        {Module, StorageRef} = maps:get(Type, Refs, undefined),
+        {Module, StorageRef} = maps:get(Type, Refs),
         Index = maps:get(Type, IndexLog, none),
         ecomet_db:commit(StorageRef, Module, Write, Delete, Index)
        end || #storage_rollback{type = Type, write = Write, delete = Delete} <- ?DECODE_VALUE(Rollback)],
@@ -179,13 +172,10 @@ rollback(
 %% Finalize commit by removing rollback entry.
 %% If all storages committed successfully.
 commit(
-  #{
-    log := Log
-  },
-  #rollback{
-    ref = TRef
-  }
+  Refs,
+  #rollback{ref = TRef}
 ) ->
+  Log = get_ref(Refs),
   log_write(Log, [{delete, TRef}]).
 
 %%% +--------------------------------------------------------------+
@@ -233,7 +223,6 @@ try_open(RootDirectory) ->
       read = maps:to_list(Read),
       write = maps:to_list(Write)
     },
-  % TODO. rollback_log(Reference),
   #{log => {?MODULE, Reference}}.
 
 try_remove(Directory, Attempts, Options) when Attempts > 0 ->
@@ -457,3 +446,6 @@ prepare_rollback_data(StorageType, Refs, Write, Delete) ->
     write = Writes,
     delete = Deletes
   }.
+
+get_ref(#{log := {?MODULE, Log}}) ->
+  Log.
