@@ -87,7 +87,7 @@ rollback_prepare(
   Log = get_ref(Refs),
   RollbackList =
     [begin
-      prepare_rollback(StorageType, Refs, Write, Delete, inverse_index(Index))
+      prepare_rollback(StorageType, Refs, Write, Delete, inverse_index_values(Index))
      end || StorageType <- Storages],
   TRef = ?ENCODE_KEY(make_ref()),
   log_write(Log, [{put, TRef, ?ENCODE_VALUE(RollbackList)}]),
@@ -387,7 +387,7 @@ remove_recursive(Path) ->
 %%   ...
 %%   StorageTypeN => ...
 %% }
-inverse_index(IndexLog) ->
+inverse_index_values(IndexLog) ->
   maps:fold(
     fun(Storage, Indexes, Acc) ->
       InverseIndexes =
@@ -414,8 +414,7 @@ prepare_rollback(StorageType, Refs, WriteIn, DeleteIn, IndexIn) ->
   StorageDelete = maps:get(StorageType, DeleteIn, []),
   StorageIndex = maps:get(StorageType, IndexIn, none),
   
-  WriteKeys = [K || {K, _} <- StorageWrite],
-  Keys = lists:usort(WriteKeys ++ StorageDelete),
+  Keys = lists:usort([K || {K, _} <- StorageWrite] ++ StorageDelete),
   
   % Read old values from storage, preserves the key order
   % Returns: [{Key1, Value1}, ..., {KeyN, ValueN}]
