@@ -456,13 +456,7 @@ commit(Ref, Data, Delete, IndexLog)->
   catch
     _Class:Error:Stacktrace ->
       ?LOGERROR("failed to commit, error: ~p, stacktrace: ~p", [Error, Stacktrace]),
-      try
-        ok = ecomet_log:rollback(Ref, Rollback)
-      catch
-        _:RollbackE:RollbackS ->
-          ?LOGERROR("failed to rollback, error: ~p, stacktrace: ~p", [RollbackE, RollbackS]),
-          timer:sleep(infinity)
-      end,
+      ok = ecomet_log:rollback(Ref, Rollback),
       throw({
         commit_failed,
         #{error => Error, stacktrace => Stacktrace}

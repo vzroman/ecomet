@@ -135,17 +135,24 @@ rollback(Refs, TRef) ->
   Log = get_ref(Refs),
   case log_get(Log, TRef) of
     {ok, Rollback} ->
-      [begin
-        #storage_rollback{
-          type = Type,
-          write = Write,
-          delete = Delete,
-          index = Index
-        } = StorageRollback,
-        {Module, StorageRef} = maps:get(Type, Refs),
-        ecomet_db:commit(StorageRef, Module, Write, Delete, Index)
-       end || StorageRollback <- ?DECODE_VALUE(Rollback)],
-      log_write(Log, [{delete, TRef}]);
+      try
+        [begin
+           #storage_rollback{
+             type = Type,
+             write = Write,
+             delete = Delete,
+             index = Index
+           } = StorageRollback,
+           {Module, StorageRef} = maps:get(Type, Refs),
+           ecomet_db:commit(StorageRef, Module, Write, Delete, Index)
+         end || StorageRollback <- ?DECODE_VALUE(Rollback)],
+        log_write(Log, [{delete, TRef}]),
+        ok
+      catch
+        _:Error:Stack ->
+          ?LOGERROR("failed to rollback, error: ~p, stacktrace: ~p", [Error, Stack]),
+          timer:sleep(infinity)
+      end;
     _Ignore ->
       ok
   end.
