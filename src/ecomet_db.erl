@@ -429,40 +429,14 @@ rollback( _Ref, _TRef )->
   ok.
 
 commit(Ref, Data, Delete, IndexLog)->
-  Storages = get_commit_storages( Data, Delete ),
-  case Storages -- maps:keys( Ref ) of
-    [] -> ok;
-    Invalid ->
-      %% ATTENTION! If the user tries to save object with storage type
-      %% that is not in the DB then it will crash here
-      ?LOGERROR("attempt to save to not configured storage types: ~p",[ Invalid ]),
-      throw({ invalid_storage_type, Invalid })
-  end,
-
-  % Order commit the heavier types go first
-  CommitOrder = [ ramdisc, disc, ram ],
-  Ordered = CommitOrder -- ( CommitOrder -- Storages ),
-
-  Rollback = ecomet_log:rollback_prepare(Ref, Ordered, Data, Delete, IndexLog),
-  try
-    [begin
-       {Module, TRef} = maps:get(T, Ref),
-       TData = maps:get(T, Data, none),
-       TDelete = maps:get(T, Delete, none),
-       TIndexLog = maps:get(T, IndexLog, none),
-       commit(TRef, Module, TData, TDelete, TIndexLog)
-     end || T <- Ordered],
-    ok = ecomet_log:commit(Ref, Rollback)
-  catch
-    _Class:Error:Stacktrace ->
-      ?LOGERROR("failed to commit, error: ~p, stacktrace: ~p", [Error, Stacktrace]),
-      ok = ecomet_log:rollback(Ref, Rollback),
-      throw({
-        commit_failed,
-        #{error => Error, stacktrace => Stacktrace}
-      })
-  end,
-  
+  Ordered = sort_storages(Ref, Data, Delete),
+  [begin
+     {Module, TRef} = maps:get(T, Ref),
+     TData = maps:get(T, Data, none),
+     TDelete = maps:get(T, Delete, none),
+     TIndexLog = maps:get(T, IndexLog, none),
+     commit(TRef, Module, TData, TDelete, TIndexLog)
+   end || T <- Ordered],
   ok.
 
 %%-----------------Only write commit (no index, no delete)----------------------------------
@@ -525,20 +499,27 @@ commit(Ref, Module, Data, Delete, IndexLog)->
   end.
 
 two_phase_commit(Ref, Data, Delete, IndexLog) ->
-  commit(Ref, Data, Delete, IndexLog).
-  
-% TODO. WIP. Not finished.
-%%  {LogModule, LogRef} = maps:get(log, Ref),
-%%  TRef = LogModule:prepare(LogRef, Ref, Data, Delete, IndexLog),
-%%  try
-%%    ok = commit(Ref, Data, Delete, IndexLog),
-%%    ok = LogModule:commit(LogRef, TRef)
-%%  catch
-%%    _Class:_Error:_Stack ->
-%%      % TODO. Print error.
-%%      catch LogModule:rollback(LogRef, Ref, TRef),
-%%      throw(todo)
-%%  end.
+  Ordered = sort_storages(Ref, Data, Delete),
+  Rollback = ecomet_log:rollback_prepare(Ref, Ordered, Data, Delete, IndexLog),
+  try
+    [begin
+       {Module, TRef} = maps:get(T, Ref),
+       TData = maps:get(T, Data, none),
+       TDelete = maps:get(T, Delete, none),
+       TIndexLog = maps:get(T, IndexLog, none),
+       commit(TRef, Module, TData, TDelete, TIndexLog)
+     end || T <- Ordered],
+    ok = ecomet_log:commit(Ref, Rollback)
+  catch
+    _Class:Error:Stacktrace ->
+      ?LOGERROR("failed to commit, error: ~p, stacktrace: ~p", [Error, Stacktrace]),
+      ok = ecomet_log:rollback(Ref, Rollback),
+      throw({
+        commit_failed,
+        #{error => Error, stacktrace => Stacktrace}
+      })
+  end,
+  ok.
 
 prepare_write( Write )->
   lists:foldl(fun( { #key{ type = T, storage = S, key = K }, V}, {DAcc, IAcc})->
@@ -562,11 +543,26 @@ prepare_delete( Delete )->
   end,#{}, Delete).
 
 needs_log( Data, Delete )->
-  Storages = get_commit_storages( Data, Delete ),
+  Storages = lists:usort(maps:keys(Data) ++ maps:keys(Delete)),
   lists:member( disc, Storages ) andalso lists:member( ramdisc, Storages ).
 
-get_commit_storages( Data, Delete )->
-  lists:usort( maps:keys( Data ) ++ maps:keys( Delete )).
+sort_storages(Ref, Data, Delete) ->
+  Storages = lists:usort(maps:keys(Data) ++ maps:keys(Delete)),
+  case Storages -- maps:keys(Ref) of
+    [] ->
+      ok;
+    Invalid ->
+      % ATTENTION! If the user tries to save object with storage type
+      % that is not in the DB then it will crash here
+      ?LOGERROR("commit rejected, unconfigured storage type(s): ~p, configured type(s): ~p", [
+        Invalid,
+        maps:keys(Ref)
+      ]),
+      throw({invalid_storage_type, Invalid})
+  end,
+  % Order commit the heavier types go first
+  CommitOrder = [ramdisc, disc, ram],
+  CommitOrder -- (CommitOrder -- Storages).
 
 %%=================================================================
 %%	INFO
