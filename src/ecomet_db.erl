@@ -456,14 +456,19 @@ commit(Ref, Data, Delete, IndexLog)->
   catch
     _Class:Error:Stacktrace ->
       ?LOGERROR("failed to commit, error: ~p, stacktrace: ~p", [Error, Stacktrace]),
-      ok = ecomet_log:rollback(Ref, Rollback),
+      try
+        ok = ecomet_log:rollback(Ref, Rollback)
+      catch
+        _:RollbackE:RollbackS ->
+          ?LOGERROR("failed to rollback, error: ~p, stacktrace: ~p", [RollbackE, RollbackS]),
+          timer:sleep(infinity)
+      end,
       throw({
         commit_failed,
         #{error => Error, stacktrace => Stacktrace}
       })
   end,
   
-  ?LOGINFO("[debug] finish commit!"),
   ok.
 
 %%-----------------Only write commit (no index, no delete)----------------------------------
