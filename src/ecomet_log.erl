@@ -74,6 +74,14 @@ remove(InvalidParams) ->
 %%% |                 Transaction API Implementation               |
 %%% +--------------------------------------------------------------+
 
+%% NOTE & TODO: For performance, we use RocksDB async writes.
+%% This is crash-consistent for Erlang / OS process crashes (data reaches OS buffers),
+%% but it is NOT fully durable across machine crashes or power loss: the latest
+%% writes may be lost. (rocksdb/wiki/basic-operations)
+%%
+%% If stronger durability will be required, we may consider enabling sync=true
+%% and / or periodically syncing the WAL in the future.
+
 %% Create rollback before applying upcoming commits.
 %%  - Generate a rollback for each storage.
 %%  - Return the transaction reference (TRef) required to commit or rollback.
