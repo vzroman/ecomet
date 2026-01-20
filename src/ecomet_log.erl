@@ -420,7 +420,6 @@ prepare_rollback(StorageType, Refs, WriteIn, DeleteIn, IndexIn) ->
   
   StorageWrite = maps:get(StorageType, WriteIn, []),
   StorageDelete = maps:get(StorageType, DeleteIn, []),
-  StorageIndex = maps:get(StorageType, IndexIn, none),
   
   Keys = lists:usort([K || {K, _} <- StorageWrite] ++ StorageDelete),
   
@@ -473,15 +472,10 @@ prepare_rollback(StorageType, Refs, WriteIn, DeleteIn, IndexIn) ->
 
   #storage_rollback{
     type = StorageType,
-    write = check_length(WriteOut),
-    delete = check_length(DeleteOut),
-    index = StorageIndex
+    write = if length(WriteOut) > 0 -> WriteOut; true -> none end,
+    delete = if length(DeleteOut) > 0 -> DeleteOut; true -> none end,
+    index = maps:get(StorageType, IndexIn, none)
   }.
 
 get_ref(#{log := {?MODULE, Log}}) ->
   Log.
-  
-check_length(List) when length(List) > 0 ->
-  List;
-check_length(_) ->
-  none.
