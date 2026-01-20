@@ -412,14 +412,8 @@ commit(Ref, KVs, Keys) when map_size( Ref ) =:= 1->
   commit( Ref, Data, Delete, IndexLog );
 
 commit(Ref, KVs, Keys)->
-  ?LOGINFO("[debug][init] REF: ~p", [Ref]),
-  ?LOGINFO("[debug][init] KVs: ~p", [KVs]),
-  ?LOGINFO("[debug][init] KEYS: ~p", [Keys]),
   {Data, IndexLog} = prepare_write( KVs ),
-  ?LOGINFO("[debug][init] data: ~p", [Data]),
-  ?LOGINFO("[debug][init] index log: ~p", [IndexLog]),
   Delete = prepare_delete( Keys ),
-  ?LOGINFO("[debug][init] delete: ~p", [Delete]),
   case needs_log( Data, Delete ) of
     false -> commit( Ref, Data, Delete, IndexLog );
     true -> two_phase_commit( Ref, Data, Delete, IndexLog )
