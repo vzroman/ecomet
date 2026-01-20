@@ -160,6 +160,142 @@ commit(Refs, TRef) ->
 %%% |                      Internal functions                      |
 %%% +--------------------------------------------------------------+
 
+get_ref(#{log := {?MODULE, Log}}) ->
+  Log.
+
+log_get(
+  #log{
+    directory = Directory,
+    database = DB,
+    read = ReadParams
+  },
+  TRef
+) ->
+  try
+    case rocksdb:get(DB, TRef, ReadParams) of
+      {ok, Result} ->
+        {ok, Result};
+      _Ignore ->
+        ok
+    end
+  catch
+    _:Error ->
+      throw({
+        log_read_failed,
+        #{error => Error, directory => Directory}
+      })
+  end.
+
+log_write(
+  #log{
+    directory = Directory,
+    database = DB,
+    write = Write
+  },
+  Data
+) ->
+  try
+    ok = rocksdb:write(DB, Data, Write)
+  catch
+    _:Error ->
+      throw({
+        log_write_failed,
+        #{error => Error, directory => Directory}
+      })
+  end.
+
+%% Index log format:
+%% #{
+%%   StorageType1 => [
+%%     {K1, V1},  %% V1 is a boolean
+%%     ...
+%%     {KN, VN}
+%%   ],
+%%   ...
+%%   StorageTypeN => ...
+%% }
+inverse_index_values(IndexLog) ->
+  maps:fold(
+    fun(Storage, Indexes, Acc) ->
+      InverseIndexes =
+        [begin
+           NewValue =
+             case Value of
+               true -> false;
+               false -> true
+             end,
+           {Key, NewValue}
+         end || {Key, Value} <- Indexes],
+      Acc#{Storage => InverseIndexes}
+    end,
+    #{},
+    IndexLog
+  ).
+
+%% Format of write: [{K1, V1}, ..., {KN, VN}]
+%% Format of delete: [K1, ..., KN]
+prepare_rollback(StorageType, Refs, WriteIn, DeleteIn, IndexIn) ->
+  {Module, StorageRef} = maps:get(StorageType, Refs),
+  
+  StorageWrite = maps:get(StorageType, WriteIn, []),
+  StorageDelete = maps:get(StorageType, DeleteIn, []),
+  
+  Keys = lists:usort([K || {K, _} <- StorageWrite] ++ StorageDelete),
+  
+  % Read old values from storage, preserves the key order
+  % Returns: [{Key1, Value1}, ..., {KeyN, ValueN}]
+  ReadData = maps:from_list(Module:read(StorageRef, Keys)),
+  
+  % Undo for 'write' operation
+  UndoWrite =
+    lists:foldl(
+      fun({Key, Value}, Acc) ->
+        case ReadData of
+          #{Key := Value} ->
+            Acc;
+          #{Key := ReadValue} ->
+            [{Key, ReadValue} | Acc];
+          _Other ->
+            [Key | Acc]
+        end
+      end,
+      [],
+      StorageWrite
+    ),
+  
+  % Undo for 'delete' operation
+  UndoDelete =
+    lists:foldl(
+      fun(Key, Acc) ->
+        case ReadData of
+          #{Key := ReadValue} ->
+            [{Key, ReadValue} | Acc];
+          _Other ->
+            Acc
+        end
+      end,
+      UndoWrite,
+      StorageDelete
+    ),
+  
+  {WriteOut, DeleteOut} =
+    lists:partition(
+      fun
+        ({_Key, _Value}) ->
+          true;
+        (_) ->
+          false
+      end,
+      UndoDelete
+    ),
+
+  #storage_rollback{
+    type = StorageType,
+    write = if length(WriteOut) > 0 -> WriteOut; true -> none end,
+    delete = if length(DeleteOut) > 0 -> DeleteOut; true -> none end,
+    index = maps:get(StorageType, IndexIn, none)
+  }.
+
 try_create(RootDirectory) ->
   try
     #{
@@ -302,47 +438,6 @@ open_database(Directory, Options) ->
       })
   end.
 
-log_get(
-  #log{
-    directory = Directory,
-    database = DB,
-    read = ReadParams
-  },
-  TRef
-) ->
-  try
-    case rocksdb:get(DB, TRef, ReadParams) of
-      {ok, Result} ->
-        {ok, Result};
-      _Ignore ->
-        ok
-    end
-  catch
-    _:Error ->
-      throw({
-        log_read_failed,
-        #{error => Error, directory => Directory}
-      })
-  end.
-
-log_write(
-  #log{
-    directory = Directory,
-    database = DB,
-    write = Write
-  },
-  Data
-) ->
-  try
-    ok = rocksdb:write(DB, Data, Write)
-  catch
-    _:Error ->
-      throw({
-        log_write_failed,
-        #{error => Error, directory => Directory}
-      })
-  end.
-
 ensure_dir(Path) ->
   case filelib:is_file(Path) of
     false ->
@@ -384,98 +479,3 @@ remove_recursive(Path) ->
           end
       end
   end.
-
-%% Index log format:
-%% #{
-%%   StorageType1 => [
-%%     {K1, V1},  %% V1 is a boolean
-%%     ...
-%%     {KN, VN}
-%%   ],
-%%   ...
-%%   StorageTypeN => ...
-%% }
-inverse_index_values(IndexLog) ->
-  maps:fold(
-    fun(Storage, Indexes, Acc) ->
-      InverseIndexes =
-        [begin
-           NewValue =
-             case Value of
-               true -> false;
-               false -> true
-             end,
-           {Key, NewValue}
-         end || {Key, Value} <- Indexes],
-      Acc#{Storage => InverseIndexes}
-    end,
-    #{},
-    IndexLog
-  ).
-
-%% Format of write: [{K1, V1}, ..., {KN, VN}]
-%% Format of delete: [K1, ..., KN]
-prepare_rollback(StorageType, Refs, WriteIn, DeleteIn, IndexIn) ->
-  {Module, StorageRef} = maps:get(StorageType, Refs),
-  
-  StorageWrite = maps:get(StorageType, WriteIn, []),
-  StorageDelete = maps:get(StorageType, DeleteIn, []),
-  
-  Keys = lists:usort([K || {K, _} <- StorageWrite] ++ StorageDelete),
-  
-  % Read old values from storage, preserves the key order
-  % Returns: [{Key1, Value1}, ..., {KeyN, ValueN}]
-  ReadData = maps:from_list(Module:read(StorageRef, Keys)),
-  
-  % Undo for 'write' operation
-  UndoWrite =
-    lists:foldl(
-      fun({Key, Value}, Acc) ->
-        case ReadData of
-          #{Key := Value} ->
-            Acc;
-          #{Key := ReadValue} ->
-            [{Key, ReadValue} | Acc];
-          _Other ->
-            [Key | Acc]
-        end
-      end,
-      [],
-      StorageWrite
-    ),
-  
-  % Undo for 'delete' operation
-  UndoDelete =
-    lists:foldl(
-      fun(Key, Acc) ->
-        case ReadData of
-          #{Key := ReadValue} ->
-            [{Key, ReadValue} | Acc];
-          _Other ->
-            Acc
-        end
-      end,
-      UndoWrite,
-      StorageDelete
-    ),
-  
-  {WriteOut, DeleteOut} =
-    lists:partition(
-      fun
-        ({_Key, _Value}) ->
-          true;
-        (_) ->
-          false
-      end,
-      UndoDelete
-    ),
-
-  #storage_rollback{
-    type = StorageType,
-    write = if length(WriteOut) > 0 -> WriteOut; true -> none end,
-    delete = if length(DeleteOut) > 0 -> DeleteOut; true -> none end,
-    index = maps:get(StorageType, IndexIn, none)
-  }.
-
-get_ref(#{log := {?MODULE, Log}}) ->
-  Log.
