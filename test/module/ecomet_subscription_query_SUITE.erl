@@ -56,7 +56,8 @@
 
 all()->
   [
-    transform_test
+    transform_test,
+    index_test
   ].
 
 groups()->
