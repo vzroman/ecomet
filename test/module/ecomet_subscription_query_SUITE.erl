@@ -102,7 +102,7 @@ transform_test(_Config) ->
   ),
 
   %---------------First subscription----------------------------
-  Client1 = spawn_link(
+  Client1 = spawn(
     fun()->
       timer:sleep(infinity)
     end
@@ -176,7 +176,7 @@ transform_test(_Config) ->
   ?assertEqual(true, lists:member({process,Client1}, Monitors1)),
 
   %---------------Second subscription----------------------------
-  Client2 = spawn_link(
+  Client2 = spawn(
     fun()->
       timer:sleep(infinity)
     end
@@ -341,6 +341,7 @@ transform_test(_Config) ->
   % Unsubscribe not existing subscription, nothing changes
   ecomet_subscription_query:unsubscribe( Client1, id1 ),
   State4 = sys:get_state(QueryServer),
+  exit(Client1, shutdown),
 
   %----------------Unsubscribe id2-----------------------
   ecomet_subscription_query:unsubscribe( Client2, id2 ),
@@ -382,8 +383,9 @@ transform_test(_Config) ->
   {monitors, Monitors5} = erlang:process_info(QueryServer, monitors),
   ?assertEqual(true, lists:member({process,Client2}, Monitors5)),
 
-  %----------------Unsubscribe client2 completely--------------
-  ecomet_subscription_query:unsubscribe( Client2, id1 ),
+  %----------------Kill client2--------------
+  exit(Client2, shutdown),
+  timer:sleep(100),
   State6 = sys:get_state(QueryServer),
 
   ?assertEqual(State0, State6),
