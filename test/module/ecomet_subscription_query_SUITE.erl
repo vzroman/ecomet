@@ -298,6 +298,98 @@ transform_test(_Config) ->
     Clients3
   ),
 
+  %------------------------unsubscribe-----------------------
+  ecomet_subscription_query:unsubscribe( Client1, id1 ),
+
+  State4 = sys:get_state(QueryServer),
+  ?LOGDEBUG("State4 ~p",[State4]),
+
+  #state{
+    queries = Queries4,
+    key2ref = KeyRef4,
+    clients = Clients4
+  } = State4,
+  ?assertEqual(
+    #{
+      Ref1 => Query1#query{
+        count = 1
+      },
+      Ref3 => Query3
+    },
+    Queries4
+  ),
+  ?assertEqual( KeyRef3, KeyRef4 ),
+
+  ?assertEqual(
+    #{
+      Client2 => #client{
+        monitor_ref = Client2MRef,
+        subs = #{
+          id1 => Ref1,
+          id2 => Ref3
+        }
+      }
+    },
+    Clients4
+  ),
+
+  {monitors, Monitors4} = erlang:process_info(QueryServer, monitors),
+  ?assertEqual(false, lists:member({process,Client1}, Monitors4)),
+  ?assertEqual(true, lists:member({process,Client2}, Monitors4)),
+
+  % Unsubscribe not existing subscription, nothing changes
+  ecomet_subscription_query:unsubscribe( Client1, id1 ),
+  State4 = sys:get_state(QueryServer),
+
+  %----------------Unsubscribe id2-----------------------
+  ecomet_subscription_query:unsubscribe( Client2, id2 ),
+  State5 = sys:get_state(QueryServer),
+
+  #state{
+    queries = Queries5,
+    key2ref = KeyRef5,
+    clients = Clients5
+  } = State5,
+
+  ?assertEqual(
+    #{
+      Ref1 => Query1#query{
+        count = 1
+      }
+    },
+    Queries5
+  ),
+  ?assertEqual(
+    #{
+      Key1 => Ref1
+    },
+    KeyRef5
+  ),
+
+  ?assertEqual(
+    #{
+      Client2 => #client{
+        monitor_ref = Client2MRef,
+        subs = #{
+          id1 => Ref1
+        }
+      }
+    },
+    Clients5
+  ),
+
+  {monitors, Monitors5} = erlang:process_info(QueryServer, monitors),
+  ?assertEqual(true, lists:member({process,Client2}, Monitors5)),
+
+  %----------------Unsubscribe client2 completely--------------
+  ecomet_subscription_query:unsubscribe( Client2, id1 ),
+  State6 = sys:get_state(QueryServer),
+
+  ?assertEqual(State0, State6),
+
+  {monitors, Monitors6} = erlang:process_info(QueryServer, monitors),
+  ?assertEqual(false, lists:member({process,Client2}, Monitors6)),
+
   ok.
 
 %--------------------------------------------------------------
