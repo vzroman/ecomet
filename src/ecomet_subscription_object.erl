@@ -1634,7 +1634,7 @@ update_queries(
       objects = Objects0
     }
 )->
-  QueriesToCheck = ecomet_subscription_query:notify(Log, Global),
+  QueriesToCheck = ecomet_subscription_query:find(Log, Global),
   #{
     wait := Wait,
     add := Add,

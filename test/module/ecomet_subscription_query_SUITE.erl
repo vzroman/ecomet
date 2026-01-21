@@ -49,7 +49,8 @@
 
 
 -export([
-  transform_test/1
+  transform_test/1,
+  index_test/1
 ]).
 
 
@@ -390,6 +391,10 @@ transform_test(_Config) ->
   {monitors, Monitors6} = erlang:process_info(QueryServer, monitors),
   ?assertEqual(false, lists:member({process,Client2}, Monitors6)),
 
+  ok.
+
+index_test(_Config) ->
+  % TODO
   ok.
 
 %--------------------------------------------------------------

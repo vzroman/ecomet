@@ -20,7 +20,7 @@
 %%        Transaction API
 %%=================================================================
 -export([
-  notify/2
+  find/2
 ]).
 
 %%=================================================================
@@ -79,7 +79,7 @@ unsubscribe(Client, SubsID)->
 %%=================================================================
 %%        Transaction API
 %%=================================================================
-notify(
+find(
     #{
       action := create,
       db := DB,
@@ -95,7 +95,7 @@ notify(
       light_search(Global, IndexDBs, Tags)
   end;
 
-notify(
+find(
     #{
       action := update,
       db := DB,
