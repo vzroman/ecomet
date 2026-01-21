@@ -274,9 +274,13 @@ open(OID,Lock,_IsTransaction = true)->
   end.
 
 exists(OID)->
-  case try open(OID,none) catch _:_-> error end of
-    error-> false;
-    _-> true
+  try
+    case read_field(construct(OID), <<".pattern">>) of
+      {ok, none} -> false;
+      _-> true
+    end
+  catch
+    _:_-> false
   end.
 
 read_field(#object{oid = OID} = Object, Field)->

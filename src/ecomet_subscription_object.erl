@@ -717,6 +717,10 @@ init_object(
   }.
 
 init_new_object(OID, SubsFields, UpdateFields)->
+  case ecomet_object:exists(OID) of
+    false -> throw({not_exists, OID});
+    true -> ok
+  end,
   Instance = ecomet_object:construct( OID ),
   RealSubsFields = real_subs_fields(SubsFields, OID),
 
