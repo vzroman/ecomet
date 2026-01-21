@@ -42,7 +42,7 @@ init([]) ->
     id=>?LOCKS,
     start=>{elock,start_link,[ ?LOCKS ]},
     restart=>permanent,
-    shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+    shutdown=> brutal_kill,
     type=>worker,
     modules=>[elock]
   },
@@ -51,7 +51,7 @@ init([]) ->
     id=>esubscribe,
     start=>{esubscribe,start_link,[?ESUBSCRIPTIONS]},
     restart=>permanent,
-    shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+    shutdown=> brutal_kill,
     type=>worker,
     modules=>[esubscribe]
   },
@@ -60,7 +60,7 @@ init([]) ->
     id=>ecomet_schema,
     start=>{ecomet_schema,start_link,[]},
     restart=>permanent,
-    shutdown=>?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+    shutdown=> brutal_kill,
     type=>worker,
     modules=>[ecomet_schema]
   },
@@ -81,7 +81,7 @@ init([]) ->
           id=>ecomet_subscription_nodes,
           start=>{ecomet_subscription_nodes,start_link,[_IsActive = false]},
           restart=>permanent,
-          shutdown=> ?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+          shutdown=> brutal_kill,
           type=>worker,
           modules=>[ecomet_subscription_nodes]
         }

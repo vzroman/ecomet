@@ -52,7 +52,7 @@ init([]) ->
       id=> N,
       start=>{ecomet_subscription_object, start_link,[ N ]},
       restart=>permanent,
-      shutdown=> ?STOP_TIMEOUT,
+      shutdown=> brutal_kill,
       type=>worker,
       modules=>[ecomet_subscription_object]
     } || N <- lists:seq(0, PoolSize-1)],

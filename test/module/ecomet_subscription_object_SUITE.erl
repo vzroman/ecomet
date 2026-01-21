@@ -31,10 +31,17 @@ all()->
 groups()->
   [].
 
-%% Init system storages
 init_per_suite(Config)->
-  Config.
-end_per_suite(_Config)->
+  ?BACKEND_INIT(),
+  SuitePID=?SUITE_PROCESS_START(),
+  [
+    {suite_pid,SuitePID}
+    |Config
+  ].
+
+end_per_suite(Config)->
+  ?SUITE_PROCESS_STOP(?GET(suite_pid,Config)),
+  ?BACKEND_STOP(),
   ok.
 
 init_per_group(_,Config)->

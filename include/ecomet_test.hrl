@@ -28,7 +28,6 @@
 -define(DEPENDENCIES,[
   compiler,
   syntax_tools,
-  goldrush,
   ecomet
 ]).
 
@@ -43,7 +42,9 @@
   begin
     ct:pal("stopping ~p",[D]),
     application:stop(D),
-    zaya:stop()
+    ct:pal("stopping zaya"),
+    zaya:stop(),
+    ct:pal("stopped zaya")
   end|| D <- lists:reverse(?DEPENDENCIES) ]).
 
 -define(SUITE_PROCESS_START(),spawn(fun()->
@@ -82,12 +83,8 @@
 
     ?STOP_DEPENDENCIES,
 
-    % mnesia:delete_schema([node()]),
-    % application:set_env(mnesia, dir,?config(priv_dir,Config)++"/DB_"++atom_to_list(?MODULE)),
-
     ?START_DEPENDENCIES
 
-    % {ok,_}=ecomet_schema:init([])
   end).
 
 -define(BACKEND_STOP(),(fun()->

@@ -25,7 +25,7 @@ init([]) ->
     id=>ecomet_subscription_nodes,
     start=>{ecomet_subscription_nodes,start_link,[_IsActive = true]},
     restart=>permanent,
-    shutdown=> ?STOP_TIMEOUT,
+    shutdown=> brutal_kill,
     type=>worker,
     modules=>[ecomet_subscription_nodes]
   },
@@ -34,7 +34,7 @@ init([]) ->
     id=>ecomet_subscription_pool,
     start=>{ecomet_subscription_pool,start_link,[]},
     restart=>permanent,
-    shutdown=> ?STOP_TIMEOUT,
+    shutdown=> infinity,
     type=>supervisor,
     modules=>[ecomet_subscription_pool]
   },
@@ -43,7 +43,7 @@ init([]) ->
     id=>ecomet_subscription_query,
     start=>{ecomet_subscription_query,start_link,[]},
     restart=>permanent,
-    shutdown=> ?STOP_TIMEOUT,
+    shutdown=> brutal_kill,
     type=>worker,
     modules=>[ecomet_subscription_query]
   },
