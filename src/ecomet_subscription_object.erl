@@ -769,13 +769,11 @@ remove_object_subscription(
     }
 )->
 
-  #{
-    ClientID := #client{
-      subs = #{
-        SubsID:=#o_sub{
-          fields = SubsFields,
-          oid = OID
-        }
+  #client{
+    subs = #{
+      SubsID:=#o_sub{
+        fields = SubsFields,
+        oid = OID
       }
     }
   } = maps:get(ClientID, Clients),
@@ -1611,8 +1609,6 @@ notify_update(
     maps:with(maps:keys(Fields0), FieldsUpdates)
   ),
 
-  ?LOGDEBUG("DEBUG: Fields0 ~p,  FieldsUpdates ~p, Fields ~p", [Fields0, FieldsUpdates, Fields]),
-
   Object = Object0#object{
     fields = Fields
   },
@@ -1785,49 +1781,55 @@ queries_notify(
       objects = Objects,
       queries = Queries
     }
-)->
-  #object{
-    fields = Fields = #{
-      <<".readgroups">> := RG
-    }
-  } = maps:get(OID, Objects),
+) when length(NotifyQueries) > 0->
 
-  Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
+  case maps:get(OID, Objects, undefined) of
+    #object{
+      fields = Fields = #{
+        <<".readgroups">> := RG
+      }
+    }->
+      Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
 
-  Notification = #notification{
-    oid = OID,
-    actor = Actor,
-    action = Action,
-    fields = Fields,
-    updates = Updates
-  },
-  [ begin
-      #query{
-        clients = Clients,
-        fields = SubsFields
-      } = maps:get(Ref, Queries),
-      maps:foreach(
-        fun(
-            ClientID,
-            #q_client{
-              usergroups = UG,
-              subs_id = SubsID,
-              no_feedback = NoFeedback,
-              read = Read
-            }
-        )->
-          send_notification(Notification#notification{
-            client_id = ClientID,
-            subs_id = SubsID,
-            access = check_access(UG, RG),
-            no_feedback = NoFeedback,
-            read = Read,
-            subs_fields = SubsFields
-          })
-        end,
-        Clients
-      )
-    end || Ref <- NotifyQueries],
+      Notification = #notification{
+        oid = OID,
+        actor = Actor,
+        action = Action,
+        fields = Fields,
+        updates = Updates
+      },
+      [ begin
+          #query{
+            clients = Clients,
+            fields = SubsFields
+          } = maps:get(Ref, Queries),
+          maps:foreach(
+            fun(
+                ClientID,
+                #q_client{
+                  usergroups = UG,
+                  subs_id = SubsID,
+                  no_feedback = NoFeedback,
+                  read = Read
+                }
+            )->
+              send_notification(Notification#notification{
+                client_id = ClientID,
+                subs_id = SubsID,
+                access = check_access(UG, RG),
+                no_feedback = NoFeedback,
+                read = Read,
+                subs_fields = SubsFields
+              })
+            end,
+            Clients
+          )
+        end || Ref <- NotifyQueries];
+    _->
+      ignore
+  end,
+  ok;
+queries_notify(_Queries, _Log, _State)->
   ok.
 
 
