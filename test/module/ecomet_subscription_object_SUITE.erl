@@ -693,6 +693,91 @@ subscribe_object_test(Config) ->
   ?assertEqual(true, lists:member({process,Client1}, W1_S5_Monitors)),
   ?assertEqual(true, lists:member({process,Client2}, W1_S5_Monitors)),
 
+  %-------------------remove client-----------------------------------
+  ok = ecomet_subscription_object:unsubscribe(Client1, id1),
+  timer:sleep(100),
+
+  W1_State6 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State6 ~p",[W1_State6]),
+
+  #state{
+    objects = W1_S6_Objects,
+    clients = W1_S6_Clients,
+    queries = #{},
+    global = ?EMPTY_SET
+  } = W1_State6,
+
+  ?assertEqual(
+    #{
+      O => #object{
+        instance = ecomet_object:construct(O),
+        clients = #{
+          Client2 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id2])
+          }
+        },
+        queries = [],
+        fields = #{
+          <<".oid">> => O,
+          object => ecomet_object:construct(O),
+          <<".readgroups">> => [],
+          <<"f1">> => <<"object1 f1 value">>,
+          <<"f3">> => 2
+        },
+        fields_ref = #{
+          <<".oid">> => 1,
+          object => 1,
+          <<".readgroups">> => 1,
+          <<"f1">> => 1,
+          <<"f3">> => 1
+        }
+      }
+    },
+    W1_S6_Objects
+  ),
+
+  ?assertEqual(
+    #{
+      Client2 => #client{
+        monitor = W1_S2_C2_MRef,
+        usergroups = is_admin,
+        subs = #{
+          id2 => #o_sub{
+            fields = F1_F3,
+            read = ReadF1F3,
+            no_feedback = true,
+            oid = O
+          }
+        }
+      }
+    },
+    W1_S6_Clients
+  ),
+
+  {monitors, W1_S6_Monitors} = erlang:process_info(W1, monitors),
+  ?assertEqual(false, lists:member({process,Client1}, W1_S6_Monitors)),
+  ?assertEqual(true, lists:member({process,Client2}, W1_S6_Monitors)),
+
+  exit(Client1, stop),
+
+  %------------------remove all clients------------------------------
+  exit(Client2, stop),
+  timer:sleep(100),
+
+  ?assertEqual(
+    #state{
+      objects = #{},
+      clients = #{},
+      queries = #{},
+      global = ?EMPTY_SET
+    },
+    sys:get_state(W1)
+  ),
+
+  {monitors, W1_S7_Monitors} = erlang:process_info(W1, monitors),
+  ?assertEqual(false, lists:member({process,Client2}, W1_S7_Monitors)),
+
   ok.
 
 %%-------------client loop--------------------

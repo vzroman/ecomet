@@ -312,6 +312,15 @@ handle_cast(Request,State) ->
   ?LOGWARNING("unexpected cast request ~p", [Request]),
   {noreply, State}.
 
+handle_info({'DOWN', _Ref, process, Client, _Reason}, State0) ->
+  try
+    State = destroy_client(Client, State0),
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("remove object subscription error: ~p, stack ~p",[E,S]),
+      {noreply, State0}
+  end;
 
 handle_info(Info, State) ->
   ?LOGWARNING("unexpected info event ~p", [Info]),
@@ -372,6 +381,29 @@ unsubscribe(
     }->
       State1 = remove_object_subscription(ClientID, SubsID, State0),
       remove_client_subs(ClientID, [SubsID], State1);
+    _->
+      State0
+  end.
+
+destroy_client(
+    ClientID,
+    State0 = #state{
+      clients = Clients
+    }
+)->
+  case Clients of
+    #{
+      ClientID := #client{
+        subs = ClientSubs
+      }
+    } ->
+      lists:foldl(
+        fun(SubsID, Acc)->
+          unsubscribe(ClientID, SubsID, Acc)
+        end,
+        State0,
+        maps:keys(ClientSubs)
+      );
     _->
       State0
   end.
