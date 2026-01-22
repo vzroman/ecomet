@@ -323,14 +323,308 @@ subscribe_object_test(Config) ->
     W1_S1_Clients
   ),
 
+  {monitors, W1_S1_Monitors} = erlang:process_info(W1, monitors),
+  ?assertEqual(true, lists:member({process,Client1}, W1_S1_Monitors)),
+
+  %-------------------Client 2--------------------------------------
+  Client2 = start_client(),
+  {F2_F3, ReadF2F3} = ecomet_query:compile_subscribe_read(
+    [<<"f2">>,<<"f3">>],
+    fun ecomet:to_string/2
+  ),
+
+  ok = ecomet_subscription_object:subscribe(Subscribe1#subscribe{
+    client = Client2,
+    read = ReadF2F3,
+    deps = F2_F3
+  }),
+
+  ?SUBSCRIPTION(id1,create,O,Fields23) = from_client(Client2),
+  ?assertEqual(
+    #{
+      <<"f2">> => <<"object1 f2 value">>,
+      <<"f3">> => <<"1">>
+    },
+    Fields23
+  ),
+
+  W1_State2 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State2 ~p",[W1_State2]),
+
+  #state{
+    objects = W1_S2_Objects,
+    clients = W1_S2_Clients,
+    queries = #{},
+    global = ?EMPTY_SET
+  } = W1_State2,
+
+  ?assertEqual(
+    #{
+      O => #object{
+        instance = ecomet_object:construct(O),
+        clients = #{
+          Client1 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id1])
+          },
+          Client2 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id1])
+          }
+        },
+        queries = [],
+        fields = #{
+          <<".oid">> => O,
+          object => ecomet_object:construct(O),
+          <<".readgroups">> => [],
+          <<"f1">> => <<"object1 f1 value">>,
+          <<"f2">> => <<"object1 f2 value">>,
+          <<"f3">> => 1
+        },
+        fields_ref = #{
+          <<".oid">> => 1,
+          object => 1,
+          <<".readgroups">> => 1,
+          <<"f1">> => 1,
+          <<"f2">> => 2,
+          <<"f3">> => 1
+        }
+      }
+    },
+    W1_S2_Objects
+  ),
+
+  #{
+    Client2 := #client{
+      monitor = W1_S2_C2_MRef
+    }
+  } = W1_S2_Clients,
+
+  ?assertEqual(
+    #{
+      Client1 => #client{
+        monitor = W1_S1_C1_MRef,
+        usergroups = is_admin,
+        subs = #{
+          id1 => #o_sub{
+            fields = F1_F2,
+            read = ReadF1F2,
+            no_feedback = false,
+            oid = O
+          }
+        }
+      },
+      Client2 => #client{
+        monitor = W1_S2_C2_MRef,
+        usergroups = is_admin,
+        subs = #{
+          id1 => #o_sub{
+            fields = F2_F3,
+            read = ReadF2F3,
+            no_feedback = false,
+            oid = O
+          }
+        }
+      }
+    },
+    W1_S2_Clients
+  ),
+
+  {monitors, W1_S2_Monitors} = erlang:process_info(W1, monitors),
+  ?assertEqual(true, lists:member({process,Client1}, W1_S2_Monitors)),
+  ?assertEqual(true, lists:member({process,Client2}, W1_S2_Monitors)),
+
+  %-------------------Client 2 subscription 2-------------------------
+  {F1_F3, ReadF1F3} = ecomet_query:compile_subscribe_read(
+    [<<"f1">>,<<"f3">>],
+    undefined
+  ),
+
+  ok = ecomet_subscription_object:subscribe(Subscribe1#subscribe{
+    id = id2,
+    client = Client2,
+    read = ReadF1F3,
+    deps = F1_F3,
+    params = #{
+      stateless => true,
+      no_feedback => true
+    }
+  }),
+
+  message_timeout = from_client(Client2, 2000),
+
+  W1_State3 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State3 ~p",[W1_State3]),
+
+  #state{
+    objects = W1_S3_Objects,
+    clients = W1_S3_Clients,
+    queries = #{},
+    global = ?EMPTY_SET
+  } = W1_State3,
+
+  ?assertEqual(
+    #{
+      O => #object{
+        instance = ecomet_object:construct(O),
+        clients = #{
+          Client1 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id1])
+          },
+          Client2 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id1,id2])
+          }
+        },
+        queries = [],
+        fields = #{
+          <<".oid">> => O,
+          object => ecomet_object:construct(O),
+          <<".readgroups">> => [],
+          <<"f1">> => <<"object1 f1 value">>,
+          <<"f2">> => <<"object1 f2 value">>,
+          <<"f3">> => 1
+        },
+        fields_ref = #{
+          <<".oid">> => 1,
+          object => 1,
+          <<".readgroups">> => 1,
+          <<"f1">> => 2,
+          <<"f2">> => 2,
+          <<"f3">> => 2
+        }
+      }
+    },
+    W1_S3_Objects
+  ),
+
+  ?assertEqual(
+    #{
+      Client1 => #client{
+        monitor = W1_S1_C1_MRef,
+        usergroups = is_admin,
+        subs = #{
+          id1 => #o_sub{
+            fields = F1_F2,
+            read = ReadF1F2,
+            no_feedback = false,
+            oid = O
+          }
+        }
+      },
+      Client2 => #client{
+        monitor = W1_S2_C2_MRef,
+        usergroups = is_admin,
+        subs = #{
+          id1 => #o_sub{
+            fields = F2_F3,
+            read = ReadF2F3,
+            no_feedback = false,
+            oid = O
+          },
+          id2 => #o_sub{
+            fields = F1_F3,
+            read = ReadF1F3,
+            no_feedback = true,
+            oid = O
+          }
+        }
+      }
+    },
+    W1_S3_Clients
+  ),
+
+  %-------------------------update object-------------------------------
+  client_run(
+    Client2,
+    fun()->
+      ecomet:edit_object(
+        ecomet:open(O),
+        #{
+          <<"f3">> => 2
+        }
+      )
+    end
+  ),
+
+  ?LOGDEBUG("check updates"),
+  message_timeout = from_client(Client1, 2000),
+  ?assertEqual(
+    ?SUBSCRIPTION(id1, update, O, #{ <<"f3">> => <<"2">> }),
+    from_client(Client2, 2000)
+  ),
+
+  % No notification by id2 because it's no_feedback = true
+  message_timeout = from_client(Client2, 2000),
+
+  W1_State4 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State4 ~p",[W1_State4]),
+
+  #state{
+    objects = W1_S4_Objects,
+    clients = W1_S4_Clients,
+    queries = #{},
+    global = ?EMPTY_SET
+  } = W1_State4,
+
+  ?assertEqual(
+    #{
+      O => #object{
+        instance = ecomet_object:construct(O),
+        clients = #{
+          Client1 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id1])
+          },
+          Client2 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id1,id2])
+          }
+        },
+        queries = [],
+        fields = #{
+          <<".oid">> => O,
+          object => ecomet_object:construct(O),
+          <<".readgroups">> => [],
+          <<"f1">> => <<"object1 f1 value">>,
+          <<"f2">> => <<"object1 f2 value">>,
+          <<"f3">> => 2
+        },
+        fields_ref = #{
+          <<".oid">> => 1,
+          object => 1,
+          <<".readgroups">> => 1,
+          <<"f1">> => 2,
+          <<"f2">> => 2,
+          <<"f3">> => 2
+        }
+      }
+    },
+    W1_S4_Objects
+  ),
+
+  ?assertEqual(
+    W1_S3_Clients,
+    W1_S4_Clients
+  ),
+
   ok.
 
 %%-------------client loop--------------------
 start_client()->
   Self = self(),
-  spawn(fun()->client_loop(Self) end).
+  spawn(fun()->
+    ecomet:dirty_login(<<"system">>),
+    client_loop(Self)
+  end).
 client_loop(Self)->
   receive
+    {Self, client_run, Fun}->
+      ?LOGDEBUG("execute client_run"),
+      Res = Fun(),
+      Self ! {self(), result, Res},
+      client_loop(Self);
     Any ->
       Self ! {self(), Any},
       client_loop(Self)
@@ -342,5 +636,11 @@ from_client(Client, Timeout)->
   receive
     {Client, Message} -> Message
   after
-    Timeout -> throw(message_timeout)
+    Timeout -> message_timeout
+  end.
+
+client_run(Client, Fun)->
+  Client ! {self(), client_run, Fun},
+  receive
+    {Client, result, Result} -> Result
   end.
