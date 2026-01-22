@@ -1602,13 +1602,16 @@ notify_update(
 )->
 
   Object0 = #object{
-    fields = Fields0
+    fields = Fields0,
+    queries = Queries
   } = maps:get(OID, Objects0),
 
   Fields = maps:merge(
     Fields0,
     maps:with(maps:keys(Fields0), FieldsUpdates)
   ),
+
+  ?LOGDEBUG("DEBUG: Fields0 ~p,  FieldsUpdates ~p, Fields ~p", [Fields0, FieldsUpdates, Fields]),
 
   Object = Object0#object{
     fields = Fields
@@ -1623,7 +1626,7 @@ notify_update(
   },
 
   clients_notify(Log, Object, State),
-  queries_notify(Log, Object, State),
+  queries_notify(Queries, Log, State),
 
   State.
 
