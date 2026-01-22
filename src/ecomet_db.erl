@@ -18,6 +18,7 @@
 -module(ecomet_db).
 
 -include("ecomet.hrl").
+-include("ecomet_db.hrl").
 
 %%=================================================================
 %%	ZAYA API
@@ -63,6 +64,7 @@
 %%	TRANSACTION API
 -export([
   commit/3,
+  commit/5,
   commit1/3,
   commit2/2,
   rollback/2
@@ -170,50 +172,94 @@ wait_dbs( DBs )->
 create( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
-  maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
+  Refs =
+    maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
+      try
+        TypeRef = M:create( type_params(T, Ps, OtherParams) ),
+        Acc#{ T => {M,TypeRef}}
+      catch
+        _:E->
+          ?LOGERROR("~p type database create error ~p",[T,E]),
+          maps:map(fun(_T,{_M,_Ref})->
+            try
+              _M:close( _Ref ),
+              _M:remove( type_params(_T, maps:get(_T,TypesParams), OtherParams) )
+            catch
+              _:_E-> ?LOGERROR("~p type database rollback create error ~p",[_T,_E])
+            end
+          end, Acc),
+          throw(E)
+      end
+    end,#{}, TypesParams ),
+  LogDirectory = ?LOG_DIRECTORY(maps:get(dir, Params)),
+  Log =
     try
-      TypeRef = M:create( type_params(T, Ps, OtherParams) ),
-      Acc#{ T => {M,TypeRef}}
+      zaya_rocksdb:create(#{
+        dir => LogDirectory,
+        rocksdb => ?ENV(log, ?DEFAULT_LOG_OPTIONS)
+      })
     catch
-      _:E->
-        ?LOGERROR("~p type database create error ~p",[T,E]),
-        maps:map(fun(_T,{_M,_Ref})->
-          try
-            _M:close( _Ref ),
-            _M:remove( type_params(_T, maps:get(_T,TypesParams), OtherParams) )
-          catch
-            _:_E-> ?LOGERROR("~p type database rollback create error ~p",[_T,_E])
-          end
-        end, Acc),
-        throw(E)
-    end
-  end,#{}, TypesParams ).
+      _Class:Error ->
+        ?LOGERROR("failed to start log database in directory: ~s, error: ~p", [LogDirectory, Error]),
+        throw({
+          log_create_failed,
+          #{error => Error, directory => LogDirectory}
+        })
+    end,
+  #database{
+    log = Log,
+    storages = Refs
+  }.
 
 open( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
-  maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
+  Refs =
+    maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
+      try
+        TypeRef = M:open( type_params(T, Ps, OtherParams) ),
+        Acc#{ T => {M, TypeRef} }
+      catch
+        _:E->
+          ?LOGERROR("~p type database open error ~p",[T,E]),
+          maps:map(fun(_T,{_M,_Ref})->
+            try
+              _M:close( _Ref )
+            catch
+              _:_E-> ?LOGERROR("~p type database rollback open error ~p",[_T,_E])
+            end
+          end, Acc),
+          throw(E)
+      end
+    end,#{}, TypesParams ),
+  LogDirectory = ?LOG_DIRECTORY(maps:get(dir, Params)),
+  Log =
     try
-      TypeRef = M:open( type_params(T, Ps, OtherParams) ),
-      Acc#{ T => {M, TypeRef} }
+      zaya_rocksdb:open(#{
+        dir => LogDirectory,
+        rocksdb => ?ENV(log, ?DEFAULT_LOG_OPTIONS)
+      })
     catch
-      _:E->
-        ?LOGERROR("~p type database open error ~p",[T,E]),
-        maps:map(fun(_T,{_M,_Ref})->
-          try
-            _M:close( _Ref )
-          catch
-            _:_E-> ?LOGERROR("~p type database rollback open error ~p",[_T,_E])
-          end
-        end, Acc),
-        throw(E)
-    end
-  end,#{}, TypesParams ).
+      _Class:Error ->
+        ?LOGERROR("failed to start log database in directory: ~s, error: ~p", [LogDirectory, Error]),
+        throw({
+          log_open_failed,
+          #{error => Error, directory => LogDirectory}
+        })
+    end,
+  Reference =
+    #database{
+      log = Log,
+      log_dir = LogDirectory,
+      storages = Refs
+    },
+  ok = rollback_recovery(Reference),
+  Reference.
 
 type_params(Type, Params, #{dir := Dir} = OtherParams )->
   maps:merge( OtherParams#{ dir => Dir ++ "/" ++ atom_to_list(Type) }, maps:without([dir],Params) ).
 
-close( Ref )->
+close( #database{log = Log, storages = Storages} )->
   case maps:fold(fun(_Type,{Module, TRef},Errs)->
     try
       Module:close( TRef ),
@@ -221,11 +267,12 @@ close( Ref )->
     catch
       _:E->[E|Errs]
     end
-  end,[], Ref ) of
+  end,[], Storages ) of
     []->ok;
     Errors->
       throw(Errors)
-  end.
+  end,
+  try zaya_rocksdb:close(Log) catch _:_ -> ok end.
 
 remove( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
@@ -241,52 +288,65 @@ remove( Params )->
     []->ok;
     Errors->
       throw(Errors)
-  end.
+  end,
+  LogDirectory = ?LOG_DIRECTORY(maps:get(dir, Params)),
+  try
+    zaya_rocksdb:remove(#{dir => LogDirectory})
+  catch
+    _Class:Error ->
+      ?LOGERROR("failed to remove log database in directory: ~s, error: ~p", [LogDirectory, Error]),
+      throw({
+        log_remove_failed,
+        #{error => Error, directory => LogDirectory}
+      })
+  end,
+  ok.
 
 %%	LOW_LEVEL
-read( Ref, [#key{type = T,storage = S,key = K}=Key|Rest])->
-  case Ref of
+read( #database{storages = Storages} = DB, [#key{type = T,storage = S,key = K}=Key|Rest])->
+  case Storages of
     #{ T := {Module, TRef} }->
       case try Module:read(TRef, [{S,[K]}]) catch _:_->error end of
         [{_,V}]->
-          [{Key,V}| read(Ref, Rest ) ];
+          [{Key,V}| read(DB, Rest ) ];
         _->
-          read(Ref, Rest)
+          read(DB, Rest)
       end;
     _->
-      read( Ref, Rest )
+      read( DB, Rest )
   end;
 read( Ref, [_InvalidKey| Rest] )->
   read( Ref, Rest );
 read(_Ref,[])->
   [].
 
-write(Ref, KVs)->
+write(#database{} = DB, KVs)->
 
   % Not transactional writes only used by zaya copy engine
   % there is no need in to cross module two phase commit
   % because is something goes wrong the copy will be destroyed and restarted
 
   {Data, IndexLog} = prepare_write( KVs ),
+  Commit = get_commit(Data, _Delete = none, IndexLog),
 
-  commit( Ref, Data, _Delete = #{}, IndexLog ).
+  one_phase_commit( DB, Commit ).
 
-
-delete(Ref, Keys)->
+delete(#database{} = DB, Keys)->
 
   % Not transactional deletes only used by zaya copy engine
   % there is no need in to cross module two phase commit
   % because is something goes wrong the copy will be destroyed and restarted
 
   Delete = prepare_delete( Keys ),
+  Commit = get_commit(_Data = none, Delete, _IndexLog = none),
 
-  commit( Ref, _Data = #{}, Delete, _IndexLog = #{} ).
+  one_phase_commit( DB, Commit ).
 
 
 %%	ITERATOR
-first( Ref )->
-  Types = lists:usort(maps:keys( Ref )),
-  first(Types, Ref).
+first( #database{storages = Storages} )->
+  Types = lists:usort(maps:keys( Storages )),
+  first(Types, Storages).
 first([T|Rest], Ref)->
   #{T := {Module, TRef}} = Ref,
   try
@@ -298,9 +358,9 @@ first([T|Rest], Ref)->
 first([], _Ref)->
   undefined.
 
-last( Ref )->
-  Types = lists:usort(maps:keys( Ref )),
-  last(lists:reverse(Types), Ref).
+last( #database{storages = Storages} )->
+  Types = lists:usort(maps:keys( Storages )),
+  last(lists:reverse(Types), Storages).
 last([T|Rest], Ref)->
   #{T := {Module, TRef}} = Ref,
   try
@@ -312,27 +372,27 @@ last([T|Rest], Ref)->
 last([], _Ref)->
   undefined.
 
-next( Ref, #key{type = T, storage = S, key = K}=Key)->
-  case Ref of
+next( #database{storages = Storages} = DB, #key{type = T, storage = S, key = K}=Key)->
+  case Storages of
     #{T := {Module, TRef}}->
       case Module:next(TRef,{S,[K]}) of
         {{S,[Next]}, V}->
           {Key#key{ key = Next }, V};
         _->
-          first( maps:filter(fun(Type,_)-> Type > T end, Ref) )
+          first( DB#database{storages = maps:filter(fun(Type,_)-> Type > T end, Storages)} )
       end;
     _->
       throw(invalid_type)
   end.
 
-prev( Ref, #key{type = T, storage = S, key = K}=Key)->
-  case Ref of
+prev( #database{storages = Storages} = DB, #key{type = T, storage = S, key = K}=Key)->
+  case Storages of
     #{T := {Module, TRef}}->
       case Module:prev(TRef,{S,[K]}) of
         {{S,[Prev]}, V}->
           {Key#key{ key = Prev }, V};
         _->
-          last( maps:filter(fun(Type,_)-> Type < T end, Ref) )
+          last( DB#database{storages = maps:filter(fun(Type,_)-> Type < T end, Storages)} )
       end;
     _->
       throw(invalid_type)
@@ -340,9 +400,9 @@ prev( Ref, #key{type = T, storage = S, key = K}=Key)->
 
 %%	HIGH-LEVEL
 %----------------------FIND------------------------------------------
-find( Ref, InQuery )->
-  {Types, Query} = query_types( InQuery, Ref),
-  find( Types, Ref, Query, [] ).
+find( #database{storages = Storages}, InQuery )->
+  {Types, Query} = query_types( InQuery, Storages),
+  find( Types, Storages, Query, [] ).
 find([T|Rest], Ref, Query, Acc)->
   #{T := {Module, TRef}} = Ref,
   TypeResult = [{ #key{type = T, storage = S, key = K}, V } || {{S,[K]}, V} <- Module:find( TRef, Query )],
@@ -351,9 +411,9 @@ find([], _Ref, _Query, Acc)->
   lists:append( lists:reverse(Acc) ).
 
 %----------------------FOLD LEFT------------------------------------------
-foldl( Ref, InQuery, Fun, InAcc )->
-  {Types, Query} = query_types( InQuery, Ref),
-  foldl(Types, Ref, Query, Fun, InAcc).
+foldl( #database{storages = Storages}, InQuery, Fun, InAcc )->
+  {Types, Query} = query_types( InQuery, Storages),
+  foldl(Types, Storages, Query, Fun, InAcc).
 foldl([T|Rest], Ref, Query, InFun, InAcc )->
   #{T := {Module, TRef}} = Ref,
   Fun =
@@ -367,9 +427,9 @@ foldl([], _Ref, _Query, _Fun, Acc )->
 
 
 %----------------------FOLD RIGHT------------------------------------------
-foldr( Ref, InQuery, Fun, InAcc )->
-  {Types, Query} = query_types( InQuery, Ref),
-  foldr(lists:reverse(Types), Ref, Query, Fun, InAcc).
+foldr( #database{storages = Storages}, InQuery, Fun, InAcc )->
+  {Types, Query} = query_types( InQuery, Storages),
+  foldr(lists:reverse(Types), Storages, Query, Fun, InAcc).
 foldr([T|Rest], Ref, Query, InFun, InAcc )->
   #{T := {Module, TRef}} = Ref,
   Fun =
@@ -389,26 +449,31 @@ query_types(Query, Ref)->
   {Types, Query}.
 
 %%	COPY
-copy(Ref, Fun, InAcc)->
-  foldl(Ref, #{}, Fun, InAcc).
+copy(#database{storages = Storages}, Fun, InAcc)->
+  foldl(Storages, #{}, Fun, InAcc).
 
-dump_batch(Ref, KVs)->
-  write(Ref, KVs).
+dump_batch(#database{storages = Storages}, KVs)->
+  write(Storages, KVs).
+  
+%%% +--------------------------------------------------------------+
+%%% |                      Transaction Commit                      |
+%%% +--------------------------------------------------------------+
 
-%%	TRANSACTION
-%-------------Commit to a single storage
-commit(Ref, KVs, Keys) when map_size( Ref ) =:= 1->
-  {Data, IndexLog} = prepare_write( KVs ),
+%% Commit Preparation
+commit(#database{} = DB, KVs, Keys) ->
+  {Data, Index} = prepare_write( KVs ),
   Delete = prepare_delete( Keys ),
-  commit( Ref, Data, Delete, IndexLog );
-
-commit(Ref, KVs, Keys)->
-
-  {Data, IndexLog} = prepare_write( KVs ),
-  Delete = prepare_delete( Keys ),
-  case needs_log( Data, Delete ) of
-    false -> commit( Ref, Data, Delete, IndexLog );
-    true -> two_phase_commit( Ref, Data, Delete, IndexLog )
+  Commit =
+    #commit{
+      data = Data,
+      delete = Delete,
+      index = Index
+    },
+  case is_cross_storage(DB, Commit) of
+    true ->
+      two_phase_commit(DB, Commit);
+    false ->
+      one_phase_commit(DB, Commit)
   end.
 
 commit1(_Ref, KVs, Keys)->
@@ -417,50 +482,73 @@ commit1(_Ref, KVs, Keys)->
 commit2(Ref, {KVs, Keys})->
   commit( Ref, KVs, Keys ).
 
-rollback( _Ref, _TRef )->
-  ok.
+commit(Ref, Module, Data, Delete, Index) ->
+  commit(
+    #storage{
+      module = Module,
+      ref = Ref,
+      commit = #commit{
+        data = Data,
+        delete = Delete,
+        index = Index
+      }
+    }
+  ).
 
-commit(Ref, Data, Delete, IndexLog)->
+%% Only write commit (no index, no delete)
+commit(
+  #storage{
+    module = Module,
+    ref = Ref,
+    commit = #commit{
+      data = Data,
+      delete = none,
+      index = none
+    }
+  }
+) ->
+  Module:write(Ref, Data);
 
-  Storages = get_commit_storages( Data, Delete ),
-  case Storages -- maps:keys( Ref ) of
-    [] -> ok;
-    Invalid ->
-      %% ATTENTION! If the user tries to save object with storage type
-      %% that is not in the DB then it will crash here
-      ?LOGERROR("attempt to save to not configured storage types: ~p",[ Invalid ]),
-      throw({ invalid_storage_type, Invalid })
-  end,
+%% Only delete commit (no index, no write)
+commit(
+  #storage{
+    module = Module,
+    ref = Ref,
+    commit = #commit{
+      data = none,
+      delete = Delete,
+      index = none
+    }
+  }
+) ->
+  Module:delete(Ref, Delete);
 
-  % Order commit the heavier types go first
-  CommitOrder = [ ramdisc, disc, ram ],
-  Ordered = CommitOrder -- ( CommitOrder -- Storages ),
+%% Write and delete with no index
+commit(
+  #storage{
+    module = Module,
+    ref = Ref,
+    commit = #commit{
+      data = Data,
+      delete = Delete,
+      index = none
+    }
+  }
+) ->
+  Module:commit(Ref, Data, Delete);
 
-  [ begin
-      { Module, TRef } = maps:get(T, Ref),
-      TData = maps:get( T, Data, none ),
-      TDelete = maps:get( T, Delete, none ),
-      TIndexLog = maps:get( T, IndexLog, none ),
-      commit( TRef, Module, TData, TDelete, TIndexLog )
-    end || T <- Ordered],
-
-  ok.
-
-%%-----------------Only write commit (no index, no delete)----------------------------------
-commit(Ref, Module, Data, _Delete = none, _IndexLog = none) ->
-  Module:write( Ref, Data);
-
-%%-----------------Only delete commit (no index, no write)----------------------------------
-commit(Ref, Module, _Data = none, Delete, _IndexLog = none) ->
-  Module:delete( Ref, Delete);
-
-%%-----------------Write and delete with no index----------------------------------
-commit(Ref, Module, Data , Delete , _IndexLog = none) ->
-  Module:commit( Ref, Data, Delete);
-
-%%-----------------Write commit with index (no delete)----------------------------------
-commit(Ref, Module, Data, _Delete = none, IndexLog) ->
-
+%% Write commit with index (no delete)
+commit(
+  #storage{
+    module = Module,
+    ref = Ref,
+    commit = #commit{
+      data = Data,
+      delete = none,
+      index = IndexLog
+    }
+  }
+) ->
   {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
   try
     case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
@@ -473,9 +561,18 @@ commit(Ref, Module, Data, _Delete = none, IndexLog) ->
     Unlock()
   end;
 
-%%-----------------Delete commit with index (no write)----------------------------------
-commit(Ref, Module, _Data = none, Delete, IndexLog) ->
-
+%% Delete commit with index (no write)
+commit(
+  #storage{
+    module = Module,
+    ref = Ref,
+    commit = #commit{
+      data = none,
+      delete = Delete,
+      index = IndexLog
+    }
+  }
+) ->
   {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
   try
     case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
@@ -488,9 +585,18 @@ commit(Ref, Module, _Data = none, Delete, IndexLog) ->
     Unlock()
   end;
 
-commit(Ref, Module, Data, Delete, IndexLog)->
+commit(
+  #storage{
+    module = Module,
+    ref = Ref,
+    commit = #commit{
+      data = Data,
+      delete = Delete,
+      index = IndexLog
+    }
+  }
+) ->
   {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
-
   try
     { IndexWrite, IndexDel } = ecomet_index:prepare_write(Module, Ref, IndexLog ),
     if
@@ -505,9 +611,153 @@ commit(Ref, Module, Data, Delete, IndexLog)->
     Unlock()
   end.
 
-two_phase_commit( Ref, Data, Delete, IndexLog )->
-  % TODO
-  commit( Ref, Data, Delete, IndexLog ).
+%% Single Storage Commit
+one_phase_commit(DB, Commit)->
+  Types = get_storage_types(DB, Commit),
+  [begin
+     CommitStorage = get_commit_storage(DB, Commit, Type),
+     ok = commit(CommitStorage)
+   end || Type <- Types],
+  ok.
+
+%% Multi Storage Commit
+two_phase_commit(DB, Commit) ->
+  Types = get_storage_types(DB, Commit),
+  Rollback = rollback_prepare(DB, Commit, Types),
+  try
+    [begin
+      CommitStorage = get_commit_storage(DB, Commit, Type),
+      ok = commit(CommitStorage)
+     end || Type <- Types],
+    ok = delete_rollback_ref(DB, Rollback)
+  catch
+    _Class:Error:Stacktrace ->
+      ?LOGERROR("failed to commit, error: ~p, stacktrace: ~p", [Error, Stacktrace]),
+      ok = rollback(DB, Rollback),
+      ok = delete_rollback_ref(DB, Rollback),
+      throw({
+        commit_failed,
+        #{error => Error, stacktrace => Stacktrace}
+      })
+  end,
+  ok.
+
+%%% +--------------------------------------------------------------+
+%%% |                      Transaction Rollback                    |
+%%% +--------------------------------------------------------------+
+
+%% NOTE & TODO: For performance, we use RocksDB async writes.
+%% This is crash-consistent for Erlang / OS process crashes (data reaches OS buffers),
+%% but it is NOT fully durable across machine crashes or power loss: the latest
+%% writes may be lost. (rocksdb/wiki/basic-operations)
+%% If stronger durability will be required, we may consider enabling sync=true
+%% and / or periodically syncing the WAL in the future.
+
+%% Rollback a transaction by TRef.
+%%  - Load rollback data from Zaya RocksDB.
+%%  - Apply rollbacks for each storage.
+%%  - Delete the transaction reference (TRef) on success.
+rollback(
+  #database{
+    storages = Storages
+  } = DB,
+  #rollback{
+    ref = TRef,
+    volatile = VolatileRollback
+  }
+)->
+  Rollback = log_read(DB, [TRef]),
+  
+  [try
+     {Module, StorageRef} = maps:get(Type, Storages),
+     ok = commit(StorageRollback#storage{ref = StorageRef, module = Module})
+   catch
+     _Class:Error:Stacktrace ->
+       ?LOGERROR("failed to commit to storage type: ~p, error: ~p, stacktrace: ~p", [
+         Type,
+         Error,
+         Stacktrace
+       ]),
+       ignore
+   end || #storage{type = Type} = StorageRollback <- Rollback],
+   
+  case VolatileRollback of
+    ignore ->
+      ignore;
+    _ ->
+      try
+        {Module, StorageRef} = maps:get(?RAM, Storages),
+        ok = commit(VolatileRollback#storage{ref = StorageRef, module = Module})
+      catch
+        _Class:Error:Stacktrace ->
+          ?LOGERROR("failed to commit to storage type: ~p, error: ~p, stacktrace: ~p", [
+            ?RAM,
+            Error,
+            Stacktrace
+          ])
+      end
+  end,
+  
+  ok.
+
+%% Create rollback before applying upcoming commits.
+%%  - Generate a rollback for each storage.
+%%  - Return the transaction reference (TRef) required to commit or rollback.
+rollback_prepare(
+  #database{
+    storages = Storages
+  } = DB,
+  Commit,
+  StorageTypes
+) ->
+  Rollback =
+    [begin
+       rollback_prepare_storage(Commit, Type, Storages)
+     end || Type <- StorageTypes, Type =/= ?RAM],
+  VolatileRollback =
+    case lists:member(?RAM, StorageTypes) of
+      true  -> rollback_prepare_storage(Commit, ?RAM, Storages);
+      false -> ignore
+    end,
+  TRef = make_ref(),
+  log_write(DB, [{TRef, Rollback}]),
+  #rollback{
+    ref = TRef,
+    volatile = VolatileRollback
+  }.
+
+%% Recover from the transaction log after the DB is opened.
+%%  - Scan all rollback entries in Zaya RocksDB.
+%%  - Apply each rollback for each storage.
+%%  - Delete the transaction reference (TRef) after successful execution.
+rollback_recovery(
+  #database{
+    log = Log,
+    log_dir = Directory,
+    storages = Storages
+  }
+) ->
+  zaya_rocksdb:foldl(
+    Log,
+    _Query = #{},
+    fun({TRef, Rollback}, ok) ->
+      [try
+         {Module, StorageRef} = maps:get(Type, Storages),
+         commit(StorageRollback#storage{module = Module, ref = StorageRef})
+       catch
+         _Class:Error:Stacktrace ->
+           ?LOGERROR("failed to rollback from log: ~s, storage type: ~p, error: ~p, stacktrace: ~p", [
+             Directory,
+             Type,
+             Error,
+             Stacktrace
+           ]),
+           timer:sleep(infinity)
+       end || #storage{type = Type} = StorageRollback <- Rollback],
+       ok = zaya_rocksdb:delete(Log, [TRef])
+    end,
+    ok
+  ).
 
 prepare_write( Write )->
   lists:foldl(fun( { #key{ type = T, storage = S, key = K }, V}, {DAcc, IAcc})->
@@ -530,20 +780,13 @@ prepare_delete( Delete )->
     Acc#{ T => [{S,[K]} | TypeAcc]}
   end,#{}, Delete).
 
-needs_log( Data, Delete )->
-  Storages = get_commit_storages( Data, Delete ),
-  lists:member( disc, Storages ) andalso lists:member( ramdisc, Storages ).
-
-get_commit_storages( Data, Delete )->
-  lists:usort( maps:keys( Data ) ++ maps:keys( Delete )).
-
 %%=================================================================
 %%	INFO
 %%=================================================================
-get_size( Ref )->
+get_size( #database{storages = Storages} )->
   maps:map(fun(_Type,{Module,TRef})->
     Module:get_size( TRef )
-  end, Ref).
+  end, Storages).
 
 %%================================================================
 %% ECOMET
@@ -970,3 +1213,210 @@ check_tags(Object)->
         {error, Error} -> throw({ set_db_tags, DB, NewTags, Error })
       end
   end.
+
+%%% +--------------------------------------------------------------+
+%%% |                Zaya RocksDB Interface Functions              |
+%%% +--------------------------------------------------------------+
+
+log_read(#database{log = Log, log_dir = Dir}, Keys) ->
+  try
+    zaya_rocksdb:read(Log, Keys)
+  catch
+    _Class:Error ->
+      ?LOGERROR("failed to read from log: ~s, error: ~p", [Dir, Error]),
+      throw({
+        read_failed,
+        #{error => Error, directory => Dir}
+      })
+  end.
+  
+log_write(#database{log = Log, log_dir = Dir}, KVs) ->
+  try
+    zaya_rocksdb:write(Log, KVs)
+  catch
+    _Class:Error ->
+      ?LOGERROR("failed to write to log: ~s, error: ~p", [Dir, Error]),
+      throw({
+        write_failed,
+        #{error => Error, directory => Dir}
+      })
+  end.
+  
+log_delete(#database{log = Log, log_dir = Dir}, Keys) ->
+  try
+    zaya_rocksdb:delete(Log, Keys)
+  catch
+    _Class:Error ->
+      ?LOGERROR("failed to write to log: ~s, error: ~p", [Dir, Error]),
+      throw({
+        delete_failed,
+        #{error => Error, directory => Dir}
+      })
+  end.
+
+%%% +--------------------------------------------------------------+
+%%% |                 Transaction Helper Functions                 |
+%%% +--------------------------------------------------------------+
+
+%% Format of write: [{K1, V1}, ..., {KN, VN}]
+%% Format of delete: [K1, ..., KN]
+rollback_prepare_storage(
+  #commit{
+    data = Data,
+    delete = Delete,
+    index = Index
+  },
+  StorageType,
+  Storages
+) ->
+  StorageWrite = maps:get(StorageType, Data, []),
+  StorageDelete = maps:get(StorageType, Delete, []),
+  StorageIndex = ecomet_index:inverse_index(Index),
+  
+  Keys = lists:usort([K || {K, _} <- StorageWrite] ++ StorageDelete),
+  
+  % Read old values from storage, preserves the key order
+  % Returns: [{Key1, Value1}, ..., {KeyN, ValueN}]
+  {Module, StorageRef} = maps:get(StorageType, Storages),
+  
+  ReadData =
+    try
+      maps:from_list(Module:read(StorageRef, Keys))
+    catch
+      _Class:Error ->
+        ?LOGERROR("failed to read from module: ~p, error: ~p", [
+          Module,
+          Error
+        ]),
+        throw({
+          read_failed,
+          #{error => Error, module => Module}
+        })
+    end,
+  
+  % Undo for 'write' operation
+  UndoWrite =
+    lists:foldl(
+      fun({Key, Value}, Acc) ->
+        case ReadData of
+          #{Key := Value} ->
+            Acc;
+          #{Key := ReadValue} ->
+            [{Key, ReadValue} | Acc];
+          _Other ->
+            [Key | Acc]
+        end
+      end,
+      [],
+      StorageWrite
+    ),
+  
+  % Undo for 'delete' operation
+  UndoDelete =
+    lists:foldl(
+      fun(Key, Acc) ->
+        case ReadData of
+          #{Key := ReadValue} ->
+            [{Key, ReadValue} | Acc];
+          _Other ->
+            Acc
+        end
+      end,
+      UndoWrite,
+      StorageDelete
+    ),
+  
+  {WriteOut, DeleteOut} =
+    lists:partition(
+      fun
+        ({_Key, _Value}) ->
+          true;
+        (_) ->
+          false
+      end,
+      UndoDelete
+    ),
+  
+  #storage{
+    type = StorageType,
+    commit = #commit{
+      data = if length(WriteOut) > 0 -> WriteOut; true -> none end,
+      delete = if length(DeleteOut) > 0 -> DeleteOut; true -> none end,
+      index = maps:get(StorageType, StorageIndex, none)
+    }
+  }.
+
+delete_rollback_ref(
+  DB,
+  #rollback{ref = TRef}
+) ->
+  ok = log_delete(DB, [TRef]).
+
+get_storage_types(
+  #database{
+    storages = Storages
+  },
+  #commit{
+    data = Data,
+    delete = Delete
+  }
+) ->
+  StorageTypes = lists:usort(maps:keys(Data) ++ maps:keys(Delete)),
+  case StorageTypes -- maps:keys(Storages) of
+    [] ->
+      ok;
+    Invalid ->
+      % ATTENTION! If the user tries to save object with storage type
+      % that is not in the DB then it will crash here
+      ?LOGERROR("commit rejected, unconfigured storage type(s): ~p, configured type(s): ~p", [
+        Invalid,
+        maps:keys(Storages)
+      ]),
+      throw({invalid_storage_type, Invalid})
+  end,
+  % Order commit the heavier types go first
+  CommitOrder = [ramdisc, disc, ram],
+  CommitOrder -- (CommitOrder -- StorageTypes).
+  
+is_cross_storage(
+  #database{storages = Storages},
+  #commit{}
+) when map_size(Storages) =:= 1 ->
+  false;
+is_cross_storage(
+  #database{},
+  #commit{data = Data, delete = Delete}
+) ->
+  Storages = lists:usort(maps:keys(Data) ++ maps:keys(Delete)),
+  lists:member(disc, Storages) andalso lists:member(ramdisc, Storages).
+  
+get_commit_storage(
+  #database{
+    storages = Storages
+  },
+  #commit{
+    data = Data,
+    delete = Delete,
+    index = Index
+  },
+  StorageType
+) ->
+  {Module, TRef} = maps:get(StorageType, Storages),
+  Commit =
+    get_commit(
+      maps:get(StorageType, Data, none),
+      maps:get(StorageType, Delete, none),
+      maps:get(StorageType, Index, none)
+    ),
+  #storage{
+    module = Module,
+    ref = TRef,
+    commit = Commit
+  }.
+  
+get_commit(Data, Delete, Index) ->
+  #commit{
+    data = Data,
+    delete = Delete,
+    index = Index
+  }.

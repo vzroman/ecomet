@@ -25,7 +25,8 @@
 -export([
   build_index/3,
   destroy_index/2,
-  prepare_write/3
+  prepare_write/3,
+  inverse_index/1
 ]).
 
 %% ====================================================================
@@ -440,6 +441,34 @@ udpate_value( Add, Del, Value )->
       Value1 = ecomet_bitmap:bit_or( Value, Add ),
       ecomet_bitmap:bit_andnot(Value1, Del)
   end.
+  
+%% Index log format:
+%% #{
+%%   StorageType1 => [
+%%     {K1, V1},  %% V1 is a boolean
+%%     ...
+%%     {KN, VN}
+%%   ],
+%%   ...
+%%   StorageTypeN => ...
+%% }
+inverse_index(IndexLog) ->
+  maps:fold(
+    fun(Storage, Indexes, Acc) ->
+      InverseIndexes =
+        [begin
+           NewValue =
+             case Value of
+               true -> false;
+               false -> true
+             end,
+           {Key, NewValue}
+         end || {Key, Value} <- Indexes],
+      Acc#{Storage => InverseIndexes}
+    end,
+    #{},
+    IndexLog
+  ).
 
 %%==============================================================================================
 %%	Search
