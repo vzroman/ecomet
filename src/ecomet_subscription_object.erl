@@ -223,7 +223,7 @@ init([]) ->
 %% OTP generic server callbacks
 %%===================================================================
 handle_call(#subscribe{} = Subscription, _From, State0) ->
-
+  ?LOGDEBUG("subscribe ~p",[Subscription]),
   try
     State = add_subscription(Subscription, State0),
     {reply, ok, State}
@@ -237,6 +237,7 @@ handle_call(Request, _From, State) ->
   {noreply, State}.
 
 handle_cast({notify, Log}, State0) ->
+  ?LOGDEBUG("notify ~p",[Log]),
   try
     State = notify(Log, State0),
     {noreply, State}
@@ -247,6 +248,7 @@ handle_cast({notify, Log}, State0) ->
   end;
 
 handle_cast({unsubscribe, Client, SubsID}, State0) ->
+  ?LOGDEBUG("unsubscribe ~p ~p",[Client, SubsID]),
   try
     State = unsubscribe(Client, SubsID, State0),
     {noreply, State}
@@ -257,6 +259,7 @@ handle_cast({unsubscribe, Client, SubsID}, State0) ->
   end;
 
 handle_cast({init_query, Ref, Subscription, Set}, State0) ->
+  ?LOGDEBUG("init_query: Ref ~p, Subscription ~p",[Ref, Subscription]),
   try
     State = add_query(Ref, Subscription, Set, State0),
     {noreply, State}
@@ -267,6 +270,7 @@ handle_cast({init_query, Ref, Subscription, Set}, State0) ->
   end;
 
 handle_cast({add_query_client, Ref, Subscription}, State0) ->
+  ?LOGDEBUG("add_query_client: Ref ~p, Subscription ~p",[Ref, Subscription]),
   try
     State = add_query_client(Ref, Subscription, State0),
     {noreply, State}
@@ -277,6 +281,7 @@ handle_cast({add_query_client, Ref, Subscription}, State0) ->
   end;
 
 handle_cast({remove_query_client, Ref, ClientID}, State0) ->
+  ?LOGDEBUG("remove_query_client: Ref ~p, ClientID ~p",[Ref, ClientID]),
   try
     State = remove_query_client(Ref, ClientID, State0),
     {noreply, State}
@@ -287,6 +292,7 @@ handle_cast({remove_query_client, Ref, ClientID}, State0) ->
   end;
 
 handle_cast({global_set, Ref, Tag, ReplyTo}, State0) ->
+  ?LOGDEBUG("global_set: Tag ~p",[Tag]),
   try
     State = global_set(Tag, State0),
     catch ReplyTo ! {confirm, Ref},
@@ -298,6 +304,7 @@ handle_cast({global_set, Ref, Tag, ReplyTo}, State0) ->
   end;
 
 handle_cast({global_reset, Ref, Tag, ReplyTo}, State0) ->
+  ?LOGDEBUG("global_set: Tag ~p",[Tag]),
   try
     State = global_reset(Tag, State0),
     catch ReplyTo ! {confirm, Ref},
@@ -312,7 +319,8 @@ handle_cast(Request,State) ->
   ?LOGWARNING("unexpected cast request ~p", [Request]),
   {noreply, State}.
 
-handle_info({'DOWN', _Ref, process, Client, _Reason}, State0) ->
+handle_info({'DOWN', _Ref, process, Client, Reason}, State0) ->
+  ?LOGDEBUG("destroy_client ~p, reason ~p",[Client, Reason]),
   try
     State = destroy_client(Client, State0),
     {noreply, State}
@@ -1768,6 +1776,18 @@ send_notification(#notification{
   read = Read,
   fields = Fields
 })->
+  ?LOGDEBUG("send_notification: ~p",[#{
+    oid => OID,
+    client_id => ClientID,
+    subs_id => SubsID,
+    access => HasAccess,
+    actor => Actor,
+    action => Action,
+    no_feedback => NoFeedback,
+    updates => Updates,
+    subs_fields => SubsFields,
+    fields => Fields
+  }]),
   if
     HasAccess =/= true ->
       ignore;
@@ -1786,6 +1806,7 @@ send_notification(#notification{
           if
             length(SubscriptionUpdates) > 0->
               Update = Read( Updates, Fields ),
+              ?LOGDEBUG("send update: action update, Client ~p, SubsID ~p, OID ~p, Update ~p",[ClientID, SubsID, OID, Update]),
               catch ClientID ! ?SUBSCRIPTION(SubsID, update, OID, Update);
             true ->
               ignore
@@ -1793,8 +1814,10 @@ send_notification(#notification{
         Action =:= create ->
           AllFields = ordsets:from_list(maps:keys(Fields)),
           Update = Read(AllFields, Fields),
+          ?LOGDEBUG("send update: action create Client ~p, SubsID ~p, OID ~p, Update ~p",[ClientID, SubsID, OID, Update]),
           catch ClientID ! ?SUBSCRIPTION(SubsID, create, OID, Update);
         Action =:= delete ->
+          ?LOGDEBUG("send update: action delete Client ~p, SubsID ~p, OID ~p",[ClientID, SubsID, OID]),
           catch ClientID ! ?SUBSCRIPTION(SubsID, delete, OID, #{})
       end
   end,

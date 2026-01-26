@@ -31,6 +31,7 @@
   logout/0,
   get_user/0, get_user/1,
   get_usergroups/0,
+  get_user_rights/1,
   get_session/0,
   get_session_info/0,
   on_init_state/0,
@@ -157,6 +158,20 @@ get_usergroups()->
           {ok, ordsets:from_list([UID|Groups])};
         true -> {ok,[UID]}
       end
+  end.
+
+get_user_rights(PID)->
+  {dictionary, Dict} = erlang:process_info(PID, dictionary),
+  case lists:keyfind(?CONTEXT, 1, Dict) of
+    {_, #state{uid=UID, groups=Groups, is_admin = IsAdmin}} ->
+      if
+        IsAdmin =:= true ->
+          {ok, is_admin};
+        true ->
+          {ok, ordsets:from_list([UID|Groups])}
+      end;
+    _ ->
+      {error, user_undefined}
   end.
 
 get_session()->

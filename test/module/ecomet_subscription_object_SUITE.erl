@@ -85,7 +85,9 @@ groups()->
   [{object_subscribe,
     [sequence],
     [
-      subscribe_object_test       % Build new fields
+      subscribe_object_test,
+      stateless_test,
+      delete_object_test
     ]
   }].
 
@@ -778,6 +780,60 @@ subscribe_object_test(Config) ->
   {monitors, W1_S7_Monitors} = erlang:process_info(W1, monitors),
   ?assertEqual(false, lists:member({process,Client2}, W1_S7_Monitors)),
 
+  ok.
+
+stateless_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"stateless_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"stateless_test f1 value">>,
+    <<"f2">> => <<"stateless_test f2 value">>,
+    <<"f3">> => 23
+  })),
+
+  Client1 = start_client(),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {<<".oid">>,'=',O},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"stateless_test f1 value">>,
+        <<"f2">> => <<"stateless_test f2 value">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ok.
+
+delete_object_test(_Config)->
+  % TODO
   ok.
 
 %%-------------client loop--------------------

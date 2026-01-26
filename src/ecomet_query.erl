@@ -217,11 +217,20 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
     client => self()
   },InParams),
 
+  UG =
+    case ecomet_user:get_user_rights( Client ) of
+      {ok, _UG} ->
+        _UG;
+      _->
+        throw({client_not_authorized, Client})
+    end,
+
   {Deps, Read} = compile_subscribe_read(Fields,Formatter),
 
   Subscribe = #subscribe{
     id = ID,
     client = Client,
+    usergroups = UG,
     dbs = DBs,
     read = Read,
     deps = Deps,
