@@ -830,6 +830,198 @@ stateless_test(Config)->
     from_client(Client1)
   ),
 
+  ok = ecomet_query:subscribe(
+    id2,
+    [root],
+    [<<"f3">>],
+    {<<".oid">>,'=',O},
+    #{
+      stateless => true,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client1, 1000)
+  ),
+
+  ok.
+
+no_feedback_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"no_feedback_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"no_feedback_test f1 value">>,
+    <<"f2">> => <<"no_feedback_test f2 value">>,
+    <<"f3">> => 34
+  })),
+
+  %-------------------no_feedback = false-------------------------
+  Client1 = start_client(),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {<<".oid">>,'=',O},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"no_feedback_test f1 value">>,
+        <<"f2">> => <<"no_feedback_test f2 value">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ecomet:edit_object(ecomet:open(O),#{
+    <<"f1">> => <<"no_feedback_test f1 value 2">>
+  }),
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O,
+      #{
+        <<"f1">> => <<"no_feedback_test f1 value 2">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  client_run(
+    Client1,
+    fun()->
+      ecomet:edit_object(ecomet:open(O),#{
+        <<"f2">> => <<"no_feedback_test f2 value 2">>
+      })
+    end
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O,
+      #{
+        <<"f2">> => <<"no_feedback_test f2 value 2">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  %-------------------no_feedback = true-------------------------
+  Client2 = start_client(),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {<<".oid">>,'=',O},
+    #{
+      stateless => false,
+      no_feedback => true,
+      client => Client2
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"no_feedback_test f1 value 2">>,
+        <<"f2">> => <<"no_feedback_test f2 value 2">>
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  client_run(
+    Client1,
+    fun()->
+      ecomet:edit_object(ecomet:open(O),#{
+        <<"f2">> => <<"no_feedback_test f2 value 3">>
+      })
+    end
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O,
+      #{
+        <<"f2">> => <<"no_feedback_test f2 value 3">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O,
+      #{
+        <<"f2">> => <<"no_feedback_test f2 value 3">>
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  client_run(
+    Client2,
+    fun()->
+      ecomet:edit_object(ecomet:open(O),#{
+        <<"f1">> => <<"no_feedback_test f1 value 3">>
+      })
+    end
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O,
+      #{
+        <<"f1">> => <<"no_feedback_test f1 value 3">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2, 1000)
+  ),
+
   ok.
 
 delete_object_test(_Config)->
