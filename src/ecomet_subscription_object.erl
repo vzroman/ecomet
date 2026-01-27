@@ -1704,11 +1704,10 @@ update_queries(
   State.
 
 clients_notify(
-    #{
+    Log = #{
       oid := OID,
       self := Actor,
-      action := Action,
-      fields := ObjectUpdates
+      action := Action
     },
     #object{
       clients = ObjectClients,
@@ -1718,7 +1717,13 @@ clients_notify(
       clients = Clients
     }
 )->
-  Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
+  Updates =
+    case Log of
+      #{ fields := ObjectUpdates }->
+        ordsets:from_list(maps:keys(ObjectUpdates));
+      _->
+        []
+    end,
 
   Notification = #notification{
     oid = OID,
@@ -1826,11 +1831,10 @@ send_notification(#notification{
 
 queries_notify(
     NotifyQueries,
-    #{
+    Log = #{
       oid := OID,
       self := Actor,
-      action := Action,
-      fields := ObjectUpdates
+      action := Action
     },
     #state{
       objects = Objects,
@@ -1844,7 +1848,13 @@ queries_notify(
         <<".readgroups">> := RG
       }
     }->
-      Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
+      Updates =
+        case Log of
+          #{ fields := ObjectUpdates } ->
+            ordsets:from_list(maps:keys(ObjectUpdates));
+          _->
+            []
+        end,
 
       Notification = #notification{
         oid = OID,

@@ -87,6 +87,7 @@ groups()->
     [
       subscribe_object_test,
       stateless_test,
+      no_feedback_test,
       delete_object_test
     ]
   }].
@@ -847,6 +848,9 @@ stateless_test(Config)->
     from_client(Client1, 1000)
   ),
 
+  exit(Client1, stop),
+  timer:sleep(100),
+
   ok.
 
 no_feedback_test(Config)->
@@ -1022,10 +1026,147 @@ no_feedback_test(Config)->
     from_client(Client2, 1000)
   ),
 
+  exit(Client1, stop),
+  exit(Client2, stop),
+
+  timer:sleep(100),
+
   ok.
 
-delete_object_test(_Config)->
-  % TODO
+delete_object_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"delete_object_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"delete_object_test f1 value">>,
+    <<"f2">> => <<"delete_object_test f2 value">>,
+    <<"f3">> => 34
+  })),
+
+  Client1 = start_client(),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {<<".oid">>,'=',O},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"delete_object_test f1 value">>,
+        <<"f2">> => <<"delete_object_test f2 value">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  W = whereis(?WORKER(?OID(O))),
+
+  W_State1 = sys:get_state(W),
+  ?LOGDEBUG("W_State1 ~p",[W_State1]),
+
+  #state{
+    objects = W_S1_Objects,
+    clients = W_S1_Clients,
+    queries = #{},
+    global = ?EMPTY_SET
+  } = W_State1,
+
+  ?assertEqual(
+    #{
+      O => #object{
+        instance = ecomet_object:construct(O),
+        clients = #{
+          Client1 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id1])
+          }
+        },
+        queries = [],
+        fields = #{
+          <<".oid">> => O,
+          object => ecomet_object:construct(O),
+          <<".readgroups">> => [],
+          <<"f1">> => <<"delete_object_test f1 value">>,
+          <<"f2">> => <<"delete_object_test f2 value">>
+        },
+        fields_ref = #{
+          <<".oid">> => 1,
+          object => 1,
+          <<".readgroups">> => 1,
+          <<"f1">> => 1,
+          <<"f2">> => 1
+        }
+      }
+    },
+    W_S1_Objects
+  ),
+
+  #{
+    Client1 := #client{
+      subs = W_S1_C1_Subs
+    }
+  } = W_S1_Clients,
+
+
+  ?assertEqual(
+    [id1],
+    maps:keys(W_S1_C1_Subs)
+  ),
+
+  {monitors, W_S1_Monitors} = erlang:process_info(W, monitors),
+  ?assertEqual(true, lists:member({process,Client1}, W_S1_Monitors)),
+
+  ok = ecomet:delete_object(ecomet:open(O)),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      delete,
+      O,
+      #{}
+    ),
+    from_client(Client1)
+  ),
+
+  W_State2 = sys:get_state(W),
+  ?LOGDEBUG("W_State2 ~p",[W_State2]),
+
+  ?assertEqual(
+    #state{
+      objects = #{},
+      clients = #{},
+      queries = #{},
+      global = ?EMPTY_SET
+    },
+    W_State2
+  ),
+
+
+  exit(Client1, stop),
+  timer:sleep(100),
+
   ok.
 
 %%-------------client loop--------------------
