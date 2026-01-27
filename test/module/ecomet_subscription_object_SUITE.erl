@@ -88,7 +88,8 @@ groups()->
       subscribe_object_test,
       stateless_test,
       no_feedback_test,
-      delete_object_test
+      delete_object_test,
+      update_object_rights_test
     ]
   }].
 
@@ -1167,6 +1168,10 @@ delete_object_test(Config)->
   exit(Client1, stop),
   timer:sleep(100),
 
+  ok.
+
+update_object_rights_test(Config)->
+  %TODO
   ok.
 
 %%-------------client loop--------------------
