@@ -139,10 +139,42 @@ init_per_suite(Config)->
     <<".folder">> => ?OID(<<"/root">>)
   })),
 
+  UG1 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"user_group1">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.usergroup">>),
+    <<".folder">> => ?OID(<<"/root/.usergroups">>)
+  })),
+
+  UG2 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"user_group2">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.usergroup">>),
+    <<".folder">> => ?OID(<<"/root/.usergroups">>)
+  })),
+
+  U1 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"user1">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.user">>),
+    <<".folder">> => ?OID(<<"/root/.users">>),
+    <<"usergroups">> => [UG1],
+    <<"password">> => <<"test">>
+  })),
+
+  U2 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"user2">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.user">>),
+    <<".folder">> => ?OID(<<"/root/.users">>),
+    <<"usergroups">> => [UG2],
+    <<"password">> => <<"test">>
+  })),
+
   [
     {suite_pid,SuitePID},
     {p1,P1},
-    {f1,F1}
+    {f1,F1},
+    {ug1,UG1},
+    {ug2,UG2},
+    {u1,U1},
+    {u2,U2}
     |Config
   ].
 
@@ -231,7 +263,7 @@ subscribe_object_test(Config) ->
     <<"f3">> => 1
   })),
 
-  Client1 = start_client(),
+  Client1 = start_client(<<"system">>),
   {F1_F2, ReadF1F2} = ecomet_query:compile_subscribe_read(
     [<<"f1">>,<<"f2">>],
     undefined
@@ -331,7 +363,7 @@ subscribe_object_test(Config) ->
   ?assertEqual(true, lists:member({process,Client1}, W1_S1_Monitors)),
 
   %-------------------Client 2--------------------------------------
-  Client2 = start_client(),
+  Client2 = start_client(<<"system">>),
   {F2_F3, ReadF2F3} = ecomet_query:compile_subscribe_read(
     [<<"f2">>,<<"f3">>],
     fun ecomet:to_string/2
@@ -804,7 +836,7 @@ stateless_test(Config)->
     <<"f3">> => 23
   })),
 
-  Client1 = start_client(),
+  Client1 = start_client(<<"system">>),
   timer:sleep(100),
 
   ok = ecomet_query:subscribe(
@@ -875,7 +907,7 @@ no_feedback_test(Config)->
   })),
 
   %-------------------no_feedback = false-------------------------
-  Client1 = start_client(),
+  Client1 = start_client(<<"system">>),
   timer:sleep(100),
 
   ok = ecomet_query:subscribe(
@@ -940,7 +972,7 @@ no_feedback_test(Config)->
   ),
 
   %-------------------no_feedback = true-------------------------
-  Client2 = start_client(),
+  Client2 = start_client(<<"system">>),
   timer:sleep(100),
 
   ok = ecomet_query:subscribe(
@@ -1054,7 +1086,7 @@ delete_object_test(Config)->
     <<"f3">> => 34
   })),
 
-  Client1 = start_client(),
+  Client1 = start_client(<<"system">>),
   timer:sleep(100),
 
   ok = ecomet_query:subscribe(
@@ -1171,14 +1203,266 @@ delete_object_test(Config)->
   ok.
 
 update_object_rights_test(Config)->
-  %TODO
+  P1 = ?GET(p1,Config),
+
+  UG1 = ?GET(ug1,Config),
+  UG2 = ?GET(ug2,Config),
+
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"update_object_rights_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<".readgroups">> => [UG1],
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 34
+  })),
+
+  Client1 = start_client(<<"user1">>),
+  timer:sleep(100),
+
+  Client2 = start_client(<<"user2">>),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {<<".oid">>,'=',O},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {<<".oid">>,'=',O},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client2
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"f1 value">>,
+        <<"f2">> => <<"f2 value">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2, 1000)
+  ),
+
+  W = whereis(?WORKER(?OID(O))),
+
+  W_State1 = sys:get_state(W),
+  ?LOGDEBUG("W_State1 ~p",[W_State1]),
+
+  #state{
+    objects = W_S1_Objects,
+    clients = _W_S1_Clients,
+    queries = #{},
+    global = ?EMPTY_SET
+  } = W_State1,
+
+  ?assertEqual(
+    #{
+      O => #object{
+        instance = ecomet_object:construct(O),
+        clients = #{
+          Client1 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id1])
+          },
+          Client2 => #o_client{
+            access = false,
+            subs = ordsets:from_list([id1])
+          }
+        },
+        queries = [],
+        fields = #{
+          <<".oid">> => O,
+          object => ecomet_object:construct(O),
+          <<".readgroups">> => [UG1],
+          <<"f1">> => <<"f1 value">>,
+          <<"f2">> => <<"f2 value">>
+        },
+        fields_ref = #{
+          <<".oid">> => 1,
+          object => 1,
+          <<".readgroups">> => 1,
+          <<"f1">> => 2,
+          <<"f2">> => 2
+        }
+      }
+    },
+    W_S1_Objects
+  ),
+
+  ecomet:edit_object(ecomet:open(O),#{
+    <<".readgroups">> => [],
+    <<"f1">> => <<"f1 value 2">>
+  }),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      delete,
+      O,
+      #{}
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2, 1000)
+  ),
+
+  W_State2 = sys:get_state(W),
+  ?LOGDEBUG("W_State2 ~p",[W_State2]),
+
+  #state{
+    objects = W_S2_Objects,
+    clients = _W_S2_Clients,
+    queries = #{},
+    global = ?EMPTY_SET
+  } = W_State2,
+
+  ?assertEqual(
+    #{
+      O => #object{
+        instance = ecomet_object:construct(O),
+        clients = #{
+          Client1 => #o_client{
+            access = false,
+            subs = ordsets:from_list([id1])
+          },
+          Client2 => #o_client{
+            access = false,
+            subs = ordsets:from_list([id1])
+          }
+        },
+        queries = [],
+        fields = #{
+          <<".oid">> => O,
+          object => ecomet_object:construct(O),
+          <<".readgroups">> => [],
+          <<"f1">> => <<"f1 value 2">>,
+          <<"f2">> => <<"f2 value">>
+        },
+        fields_ref = #{
+          <<".oid">> => 1,
+          object => 1,
+          <<".readgroups">> => 1,
+          <<"f1">> => 2,
+          <<"f2">> => 2
+        }
+      }
+    },
+    W_S2_Objects
+  ),
+
+  ecomet:edit_object(ecomet:open(O),#{
+    <<".readgroups">> => [UG2],
+    <<"f2">> => <<"f2 value 2">>
+  }),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client1, 1000)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"f1 value 2">>,
+        <<"f2">> => <<"f2 value 2">>
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  W_State3 = sys:get_state(W),
+  ?LOGDEBUG("W_State3 ~p",[W_State3]),
+
+  #state{
+    objects = W_S3_Objects,
+    clients = _W_S3_Clients,
+    queries = #{},
+    global = ?EMPTY_SET
+  } = W_State3,
+
+  ?assertEqual(
+    #{
+      O => #object{
+        instance = ecomet_object:construct(O),
+        clients = #{
+          Client1 => #o_client{
+            access = false,
+            subs = ordsets:from_list([id1])
+          },
+          Client2 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id1])
+          }
+        },
+        queries = [],
+        fields = #{
+          <<".oid">> => O,
+          object => ecomet_object:construct(O),
+          <<".readgroups">> => [UG2],
+          <<"f1">> => <<"f1 value 2">>,
+          <<"f2">> => <<"f2 value 2">>
+        },
+        fields_ref = #{
+          <<".oid">> => 1,
+          object => 1,
+          <<".readgroups">> => 1,
+          <<"f1">> => 2,
+          <<"f2">> => 2
+        }
+      }
+    },
+    W_S3_Objects
+  ),
+
+  exit(Client1, stop),
+  exit(Client2, stop),
+  timer:sleep(100),
+
   ok.
 
 %%-------------client loop--------------------
-start_client()->
+start_client(User)->
   Self = self(),
   spawn(fun()->
-    ecomet:dirty_login(<<"system">>),
+    ecomet:dirty_login(User),
     client_loop(Self)
   end).
 client_loop(Self)->
