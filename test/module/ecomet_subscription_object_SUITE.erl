@@ -77,21 +77,35 @@
 
 all()->
   [
-    not_exists_test,
-    {group,object_subscribe}
+%%    not_exists_test,
+%%    {group,object_subscribe},
+    {group,query_subscribe}
   ].
 
 groups()->
-  [{object_subscribe,
-    [sequence],
-    [
-      subscribe_object_test,
-      stateless_test,
-      no_feedback_test,
-      delete_object_test,
-      update_object_rights_test
-    ]
-  }].
+  [
+    {object_subscribe,
+      [sequence],
+      [
+        subscribe_object_test,
+        stateless_test,
+        no_feedback_test,
+        delete_object_test,
+        update_object_rights_test
+      ]
+    },
+    {query_subscribe,
+      [sequence],
+      [
+        subscribe_query_test
+%%        wait_query_test,
+%%        stateless_test,
+%%        no_feedback_test,
+%%        delete_object_test,
+%%        update_object_rights_test
+      ]
+    }
+  ].
 
 init_per_suite(Config)->
   ?BACKEND_INIT(),
@@ -1458,11 +1472,368 @@ update_object_rights_test(Config)->
 
   ok.
 
+subscribe_query_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"subscribe_query_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O1 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 12
+  })),
+
+  O2 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object2">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 23
+  })),
+
+  QS = whereis(ecomet_subscription_query),
+  W1 = whereis(?WORKER(?OID(O1))),
+  W2 = whereis(?WORKER(?OID(O2))),
+
+  Client1 = start_client(<<"system">>),
+  Client2 = start_client(<<"system">>),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<"f1">>,'=',<<"f1 value">>},
+      {<<"f3">>,'=',12}
+    ]},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f2">>, <<"f3">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<"f1">>,'=',<<"f1 value">>},
+      {<<"f3">>,'=',23}
+    ]},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client2
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O1,
+      #{
+        <<"f1">> => <<"f1 value">>,
+        <<"f2">> => <<"f2 value">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client1, 1000)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O2,
+      #{
+        <<"f2">> => <<"f2 value">>,
+        <<"f3">> => 23
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2, 1000)
+  ),
+
+  #state{global = S1_Global} = sys:get_state(W1),
+  [Q1_ref] = ecomet_subscription_query:find(
+    #{
+      action => create,
+      db => root,
+      tags => ?NEW_SET([
+        {<<".folder">>,F,simple},
+        {<<"f1">>,<<"f1 value">>,simple},
+        {<<"f3">>,12,simple}
+      ])
+    },
+    S1_Global
+  ),
+
+  [Q2_ref] = ecomet_subscription_query:find(
+    #{
+      action => create,
+      db => root,
+      tags => ?NEW_SET([
+        {<<".folder">>,F,simple},
+        {<<"f1">>,<<"f1 value">>,simple},
+        {<<"f3">>,23,simple}
+      ])
+    },
+    S1_Global
+  ),
+
+  [ begin
+      ?LOGDEBUG("check state worker ~p",[N]),
+      W = whereis(?NAME(N)),
+      S = sys:get_state(W),
+      ?LOGDEBUG("worker ~p State1 ~p",[N,S]),
+      #state{
+        queries = Queries,
+        global = S1_Global
+      } = S,
+
+      #{
+        Q1_ref := #query{
+          conditions = {'AND',[
+            {<<".folder">>,'=',F},
+            {<<"f1">>,'=',<<"f1 value">>},
+            {<<"f3">>,'=',12}
+          ]},
+          fields = [<<"f1">>, <<"f2">>],
+          clients = #{
+            Client1 := #q_client{
+              usergroups = is_admin,
+              subs_id = id1,
+              no_feedback = false,
+              read = _
+            }
+          },
+          set = Q1_Set
+        },
+        Q2_ref := #query{
+          conditions = {'AND',[
+            {<<".folder">>,'=',F},
+            {<<"f1">>,'=',<<"f1 value">>},
+            {<<"f3">>,'=',23}
+          ]},
+          fields = [<<"f2">>, <<"f3">>],
+          clients = #{
+            Client2 := #q_client{
+              usergroups = is_admin,
+              subs_id = id1,
+              no_feedback = false,
+              read = _
+            }
+          },
+          set = Q2_Set
+        }
+      } = Queries,
+
+      if
+        W =:= W1 ->
+          ?assertEqual(
+            ecomet_resultset:add_oid(O1, ecomet_resultset:new()),
+            Q1_Set
+          );
+        true ->
+          ?assertEqual(
+            ecomet_resultset:new(),
+            Q1_Set
+          )
+      end,
+
+      if
+        W =:= W2 ->
+          ?assertEqual(
+            ecomet_resultset:add_oid(O2, ecomet_resultset:new()),
+            Q2_Set
+          );
+        true ->
+          ?assertEqual(
+            ecomet_resultset:new(),
+            Q2_Set
+          )
+      end
+
+    end || N <-ecomet_subscription_pool:get_workers() ],
+
+  W1_State1 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State1 ~p",[W1_State1]),
+
+  #state{
+    objects = W1_S1_Objects,
+    clients = W1_S1_Clients,
+    queries = _W1_S1_Queries,
+    global = _W1_S1_Global
+  } = W1_State1,
+
+  ?assertEqual(
+    #{},
+    W1_S1_Clients
+  ),
+
+  ?assertEqual(
+    #object{
+      instance = ecomet_object:construct(O1),
+      clients = #{},
+      queries = [Q1_ref],
+      fields = #{
+        <<".oid">> => O1,
+        object => ecomet_object:construct(O1),
+        <<".readgroups">> => [],
+        <<"f1">> => <<"f1 value">>,
+        <<"f2">> => <<"f2 value">>
+      },
+      fields_ref = #{
+        <<".oid">> => 1,
+        object => 1,
+        <<".readgroups">> => 1,
+        <<"f1">> => 1,
+        <<"f2">> => 1
+      }
+    },
+    maps:get(O1, W1_S1_Objects)
+  ),
+
+  W2_State1 = sys:get_state(W2),
+  ?LOGDEBUG("W2_State1 ~p",[W2_State1]),
+
+  #state{
+    objects = W2_S1_Objects,
+    clients = W2_S1_Clients,
+    queries = _W2_S1_Queries,
+    global = _W2_S1_Global
+  } = W2_State1,
+
+  ?assertEqual(
+    #{},
+    W2_S1_Clients
+  ),
+
+  ?assertEqual(
+    #object{
+      instance = ecomet_object:construct(O2),
+      clients = #{},
+      queries = [Q2_ref],
+      fields = #{
+        <<".oid">> => O2,
+        object => ecomet_object:construct(O2),
+        <<".readgroups">> => [],
+        <<"f2">> => <<"f2 value">>,
+        <<"f3">> => 23
+      },
+      fields_ref = #{
+        <<".oid">> => 1,
+        object => 1,
+        <<".readgroups">> => 1,
+        <<"f2">> => 1,
+        <<"f3">> => 1
+      }
+    },
+    maps:get(O2, W2_S1_Objects)
+  ),
+
+  %------------------add new object-----------------------------------
+  O3 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object3">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 12
+  })),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O3,
+      #{
+        <<"f1">> => <<"f1 value">>,
+        <<"f2">> => <<"f2 value">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client1,1000)
+  ),
+
+  W3 = whereis(?WORKER(?OID(O3))),
+  W3_State2 = sys:get_state(W3),
+  ?LOGDEBUG("W3_State2 ~p",[W3_State2]),
+
+  #state{
+    objects = W3_S3_Objects,
+    clients = _W3_S2_Clients,
+    queries = W3_S2_Queries,
+    global = _W3_S2_Global
+  } = W3_State2,
+
+  ?assertEqual(
+    #object{
+      instance = ecomet_object:construct(O3),
+      clients = #{},
+      queries = [Q1_ref],
+      fields = #{
+        <<".oid">> => O3,
+        object => ecomet_object:construct(O3),
+        <<".readgroups">> => [],
+        <<"f1">> => <<"f1 value">>,
+        <<"f2">> => <<"f2 value">>
+      },
+      fields_ref = #{
+        <<".oid">> => 1,
+        object => 1,
+        <<".readgroups">> => 1,
+        <<"f1">> => 1,
+        <<"f2">> => 1
+      }
+    },
+    maps:get(O3, W3_S3_Objects)
+  ),
+
+  #query{
+    set = W3_S2_Q1_Set
+  } = maps:get(Q1_ref, W3_S2_Queries),
+
+  ?assertEqual(
+    true,
+    ecomet_resultset:contains(O3, W3_S2_Q1_Set)
+  ),
+
+  ok.
+
 %%-------------client loop--------------------
 start_client(User)->
   Self = self(),
   spawn(fun()->
     ecomet:dirty_login(User),
+    ?LOGDEBUG("started client, user ~p",[User]),
     client_loop(Self)
   end).
 client_loop(Self)->

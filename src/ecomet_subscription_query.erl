@@ -411,7 +411,7 @@ init_query(
   build_index(Index, Ref),
 
   % Prepare initial set
-  InitSet = ecomet_query:get(DBs,rs,Conditions0),
+  InitSet = ecomet_query:system(DBs,rs,Conditions0),
   Subscription = Subscription0#subscribe{
     conditions = Conditions
   },

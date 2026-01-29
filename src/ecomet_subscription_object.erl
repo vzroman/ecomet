@@ -154,18 +154,12 @@ init_query(Ref, Subscription, InitSet)->
     ecomet_resultset:foldl(
       fun(OID, Acc)->
         Worker = ?WORKER(OID),
-        WorkerAcc0=
-          case Acc of
-            #{Worker := _WorkerAcc} ->
-              _WorkerAcc;
-            _->
-              ecomet_resultset:new()
-          end,
+        WorkerAcc0= maps:get(Worker, Acc),
         Acc#{
           Worker => ecomet_resultset:add_oid(OID, WorkerAcc0)
         }
       end,
-      _Acc = #{},
+      maps:from_list([{?NAME(N), ecomet_resultset:new()}|| N <- ecomet_subscription_pool:get_workers()]),
       InitSet
     ),
 
@@ -446,7 +440,7 @@ add_query(
   Objects = add_query_to_objects(Ref, Query0, Objects0),
   Query = add_client_to_query(Subscription, Query0),
 
-  Queries = #{
+  Queries = Queries0#{
     Ref => Query
   },
 
@@ -1685,7 +1679,11 @@ update_queries(
   } = check_queries(OID, Fields, Queries0, QueriesToCheck),
 
   Queries =
-    lists:foldl(fun maps:merge/2, Queries0, [Wait, Del, Add]),
+    lists:foldl(
+      fun(Qs, Acc)-> maps:merge(Acc,Qs) end,
+      Queries0,
+      [Wait, Del, Add]
+    ),
 
   Objects1 = add_queries_to_object(Add, OID, Fields, Objects0),
   Objects = remove_queries_from_object(Del, OID, Objects1),
