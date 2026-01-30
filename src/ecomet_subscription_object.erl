@@ -281,7 +281,7 @@ handle_cast({remove_query_client, Ref, ClientID}, State0) ->
     {noreply, State}
   catch
     _:E:S->
-      ?LOGERROR("add query client error: ~p, stack ~p",[E,S]),
+      ?LOGERROR("remove query client error: ~p, stack ~p",[E,S]),
       {noreply, State0}
   end;
 
@@ -625,9 +625,9 @@ remove_client_from_query(
       clients = QueryClients0
     }
 )->
-  QueryClients0 = maps:remove(ClientID, QueryClients0),
+  QueryClients = maps:remove(ClientID, QueryClients0),
   Query0#query{
-    clients = QueryClients0
+    clients = QueryClients
   }.
 
 
@@ -1377,31 +1377,103 @@ notify(
 
 notify(
     Log = #{
-      action := create
+      action := create,
+      oid := OID,
+      fields := Fields
     },
-    State0
+    State0 = #state{
+      global = Global,
+      queries = Queries0,
+      objects = Objects0
+    }
 )->
-  State = update_queries( Log, State0 ),
+  QueriesToCheck = ecomet_subscription_query:find(Log, Global),
+  #{
+    wait := Wait,
+    add := Add
+  } = check_queries(OID, Fields, Queries0, QueriesToCheck),
+
+  Queries =
+    lists:foldl(
+      fun(Qs, Acc)-> maps:merge(Acc,Qs) end,
+      Queries0,
+      [Wait, Add]
+    ),
+
+  Objects = add_queries_to_object(Add, OID, Fields, Objects0),
+
+  State = State0#state{
+    queries = Queries,
+    objects = Objects
+  },
+
+  LogCreate = Log#{ action => create },
+  queries_notify(maps:keys(Add), LogCreate, State),
+
   State;
 
 notify(
     Log = #{
       oid := OID,
-      action := update
+      action := update,
+      fields := Fields1,
+      fields0 := Fields0
     },
     State0 = #state{
-      objects = Objects
+      global = Global,
+      queries = Queries0,
+      objects = Objects0
     }
 )->
 
-  State =
-    case maps:is_key(OID, Objects) of
+  Fields = maps:merge(Fields0, Fields1),
+  QueriesToCheck = ecomet_subscription_query:find(Log, Global),
+  #{
+    wait := Wait,
+    add := Add,
+    del := Del
+  } = check_queries(OID, Fields, Queries0, QueriesToCheck),
+
+  LogDelete = Log#{ action => delete },
+  queries_notify(maps:keys(Del), LogDelete, State0),
+
+  Queries1 = maps:merge(Queries0, Del),
+  Objects1 = remove_queries_from_object(Del, OID, Objects0),
+
+  State1 = State0#state{
+    queries = Queries1,
+    objects = Objects1
+  },
+
+  State2 =
+    case maps:is_key(OID, Objects1) of
       true ->
-        State1 = notify_update(Log, State0),
-        update_queries(Log, State1);
+        notify_update(Log, State1);
       _->
-        State0
+        State1
     end,
+
+  #state{
+    queries = Queries2,
+    objects = Objects2
+  } = State2,
+
+  Queries =
+    lists:foldl(
+      fun(Qs, Acc)-> maps:merge(Acc,Qs) end,
+      Queries2,
+      [Wait, Add]
+    ),
+
+  Objects = add_queries_to_object(Add, OID, Fields, Objects2),
+
+  State = State2#state{
+    queries = Queries,
+    objects = Objects
+  },
+
+  LogCreate = Log#{ action => create },
+  queries_notify(maps:keys(Add), LogCreate, State),
 
   State;
 
@@ -1660,47 +1732,6 @@ notify_update(
 
   State.
 
-update_queries(
-    Log = #{
-      oid := OID,
-      fields := Fields
-    },
-    State0 = #state{
-      global = Global,
-      queries = Queries0,
-      objects = Objects0
-    }
-)->
-  QueriesToCheck = ecomet_subscription_query:find(Log, Global),
-  #{
-    wait := Wait,
-    add := Add,
-    del := Del
-  } = check_queries(OID, Fields, Queries0, QueriesToCheck),
-
-  Queries =
-    lists:foldl(
-      fun(Qs, Acc)-> maps:merge(Acc,Qs) end,
-      Queries0,
-      [Wait, Del, Add]
-    ),
-
-  Objects1 = add_queries_to_object(Add, OID, Fields, Objects0),
-  Objects = remove_queries_from_object(Del, OID, Objects1),
-
-  State = State0#state{
-    queries = Queries,
-    objects = Objects
-  },
-
-  LogDelete = Log#{ action => delete },
-  queries_notify(maps:keys(Del), LogDelete, State),
-
-  LogCreate = Log#{ action => create },
-  queries_notify(maps:keys(Add), LogCreate, State),
-
-  State.
-
 clients_notify(
     Log = #{
       oid := OID,
@@ -1952,7 +1983,7 @@ add_queries_to_object(
     OID,
     UpdateFields,
     Objects0
-)->
+) when map_size(AddQueries) > 0->
   SubsFields =
     maps:fold(
       fun(_Ref, #query{fields = QueryFields}, Acc)->
@@ -1979,13 +2010,21 @@ add_queries_to_object(
 
   Objects0#{
     OID => Object
-  }.
+  };
+add_queries_to_object(
+    _AddQueries,
+    _OID,
+    _UpdateFields,
+    Objects
+)->
+  Objects.
+
 
 remove_queries_from_object(
     RemoveQueries,
     OID,
     Objects0
-)->
+) when map_size(RemoveQueries) > 0->
   case Objects0 of
     #{OID := Object0}->
       Object =
@@ -2007,7 +2046,13 @@ remove_queries_from_object(
       end;
     _->
       Objects0
-  end.
+  end;
+remove_queries_from_object(
+    _RemoveQueries,
+    _OID,
+    Objects
+)->
+  Objects.
 
 delete_object_from_queries(
     #object{

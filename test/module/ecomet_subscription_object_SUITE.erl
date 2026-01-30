@@ -98,6 +98,7 @@ groups()->
       [sequence],
       [
         subscribe_query_test
+%%        light_update_test,
 %%        wait_query_test,
 %%        stateless_test,
 %%        no_feedback_test,
@@ -1825,6 +1826,184 @@ subscribe_query_test(Config)->
     true,
     ecomet_resultset:contains(O3, W3_S2_Q1_Set)
   ),
+
+  %-----------------------Object doesn't meet the conditions----------------------------
+  ecomet:edit_object(ecomet:open(O1), #{<<"f3">> => 22}),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      delete,
+      O1,
+      #{}
+    ),
+    from_client(Client1)
+  ),
+
+  W1_State4 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State4 ~p",[W1_State4]),
+
+  #state{
+    objects = W1_S4_Objects,
+    clients = _W1_S4_Clients,
+    queries = W1_S4_Queries,
+    global = _W1_S4_Global
+  } = W1_State4,
+
+  ?assertEqual(
+    undefined,
+    maps:get(O1, W1_S4_Objects, undefined)
+  ),
+
+  #query{
+    set = W1_S4_Q1_Set
+  } = maps:get(Q1_ref, W1_S4_Queries),
+
+  ?assertEqual(
+    false,
+    ecomet_resultset:contains(O1, W1_S4_Q1_Set)
+  ),
+
+  ecomet:edit_object(ecomet:open(O1), #{<<"f3">> => 23}),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O1,
+      #{
+        <<"f2">> => <<"f2 value">>,
+        <<"f3">> => 23
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  W1_State5 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State5 ~p",[W1_State5]),
+
+  #state{
+    objects = W1_S5_Objects,
+    clients = _W1_S5_Clients,
+    queries = W1_S5_Queries,
+    global = _W1_S5_Global
+  } = W1_State5,
+
+  ?assertEqual(
+    #object{
+      instance = ecomet_object:construct(O1),
+      clients = #{},
+      queries = [Q2_ref],
+      fields = #{
+        <<".oid">> => O1,
+        object => ecomet_object:construct(O1),
+        <<".readgroups">> => [],
+        <<"f2">> => <<"f2 value">>,
+        <<"f3">> => 23
+      },
+      fields_ref = #{
+        <<".oid">> => 1,
+        object => 1,
+        <<".readgroups">> => 1,
+        <<"f2">> => 1,
+        <<"f3">> => 1
+      }
+    },
+    maps:get(O1, W1_S5_Objects)
+  ),
+
+  #query{
+    set = W1_S5_Q2_Set
+  } = maps:get(Q2_ref, W1_S5_Queries),
+
+  ?assertEqual(
+    true,
+    ecomet_resultset:contains(O1, W1_S5_Q2_Set)
+  ),
+
+  %------------------delete object------------------------------
+  ecomet:delete_object(ecomet:open(O1)),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      delete,
+      O1,
+      #{}
+    ),
+    from_client(Client2)
+  ),
+
+  W1_State6 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State6 ~p",[W1_State6]),
+
+  #state{
+    objects = W1_S6_Objects,
+    clients = _W1_S6_Clients,
+    queries = W1_S6_Queries,
+    global = _W1_S6_Global
+  } = W1_State6,
+
+  ?assertEqual(
+    undefined,
+    maps:get(O1, W1_S6_Objects, undefined)
+  ),
+
+  #query{
+    set = W1_S6_Q2_Set
+  } = maps:get(Q2_ref, W1_S6_Queries),
+
+  ?assertEqual(
+    false,
+    ecomet_resultset:contains(O1, W1_S6_Q2_Set)
+  ),
+
+  %------------------------------unsubscribe------------------------------
+  ecomet_query:unsubscribe(Client1, id1),
+  timer:sleep(100),
+
+  #state{global = S7_Global} = sys:get_state(W1),
+
+  [ begin
+      ?LOGDEBUG("check state7 worker ~p",[N]),
+      W = whereis(?NAME(N)),
+      S = sys:get_state(W),
+      ?LOGDEBUG("worker ~p State7 ~p",[N,S]),
+      #state{
+        queries = Queries,
+        global = S7_Global
+      } = S,
+
+      ?assertEqual(
+        false,
+        maps:is_key(Q1_ref, Queries)
+      )
+
+    end || N <-ecomet_subscription_pool:get_workers() ],
+
+  exit(Client1, stop),
+
+  exit(Client2, stop),
+  timer:sleep(100),
+
+  [ begin
+      ?LOGDEBUG("check state8 worker ~p",[N]),
+      W = whereis(?NAME(N)),
+      S = sys:get_state(W),
+      ?LOGDEBUG("worker ~p State8 ~p",[N,S]),
+      ?assertEqual(
+        #state{
+          objects = #{},
+          clients = #{},
+          queries = #{},
+          global = ?EMPTY_SET
+        },
+        S
+      )
+
+    end || N <-ecomet_subscription_pool:get_workers() ],
+
+
 
   ok.
 
