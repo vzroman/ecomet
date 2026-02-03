@@ -97,13 +97,13 @@ groups()->
     {query_subscribe,
       [sequence],
       [
-        subscribe_query_test
-%%        light_update_test,
-%%        wait_query_test,
+%%        subscribe_query_test,
+        light_update_test
 %%        stateless_test,
 %%        no_feedback_test,
 %%        delete_object_test,
-%%        update_object_rights_test
+%%        update_object_rights_test,
+%%        wait_query_test,
       ]
     }
   ].
@@ -125,7 +125,6 @@ init_per_suite(Config)->
     <<".name">> => <<"f1">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.field">>),
     <<".folder">> => P1,
-    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.object">>),
     <<"type">> => string,
     <<"index">> => [simple,'3gram']
   }),
@@ -134,7 +133,6 @@ init_per_suite(Config)->
     <<".name">> => <<"f2">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.field">>),
     <<".folder">> => P1,
-    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.object">>),
     <<"type">> => string,
     <<"index">> => [simple,'3gram']
   }),
@@ -143,9 +141,26 @@ init_per_suite(Config)->
     <<".name">> => <<"f3">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.field">>),
     <<".folder">> => P1,
-    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.object">>),
     <<"type">> => integer,
     <<"index">> => [simple]
+  }),
+
+  ecomet:create_object(#{
+    <<".name">> => <<"f4">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.field">>),
+    <<".folder">> => P1,
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.object">>),
+    <<"type">> => string,
+    <<"index">> => none
+  }),
+
+  ecomet:create_object(#{
+    <<".name">> => <<"f5">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.field">>),
+    <<".folder">> => P1,
+    <<"parent_pattern">> => ?OID(<<"/root/.patterns/.object">>),
+    <<"type">> => integer,
+    <<"index">> => none
   }),
 
   F1 = ?OID(ecomet:create_object(#{
@@ -1502,7 +1517,6 @@ subscribe_query_test(Config)->
     <<"f3">> => 23
   })),
 
-  QS = whereis(ecomet_subscription_query),
   W1 = whereis(?WORKER(?OID(O1))),
   W2 = whereis(?WORKER(?OID(O2))),
 
@@ -2003,8 +2017,273 @@ subscribe_query_test(Config)->
 
     end || N <-ecomet_subscription_pool:get_workers() ],
 
+  ok.
 
+light_update_test(Config)->
+  P1 = ?GET(p1,Config),
 
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"light_update_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O1 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 12,
+    <<"f4">> => <<"f4 value">>,
+    <<"f5">> => 23
+  })),
+
+  W1 = whereis(?WORKER(O1)),
+
+  Client1 = start_client(<<"system">>),
+  Client2 = start_client(<<"system">>),
+
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f5">>],
+    {<<".oid">>,'=',O1},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f4">>, <<"f5">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<"f1">>,'=',<<"f1 value">>},
+      {<<"f3">>,'=',12}
+    ]},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client2
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O1,
+      #{
+        <<"f1">> => <<"f1 value">>,
+        <<"f5">> => 23
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O1,
+      #{
+        <<"f4">> => <<"f4 value">>,
+        <<"f5">> => 23
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  W1_State1 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State1 ~p",[W1_State1]),
+
+  #state{
+    objects = W1_S1_Objects,
+    clients = _W1_S1_Clients,
+    queries = W1_S1_Queries,
+    global = _W1_S1_Global
+  } = W1_State1,
+
+  [Q1_ref] = maps:keys(W1_S1_Queries),
+
+  ?assertEqual(
+    #object{
+      instance = ecomet_object:construct(O1),
+      clients = #{
+        Client1 => #o_client{
+          access = true,
+          subs = [id1]
+        }
+      },
+      queries = [Q1_ref],
+      fields = #{
+        <<".oid">> => O1,
+        object => ecomet_object:construct(O1),
+        <<".readgroups">> => [],
+        <<"f1">> => <<"f1 value">>,
+        <<"f4">> => <<"f4 value">>,
+        <<"f5">> => 23
+      },
+      fields_ref = #{
+        <<".oid">> => 1,
+        object => 1,
+        <<".readgroups">> => 1,
+        <<"f1">> => 1,
+        <<"f4">> => 1,
+        <<"f5">> => 2
+      }
+    },
+    maps:get(O1, W1_S1_Objects)
+  ),
+
+  %-------------------light update (no index changes)--------------------
+  ecomet:edit_object(ecomet:open(O1), #{ <<"f4">> => <<"f4 value 2">> }),
+
+  % Client 1 doesn't receive the update because it's not subscribed to f4 field
+  ?assertEqual(
+    message_timeout,
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O1,
+      #{
+        <<"f4">> => <<"f4 value 2">>
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  W1_State2 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State2 ~p",[W1_State2]),
+
+  #state{
+    objects = W1_S2_Objects,
+    clients = _W1_S2_Clients,
+    queries = _W1_S2_Queries,
+    global = _W1_S2_Global
+  } = W1_State2,
+
+  ?assertEqual(
+    #object{
+      instance = ecomet_object:construct(O1),
+      clients = #{
+        Client1 => #o_client{
+          access = true,
+          subs = [id1]
+        }
+      },
+      queries = [Q1_ref],
+      fields = #{
+        <<".oid">> => O1,
+        object => ecomet_object:construct(O1),
+        <<".readgroups">> => [],
+        <<"f1">> => <<"f1 value">>,
+        <<"f4">> => <<"f4 value 2">>,
+        <<"f5">> => 23
+      },
+      fields_ref = #{
+        <<".oid">> => 1,
+        object => 1,
+        <<".readgroups">> => 1,
+        <<"f1">> => 1,
+        <<"f4">> => 1,
+        <<"f5">> => 2
+      }
+    },
+    maps:get(O1, W1_S2_Objects)
+  ),
+
+  ecomet:edit_object(ecomet:open(O1), #{ <<"f5">> => 34 }),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O1,
+      #{
+        <<"f5">> => 34
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O1,
+      #{
+        <<"f5">> => 34
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  W1_State3 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State3 ~p",[W1_State3]),
+
+  #state{
+    objects = W1_S3_Objects,
+    clients = _W1_S3_Clients,
+    queries = _W1_S3_Queries,
+    global = _W1_S3_Global
+  } = W1_State3,
+
+  ?assertEqual(
+    #object{
+      instance = ecomet_object:construct(O1),
+      clients = #{
+        Client1 => #o_client{
+          access = true,
+          subs = [id1]
+        }
+      },
+      queries = [Q1_ref],
+      fields = #{
+        <<".oid">> => O1,
+        object => ecomet_object:construct(O1),
+        <<".readgroups">> => [],
+        <<"f1">> => <<"f1 value">>,
+        <<"f4">> => <<"f4 value 2">>,
+        <<"f5">> => 34
+      },
+      fields_ref = #{
+        <<".oid">> => 1,
+        object => 1,
+        <<".readgroups">> => 1,
+        <<"f1">> => 1,
+        <<"f4">> => 1,
+        <<"f5">> => 2
+      }
+    },
+    maps:get(O1, W1_S3_Objects)
+  ),
+
+  exit(Client1, stop),
+  exit(Client2, stop),
+  timer:sleep(100),
+
+  ?assertEqual(
+    #state{
+      objects = #{},
+      clients = #{},
+      queries = #{},
+      global = ?EMPTY_SET
+    },
+    sys:get_state(W1)
+  ),
   ok.
 
 %%-------------client loop--------------------
