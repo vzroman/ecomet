@@ -87,20 +87,20 @@ groups()->
     {object_subscribe,
       [sequence],
       [
-        subscribe_object_test,
-        stateless_test,
-        no_feedback_test,
-        delete_object_test,
-        update_object_rights_test
+        object_subscribe_test,
+        object_stateless_test,
+        object_no_feedback_test,
+        object_delete_test,
+        object_update_rights_test
       ]
     },
     {query_subscribe,
       [sequence],
       [
-        subscribe_query_test,
-        same_query_test,
-        light_update_test
-%%        stateless_test,
+        query_subscribe_test,
+        query_same_test,
+        query_light_update_test,
+        query_stateless_test
 %%        no_feedback_test,
 %%        delete_object_test,
 %%        update_object_rights_test,
@@ -279,7 +279,7 @@ not_exists_test(_Config)->
 
   ok.
 
-subscribe_object_test(Config) ->
+object_subscribe_test(Config) ->
   P1 = ?GET(p1,Config),
   F1 = ?GET(f1,Config),
 
@@ -847,13 +847,13 @@ subscribe_object_test(Config) ->
 
   ok.
 
-stateless_test(Config)->
+object_stateless_test(Config)->
   P1 = ?GET(p1,Config),
 
   ecomet:dirty_login(<<"system">>),
 
   F = ?OID(ecomet:create_object(#{
-    <<".name">> => <<"stateless_test">>,
+    <<".name">> => <<"object_stateless_test">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
     <<".folder">> => ?OID(<<"/root">>)
   })),
@@ -917,13 +917,13 @@ stateless_test(Config)->
 
   ok.
 
-no_feedback_test(Config)->
+object_no_feedback_test(Config)->
   P1 = ?GET(p1,Config),
 
   ecomet:dirty_login(<<"system">>),
 
   F = ?OID(ecomet:create_object(#{
-    <<".name">> => <<"no_feedback_test">>,
+    <<".name">> => <<"object_no_feedback_test">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
     <<".folder">> => ?OID(<<"/root">>)
   })),
@@ -932,8 +932,8 @@ no_feedback_test(Config)->
     <<".name">> => <<"object1">>,
     <<".pattern">> => P1,
     <<".folder">> => F,
-    <<"f1">> => <<"no_feedback_test f1 value">>,
-    <<"f2">> => <<"no_feedback_test f2 value">>,
+    <<"f1">> => <<"object_no_feedback_test f1 value">>,
+    <<"f2">> => <<"object_no_feedback_test f2 value">>,
     <<"f3">> => 34
   })),
 
@@ -959,15 +959,15 @@ no_feedback_test(Config)->
       create,
       O,
       #{
-        <<"f1">> => <<"no_feedback_test f1 value">>,
-        <<"f2">> => <<"no_feedback_test f2 value">>
+        <<"f1">> => <<"object_no_feedback_test f1 value">>,
+        <<"f2">> => <<"object_no_feedback_test f2 value">>
       }
     ),
     from_client(Client1)
   ),
 
   ecomet:edit_object(ecomet:open(O),#{
-    <<"f1">> => <<"no_feedback_test f1 value 2">>
+    <<"f1">> => <<"object_no_feedback_test f1 value 2">>
   }),
   ?assertEqual(
     ?SUBSCRIPTION(
@@ -975,7 +975,7 @@ no_feedback_test(Config)->
       update,
       O,
       #{
-        <<"f1">> => <<"no_feedback_test f1 value 2">>
+        <<"f1">> => <<"object_no_feedback_test f1 value 2">>
       }
     ),
     from_client(Client1)
@@ -985,7 +985,7 @@ no_feedback_test(Config)->
     Client1,
     fun()->
       ecomet:edit_object(ecomet:open(O),#{
-        <<"f2">> => <<"no_feedback_test f2 value 2">>
+        <<"f2">> => <<"object_no_feedback_test f2 value 2">>
       })
     end
   ),
@@ -996,7 +996,7 @@ no_feedback_test(Config)->
       update,
       O,
       #{
-        <<"f2">> => <<"no_feedback_test f2 value 2">>
+        <<"f2">> => <<"object_no_feedback_test f2 value 2">>
       }
     ),
     from_client(Client1)
@@ -1024,8 +1024,8 @@ no_feedback_test(Config)->
       create,
       O,
       #{
-        <<"f1">> => <<"no_feedback_test f1 value 2">>,
-        <<"f2">> => <<"no_feedback_test f2 value 2">>
+        <<"f1">> => <<"object_no_feedback_test f1 value 2">>,
+        <<"f2">> => <<"object_no_feedback_test f2 value 2">>
       }
     ),
     from_client(Client2)
@@ -1035,7 +1035,7 @@ no_feedback_test(Config)->
     Client1,
     fun()->
       ecomet:edit_object(ecomet:open(O),#{
-        <<"f2">> => <<"no_feedback_test f2 value 3">>
+        <<"f2">> => <<"object_no_feedback_test f2 value 3">>
       })
     end
   ),
@@ -1046,7 +1046,7 @@ no_feedback_test(Config)->
       update,
       O,
       #{
-        <<"f2">> => <<"no_feedback_test f2 value 3">>
+        <<"f2">> => <<"object_no_feedback_test f2 value 3">>
       }
     ),
     from_client(Client1)
@@ -1058,7 +1058,7 @@ no_feedback_test(Config)->
       update,
       O,
       #{
-        <<"f2">> => <<"no_feedback_test f2 value 3">>
+        <<"f2">> => <<"object_no_feedback_test f2 value 3">>
       }
     ),
     from_client(Client2)
@@ -1068,7 +1068,7 @@ no_feedback_test(Config)->
     Client2,
     fun()->
       ecomet:edit_object(ecomet:open(O),#{
-        <<"f1">> => <<"no_feedback_test f1 value 3">>
+        <<"f1">> => <<"object_no_feedback_test f1 value 3">>
       })
     end
   ),
@@ -1079,7 +1079,7 @@ no_feedback_test(Config)->
       update,
       O,
       #{
-        <<"f1">> => <<"no_feedback_test f1 value 3">>
+        <<"f1">> => <<"object_no_feedback_test f1 value 3">>
       }
     ),
     from_client(Client1)
@@ -1097,13 +1097,13 @@ no_feedback_test(Config)->
 
   ok.
 
-delete_object_test(Config)->
+object_delete_test(Config)->
   P1 = ?GET(p1,Config),
 
   ecomet:dirty_login(<<"system">>),
 
   F = ?OID(ecomet:create_object(#{
-    <<".name">> => <<"delete_object_test">>,
+    <<".name">> => <<"object_delete_test">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
     <<".folder">> => ?OID(<<"/root">>)
   })),
@@ -1112,8 +1112,8 @@ delete_object_test(Config)->
     <<".name">> => <<"object1">>,
     <<".pattern">> => P1,
     <<".folder">> => F,
-    <<"f1">> => <<"delete_object_test f1 value">>,
-    <<"f2">> => <<"delete_object_test f2 value">>,
+    <<"f1">> => <<"object_delete_test f1 value">>,
+    <<"f2">> => <<"object_delete_test f2 value">>,
     <<"f3">> => 34
   })),
 
@@ -1138,8 +1138,8 @@ delete_object_test(Config)->
       create,
       O,
       #{
-        <<"f1">> => <<"delete_object_test f1 value">>,
-        <<"f2">> => <<"delete_object_test f2 value">>
+        <<"f1">> => <<"object_delete_test f1 value">>,
+        <<"f2">> => <<"object_delete_test f2 value">>
       }
     ),
     from_client(Client1)
@@ -1172,8 +1172,8 @@ delete_object_test(Config)->
           <<".oid">> => O,
           object => ecomet_object:construct(O),
           <<".readgroups">> => [],
-          <<"f1">> => <<"delete_object_test f1 value">>,
-          <<"f2">> => <<"delete_object_test f2 value">>
+          <<"f1">> => <<"object_delete_test f1 value">>,
+          <<"f2">> => <<"object_delete_test f2 value">>
         },
         fields_ref = #{
           <<".oid">> => 1,
@@ -1233,7 +1233,7 @@ delete_object_test(Config)->
 
   ok.
 
-update_object_rights_test(Config)->
+object_update_rights_test(Config)->
   P1 = ?GET(p1,Config),
 
   UG1 = ?GET(ug1,Config),
@@ -1243,7 +1243,7 @@ update_object_rights_test(Config)->
   ecomet:dirty_login(<<"system">>),
 
   F = ?OID(ecomet:create_object(#{
-    <<".name">> => <<"update_object_rights_test">>,
+    <<".name">> => <<"object_update_rights_test">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
     <<".folder">> => ?OID(<<"/root">>)
   })),
@@ -1489,13 +1489,13 @@ update_object_rights_test(Config)->
 
   ok.
 
-subscribe_query_test(Config)->
+query_subscribe_test(Config)->
   P1 = ?GET(p1,Config),
 
   ecomet:dirty_login(<<"system">>),
 
   F = ?OID(ecomet:create_object(#{
-    <<".name">> => <<"subscribe_query_test">>,
+    <<".name">> => <<"query_subscribe_test">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
     <<".folder">> => ?OID(<<"/root">>)
   })),
@@ -2020,13 +2020,13 @@ subscribe_query_test(Config)->
 
   ok.
 
-same_query_test(Config)->
+query_same_test(Config)->
   P1 = ?GET(p1,Config),
 
   ecomet:dirty_login(<<"system">>),
 
   F = ?OID(ecomet:create_object(#{
-    <<".name">> => <<"same_query_test">>,
+    <<".name">> => <<"query_same_test">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
     <<".folder">> => ?OID(<<"/root">>)
   })),
@@ -2288,13 +2288,13 @@ same_query_test(Config)->
 
   ok.
 
-light_update_test(Config)->
+query_light_update_test(Config)->
   P1 = ?GET(p1,Config),
 
   ecomet:dirty_login(<<"system">>),
 
   F = ?OID(ecomet:create_object(#{
-    <<".name">> => <<"light_update_test">>,
+    <<".name">> => <<"query_light_update_test">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
     <<".folder">> => ?OID(<<"/root">>)
   })),
@@ -2538,6 +2538,147 @@ light_update_test(Config)->
       }
     },
     maps:get(O1, W1_S3_Objects)
+  ),
+
+  exit(Client1, stop),
+  exit(Client2, stop),
+  timer:sleep(100),
+
+  ?assertEqual(
+    #state{
+      objects = #{},
+      clients = #{},
+      queries = #{},
+      global = ?EMPTY_SET
+    },
+    sys:get_state(W1)
+  ),
+  ok.
+
+query_stateless_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"query_stateless_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O1 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 12,
+    <<"f4">> => <<"f4 value">>,
+    <<"f5">> => 23
+  })),
+
+  W1 = whereis(?WORKER(O1)),
+
+  Client1 = start_client(<<"system">>),
+  Client2 = start_client(<<"system">>),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f4">>, <<"f5">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<"f1">>,'=',<<"f1 value">>},
+      {<<"f3">>,'=',12}
+    ]},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f4">>, <<"f5">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<"f1">>,'=',<<"f1 value">>},
+      {<<"f3">>,'=',12}
+    ]},
+    #{
+      stateless => true,
+      no_feedback => false,
+      client => Client2
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O1,
+      #{
+        <<"f4">> => <<"f4 value">>,
+        <<"f5">> => 23
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2)
+  ),
+
+  W1_State1 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State1 ~p",[W1_State1]),
+
+  #state{
+    objects = W1_S1_Objects,
+    clients = _W1_S1_Clients,
+    queries = W1_S1_Queries,
+    global = _W1_S1_Global
+  } = W1_State1,
+
+  [Q1_ref] = maps:keys(W1_S1_Queries),
+
+  ?assertMatch(
+    #query{
+      conditions = _,
+      fields = _,
+      clients = #{
+        Client1 := _,
+        Client2 := _
+      },
+      set = _
+    },
+    maps:get(Q1_ref, W1_S1_Queries)
+  ),
+
+  ?assertEqual(
+    #object{
+      instance = ecomet_object:construct(O1),
+      clients = #{},
+      queries = [Q1_ref],
+      fields = #{
+        <<".oid">> => O1,
+        object => ecomet_object:construct(O1),
+        <<".readgroups">> => [],
+        <<"f4">> => <<"f4 value">>,
+        <<"f5">> => 23
+      },
+      fields_ref = #{
+        <<".oid">> => 1,
+        object => 1,
+        <<".readgroups">> => 1,
+        <<"f4">> => 1,
+        <<"f5">> => 1
+      }
+    },
+    maps:get(O1, W1_S1_Objects)
   ),
 
   exit(Client1, stop),
