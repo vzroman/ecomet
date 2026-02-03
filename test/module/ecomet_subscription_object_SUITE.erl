@@ -77,8 +77,8 @@
 
 all()->
   [
-%%    not_exists_test,
-%%    {group,object_subscribe},
+    not_exists_test,
+    {group,object_subscribe},
     {group,query_subscribe}
   ].
 
@@ -97,13 +97,13 @@ groups()->
     {query_subscribe,
       [sequence],
       [
-%%        query_subscribe_test,
-%%        query_same_test,
-%%        query_light_update_test,
-%%        query_stateless_test,
-%%        query_no_feedback_test,
-        query_update_rights_test
-%%        wait_query_test,
+        query_subscribe_test,
+        query_same_test,
+        query_light_update_test,
+        query_stateless_test,
+        query_no_feedback_test,
+        query_update_rights_test,
+        query_wait_test
       ]
     }
   ].
@@ -3111,6 +3111,43 @@ query_update_rights_test(Config)->
   timer:sleep(100),
 
   ok.
+
+query_wait_test(Config)->
+
+  P1 = ?GET(p1,Config),
+
+%%  ecomet:dirty_login(<<"system">>),
+%%
+%%  F = ?OID(ecomet:create_object(#{
+%%    <<".name">> => <<"query_wait_test">>,
+%%    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+%%    <<".folder">> => ?OID(<<"/root">>)
+%%  })),
+%%
+%%  O1 = ?OID(ecomet:create_object(#{
+%%    <<".name">> => <<"object1">>,
+%%    <<".pattern">> => P1,
+%%    <<".folder">> => F,
+%%    <<"f1">> => <<"f1 value">>,
+%%    <<"f2">> => <<"f2 value">>,
+%%    <<"f3">> => 12,
+%%    <<"f4">> => <<"f4 value">>,
+%%    <<"f5">> => 23
+%%  })),
+%%
+%%  W1 = whereis(?WORKER(O1)),
+%%
+%%  Client1 = start_client(<<"system">>),
+%%  timer:sleep(100),
+%%
+%%
+%%
+%%
+%%
+%%  exit(Client1, stop),
+%%  timer:sleep(100),
+  ok.
+
 
 %%-------------client loop--------------------
 start_client(User)->

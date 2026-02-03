@@ -72,8 +72,7 @@
 }).
 
 -record(wait_query,{
-  add,
-  remove
+  set
 }).
 
 -record(client,{
@@ -476,8 +475,7 @@ remove_query(
 
 init_query_set(
     #wait_query{
-      add = AddObjects,
-      remove = RemoveObjects
+      set = WaitSet
     },
     #subscribe{
       conditions = Conditions,
@@ -486,11 +484,6 @@ init_query_set(
     Objects,
     Set0
 )->
-  Set1 = lists:foldl(
-    fun ecomet_resultset:remove_oid/2,
-    Set0,
-    RemoveObjects
-  ),
   lists:foldl(
     fun(OID, RS)->
       try
@@ -524,8 +517,8 @@ init_query_set(
           ecomet_resultset:remove_oid(OID, RS)
       end
     end,
-    Set1,
-    AddObjects
+    Set0,
+    WaitSet
   );
 init_query_set(_NoWaitQuery, _Subscription, _Objects, Set)->
   Set.
@@ -1954,18 +1947,16 @@ check_queries(OID, Fields, Queries, QueriesToCheck)->
             _->
               Acc
           end;
-        #{ Ref := WQ0 = #wait_query{ add = Set0 } }->
+        #{ Ref := WQ0 = #wait_query{ set = Set0 } }->
           Set = ecomet_resultset:add_oid(OID, Set0),
-          WQ = WQ0#wait_query{ add = Set },
+          WQ = WQ0#wait_query{ set = Set },
           Acc#{
             wait => WaitAcc#{ Ref => WQ }
           };
         _->
-          Set0 = ecomet_resultset:new(),
-          Set = ecomet_resultset:add_oid(OID, Set0),
+          Set = ecomet_resultset:add_oid(OID, ecomet_resultset:new()),
           WQ = #wait_query{
-            add = Set,
-            remove = Set0
+            set = Set
           },
           Acc#{
             wait => WaitAcc#{ Ref => WQ }
