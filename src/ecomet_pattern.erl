@@ -100,26 +100,32 @@ edit_map(Pattern,Map)->
   end.
 
 wrap_transaction(PatternID,Fun)->
+  case ecomet:transaction(
+    fun()->
+      ok = ecomet_schema:lock_pattern( PatternID ),
 
-  ok = ecomet_schema:lock_pattern( PatternID ),
-
-  % Check if the schema is already under transaction
-  RootTransaction = ecomet_transaction:dict_get({'@pattern_map@',PatternID},undefined)=:=undefined,
-  % Put the schema into the transaction
-  Map = get_map(PatternID),
-  ecomet_transaction:dict_put(#{
-    {'@pattern_map@',PatternID}=>Map
-  }),
-  % Perform schema transformations
-  Fun(Map),
-  % Commit the schema if there is no upper level transaction
-  if
-    RootTransaction ->
-      NewMap=get_map(PatternID),
-      ecomet_transaction:dict_remove([{'@pattern_map@',PatternID}]),
-      edit_map(PatternID,NewMap);
-    true ->
-      ok
+      % Check if the schema is already under transaction
+      RootTransaction = ecomet_transaction:dict_get({'@pattern_map@',PatternID},undefined)=:=undefined,
+      % Put the schema into the transaction
+      Map = get_map(PatternID),
+      ecomet_transaction:dict_put(#{
+        {'@pattern_map@',PatternID}=>Map
+      }),
+      % Perform schema transformations
+      Fun(Map),
+      % Commit the schema if there is no upper level transaction
+      if
+        RootTransaction ->
+          NewMap=get_map(PatternID),
+          ecomet_transaction:dict_remove([{'@pattern_map@',PatternID}]),
+          edit_map(PatternID,NewMap);
+        true ->
+          ok
+      end
+    end)
+  of
+    {ok,_}->ok;
+    {error, Error}-> throw(Error)
   end.
 
 get_behaviours(Map) when is_map(Map)->
@@ -263,7 +269,10 @@ remove_field(Pattern,Field)->
     edit_map(Pattern,Map2),
 
     % update children
-    [ remove_field(ChildID,Field) || ChildID <- get_children(Pattern) ]
+    [ begin
+        {ok, FieldID} =ecomet_folder:find_object(ChildID, Field),
+        ecomet_object:delete(ecomet_object:open(FieldID, _Lock=none))
+      end || ChildID <- get_children(Pattern) ]
   end),
 
   ok.
