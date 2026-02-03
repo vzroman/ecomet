@@ -1682,7 +1682,9 @@ notify_update(
                 no_feedback = NoFeedback,
                 subs_fields = SubsFields,
                 read = Read
-              })
+              });
+            true ->
+              ignore
           end
 
         end,

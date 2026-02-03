@@ -101,9 +101,8 @@ groups()->
 %%        query_same_test,
 %%        query_light_update_test,
 %%        query_stateless_test,
-        query_no_feedback_test
-%%        delete_object_test,
-%%        update_object_rights_test,
+%%        query_no_feedback_test,
+        query_update_rights_test
 %%        wait_query_test,
       ]
     }
@@ -2874,6 +2873,237 @@ query_no_feedback_test(Config)->
   ?assertEqual(
     message_timeout,
     from_client(Client2, 1000)
+  ),
+
+  exit(Client1, stop),
+  exit(Client2, stop),
+  timer:sleep(100),
+
+  ok.
+
+query_update_rights_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  UG1 = ?GET(ug1,Config),
+  UG2 = ?GET(ug2,Config),
+
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"query_update_rights_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<".readgroups">> => [UG1],
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 34
+  })),
+
+  Client1 = start_client(<<"user1">>),
+  timer:sleep(100),
+
+  Client2 = start_client(<<"user2">>),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<"f3">>,'=',34}
+    ]},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<"f3">>,'=',34}
+    ]},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client2
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"f1 value">>,
+        <<"f2">> => <<"f2 value">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  % Client2 doesn't have rights
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2, 1000)
+  ),
+
+  ecomet:edit_object(ecomet:open(O),#{
+    <<"f1">> => <<"f1 value 2">>
+  }),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O,
+      #{
+        <<"f1">> => <<"f1 value 2">>
+      }
+    ),
+    from_client(Client1,1000)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2,1000)
+  ),
+
+  ecomet:edit_object(ecomet:open(O),#{
+    <<".readgroups">> => [UG1, UG2]
+  }),
+
+  % Client1 has rights but the update doesn't contain the fields it subscribed
+  ?assertEqual(
+    message_timeout,
+    from_client(Client1,1000)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"f1 value 2">>,
+        <<"f2">> => <<"f2 value">>
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  ecomet:edit_object(ecomet:open(O),#{
+    <<".readgroups">> => [UG2]
+  }),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      delete,
+      O,
+      #{}
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2, 1000)
+  ),
+
+  ecomet:edit_object(ecomet:open(O),#{
+    <<".readgroups">> => none
+  }),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client1, 1000)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      delete,
+      O,
+      #{}
+    ),
+    from_client(Client2, 1000)
+  ),
+
+  ecomet:edit_object(ecomet:open(O),#{
+    <<"f2">> => <<"f2 value 2">>
+  }),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client1, 1000)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2, 1000)
+  ),
+
+  ecomet:edit_object(ecomet:open(O),#{
+    <<".readgroups">> => [UG2]
+  }),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client1, 1000)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"f1 value 2">>,
+        <<"f2">> => <<"f2 value 2">>
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  ecomet:edit_object(ecomet:open(O),#{
+    <<".readgroups">> => [UG1]
+  }),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"f1 value 2">>,
+        <<"f2">> => <<"f2 value 2">>
+      }
+    ),
+    from_client(Client1, 1000)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      delete,
+      O,
+      #{}
+    ),
+    from_client(Client2)
   ),
 
   exit(Client1, stop),
