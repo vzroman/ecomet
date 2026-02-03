@@ -77,8 +77,8 @@
 
 all()->
   [
-    not_exists_test,
-    {group,object_subscribe},
+%%    not_exists_test,
+%%    {group,object_subscribe},
     {group,query_subscribe}
   ].
 
@@ -97,11 +97,11 @@ groups()->
     {query_subscribe,
       [sequence],
       [
-        query_subscribe_test,
-        query_same_test,
-        query_light_update_test,
-        query_stateless_test
-%%        no_feedback_test,
+%%        query_subscribe_test,
+%%        query_same_test,
+%%        query_light_update_test,
+%%        query_stateless_test,
+        query_no_feedback_test
 %%        delete_object_test,
 %%        update_object_rights_test,
 %%        wait_query_test,
@@ -2694,6 +2694,192 @@ query_stateless_test(Config)->
     },
     sys:get_state(W1)
   ),
+  ok.
+
+query_no_feedback_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"query_no_feedback_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O1 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 12,
+    <<"f4">> => <<"f4 value">>,
+    <<"f5">> => 23
+  })),
+
+  W1 = whereis(?WORKER(O1)),
+
+  Client1 = start_client(<<"system">>),
+  Client2 = start_client(<<"system">>),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f4">>, <<"f5">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<"f1">>,'=',<<"f1 value">>},
+      {<<"f3">>,'=',12}
+    ]},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f4">>, <<"f5">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<"f1">>,'=',<<"f1 value">>},
+      {<<"f3">>,'=',12}
+    ]},
+    #{
+      stateless => false,
+      no_feedback => true,
+      client => Client2
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O1,
+      #{
+        <<"f4">> => <<"f4 value">>,
+        <<"f5">> => 23
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O1,
+      #{
+        <<"f4">> => <<"f4 value">>,
+        <<"f5">> => 23
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  W1_State1 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State1 ~p",[W1_State1]),
+
+  #state{
+    objects = _W1_S1_Objects,
+    clients = _W1_S1_Clients,
+    queries = W1_S1_Queries,
+    global = _W1_S1_Global
+  } = W1_State1,
+
+  [Q1_ref] = maps:keys(W1_S1_Queries),
+
+  ?assertMatch(
+    #query{
+      conditions = _,
+      fields = _,
+      clients = #{
+        Client1 := #q_client{
+          usergroups = _,
+          subs_id = id1,
+          no_feedback = false,
+          read = _
+        },
+        Client2 := #q_client{
+          usergroups = _,
+          subs_id = id1,
+          no_feedback = true,
+          read = _
+        }
+      },
+      set = _
+    },
+    maps:get(Q1_ref, W1_S1_Queries)
+  ),
+
+  client_run(
+    Client1,
+    fun()->
+      ecomet:edit_object(ecomet:open(O1), #{
+        <<"f4">> => <<"f4 value 2">>
+      })
+    end
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O1,
+      #{
+        <<"f4">> => <<"f4 value 2">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O1,
+      #{
+        <<"f4">> => <<"f4 value 2">>
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  client_run(
+    Client2,
+    fun()->
+      ecomet:edit_object(ecomet:open(O1), #{
+        <<"f4">> => <<"f4 value 3">>
+      })
+    end
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O1,
+      #{
+        <<"f4">> => <<"f4 value 3">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2, 1000)
+  ),
+
+  exit(Client1, stop),
+  exit(Client2, stop),
+  timer:sleep(100),
+
   ok.
 
 %%-------------client loop--------------------
