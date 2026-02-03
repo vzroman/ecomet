@@ -77,8 +77,8 @@
 
 all()->
   [
-%%    not_exists_test,
-%%    {group,object_subscribe},
+    not_exists_test,
+    {group,object_subscribe},
     {group,query_subscribe}
   ].
 
@@ -97,7 +97,8 @@ groups()->
     {query_subscribe,
       [sequence],
       [
-%%        subscribe_query_test,
+        subscribe_query_test,
+        same_query_test,
         light_update_test
 %%        stateless_test,
 %%        no_feedback_test,
@@ -2016,6 +2017,274 @@ subscribe_query_test(Config)->
       )
 
     end || N <-ecomet_subscription_pool:get_workers() ],
+
+  ok.
+
+same_query_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"same_query_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O1 = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 12
+  })),
+
+  W1 = whereis(?WORKER(O1)),
+
+  Client1 = start_client(<<"system">>),
+  Client2 = start_client(<<"system">>),
+
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<".name">>,'=',<<"object1">>},
+      {<<"f3">>,'=',12}
+    ]},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ok = ecomet_query:subscribe(
+    id2,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<".name">>,'=',<<"object1">>},
+      {<<"f3">>,'=',12}
+    ]},
+    #{
+      format => fun(_Type, Value) -> {formatted, Value} end,
+      stateless => false,
+      no_feedback => false,
+      client => Client2
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O1,
+      #{
+        <<"f1">> => <<"f1 value">>,
+        <<"f2">> => <<"f2 value">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id2,
+      create,
+      O1,
+      #{
+        <<"f1">> => {formatted, <<"f1 value">>},
+        <<"f2">> => {formatted, <<"f2 value">>}
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  W1_State1 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State1 ~p",[W1_State1]),
+
+  #state{
+    objects = W1_S1_Objects,
+    clients = _W1_S1_Clients,
+    queries = W1_S1_Queries,
+    global = _W1_S1_Global
+  } = W1_State1,
+
+  [Q1_ref] = maps:keys(W1_S1_Queries),
+
+  ?assertMatch(
+    #{
+      Q1_ref := #query{
+        conditions = {'AND',[
+          {<<".folder">>,'=',F},
+          {<<".name">>,'=',<<"object1">>},
+          {<<"f3">>,'=',12}
+        ]},
+        fields = [<<"f1">>, <<"f2">>],
+        clients = #{
+          Client1 := #q_client{
+            usergroups = _,
+            subs_id = id1,
+            no_feedback = false,
+            read = _
+          },
+          Client2 := #q_client{
+            usergroups = _,
+            subs_id = id2,
+            no_feedback = false,
+            read = _
+          }
+        },
+        set = _W1_S1_Q1_Set
+      }
+    },
+    W1_S1_Queries
+  ),
+
+  ?assertEqual(
+    #object{
+      instance = ecomet_object:construct(O1),
+      clients = #{},
+      queries = [Q1_ref],
+      fields = #{
+        <<".oid">> => O1,
+        object => ecomet_object:construct(O1),
+        <<".readgroups">> => [],
+        <<"f1">> => <<"f1 value">>,
+        <<"f2">> => <<"f2 value">>
+      },
+      fields_ref = #{
+        <<".oid">> => 1,
+        object => 1,
+        <<".readgroups">> => 1,
+        <<"f1">> => 1,
+        <<"f2">> => 1
+      }
+    },
+    maps:get(O1, W1_S1_Objects)
+  ),
+
+  %-------------------update object--------------------
+  ecomet:edit_object(ecomet:open(O1), #{ <<"f1">> => <<"f1 value 2">> }),
+
+  % Client 1 doesn't receive the update because it's not subscribed to f4 field
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O1,
+      #{
+        <<"f1">> => <<"f1 value 2">>
+      }
+    ),
+    from_client(Client1)
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id2,
+      update,
+      O1,
+      #{
+        <<"f1">> => {formatted, <<"f1 value 2">>}
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  W1_State2 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State2 ~p",[W1_State2]),
+
+  #state{
+    objects = W1_S2_Objects,
+    clients = _W1_S2_Clients,
+    queries = W1_S2_Queries,
+    global = _W1_S2_Global
+  } = W1_State2,
+
+  ?assertEqual(
+    W1_S1_Queries,
+    W1_S2_Queries
+  ),
+
+  ?assertEqual(
+    #object{
+      instance = ecomet_object:construct(O1),
+      clients = #{},
+      queries = [Q1_ref],
+      fields = #{
+        <<".oid">> => O1,
+        object => ecomet_object:construct(O1),
+        <<".readgroups">> => [],
+        <<"f1">> => <<"f1 value 2">>,
+        <<"f2">> => <<"f2 value">>
+      },
+      fields_ref = #{
+        <<".oid">> => 1,
+        object => 1,
+        <<".readgroups">> => 1,
+        <<"f1">> => 1,
+        <<"f2">> => 1
+      }
+    },
+    maps:get(O1, W1_S2_Objects)
+  ),
+
+  exit(Client1, stop),
+  timer:sleep(100),
+
+  W1_State3 = sys:get_state(W1),
+  ?LOGDEBUG("W1_State3 ~p",[W1_State3]),
+
+  #state{
+    objects = W1_S3_Objects,
+    clients = _W1_S3_Clients,
+    queries = W1_S3_Queries,
+    global = _W1_S3_Global
+  } = W1_State3,
+
+  #{
+    Q1_ref := #query{
+      conditions = {'AND',[
+        {<<".folder">>,'=',F},
+        {<<".name">>,'=',<<"object1">>},
+        {<<"f3">>,'=',12}
+      ]},
+      fields = [<<"f1">>, <<"f2">>],
+      clients = W1_S3_Q1_Clients,
+      set = _W1_S3_Q1_Set
+    }
+  } = W1_S3_Queries,
+
+  ?assertEqual(
+    W1_S2_Objects,
+    W1_S3_Objects
+  ),
+
+  ?assertEqual(
+    [Client2],
+    maps:keys(W1_S3_Q1_Clients)
+  ),
+
+
+  exit(Client2, stop),
+  timer:sleep(100),
+
+  ?assertEqual(
+    #state{
+      objects = #{},
+      clients = #{},
+      queries = #{},
+      global = ?EMPTY_SET
+    },
+    sys:get_state(W1)
+  ),
 
   ok.
 
