@@ -427,7 +427,7 @@ add_query(
       objects = Objects0
     }
 )->
-  Set = init_query_set(maps:get(Ref, Queries0, undefined), Subscription, Objects0, Set0),
+  Set = init_query_set(maps:get(Ref, Queries0, undefined), Subscription, Set0),
 
   Query0 = #query{
     conditions = Conditions,
@@ -478,34 +478,16 @@ init_query_set(
       set = WaitSet
     },
     #subscribe{
-      conditions = Conditions,
-      deps = SubsFields
+      conditions = Conditions
     },
-    Objects,
     Set0
 )->
-  lists:foldl(
+  ecomet_resultset:foldl(
     fun(OID, RS)->
       try
-        Fields =
-          case maps:get(OID, Objects, undefined) of
-            #object{
-              instance = Object,
-              fields = ReadyFields
-            } ->
-              case SubsFields -- maps:keys(ReadyFields) of
-                [] ->
-                  maps:with(SubsFields, ReadyFields);
-                ToReadFields->
-                  maps:merge(
-                    maps:with(SubsFields, ReadyFields),
-                    ecomet:read_fields(Object, ToReadFields)
-                  )
-              end;
-            _->
-              Object = ecomet_object:construct(OID),
-              ecomet:read_fields(Object, SubsFields)
-          end,
+        Object = ecomet_object:construct(OID),
+        Fields0 = ecomet_object:read_all(Object),
+        Fields = ecomet_query:query_object(Object, Fields0),
         case ecomet_resultset:direct(Conditions, Fields) of
           true ->
             ecomet_resultset:add_oid(OID, RS);
@@ -520,7 +502,7 @@ init_query_set(
     Set0,
     WaitSet
   );
-init_query_set(_NoWaitQuery, _Subscription, _Objects, Set)->
+init_query_set(_NoWaitQuery, _Subscription, Set)->
   Set.
 
 add_query_client(

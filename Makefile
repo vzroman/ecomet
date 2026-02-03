@@ -4,7 +4,7 @@ compile:
 	$(REBAR3) compile
 
 tests: compile
-	$(REBAR3) ct --spec=./test/module/test.spec
+	$(REBAR3) ct --spec=./test/subscriptions/test.spec
 
 clean_build:
 	@rm -rf _build

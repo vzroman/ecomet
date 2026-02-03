@@ -88,7 +88,7 @@ transform_test(_Config) ->
 
 
   meck:new(ecomet_query, [passthrough]),
-  meck:expect(ecomet_query, get, fun ?MODULE:query_get/3),
+  meck:expect(ecomet_query, system, fun ?MODULE:query_get/3),
 
   {ok, _} = ecomet_subscription_sup:start_link(),
   QueryServer = whereis(ecomet_subscription_query),
