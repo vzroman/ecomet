@@ -33,7 +33,6 @@
 -record(subscribe,{
   id,
   client,
-  usergroups,
   dbs,
   read,
   deps,

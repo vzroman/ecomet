@@ -36,8 +36,7 @@
   insert/2,
   delete/2,delete/3,
   compile/3,compile/4,
-  system/3,
-  query_object/2
+  system/3
 ]).
 
 %%====================================================================
@@ -217,38 +216,72 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
     client => self()
   },InParams),
 
-  UG =
-    case ecomet_user:get_user_rights( Client ) of
-      {ok, _UG} ->
-        _UG;
-      _->
-        throw({client_not_authorized, Client})
-    end,
-
   {Deps, Read} = compile_subscribe_read(Fields,Formatter),
 
-  Subscribe = #subscribe{
+  init_subscription(#subscribe{
     id = ID,
     client = Client,
-    usergroups = UG,
     dbs = DBs,
     read = Read,
     deps = Deps,
     conditions = Conditions,
     params = Params
-  },
+  }).
 
-  case Conditions of
-    {<<".oid">>,'=',_} ->
-      ecomet_subscription_object:subscribe(Subscribe);
-    {<<".path">>,'=',Path} ->
+init_subscription(Subscribe = #subscribe{
+  client = Client,
+  conditions = {<<".oid">>,'=',OID}
+})->
+  %-----------Object subscription------------------------------
+  case ecomet_user:get_user_rights( Client ) of
+    {ok, UG} when is_list(UG)->
+      Object = ecomet_object:construct(OID),
+      case ecomet:read_field(Object, <<".readgroups">>) of
+        {ok, RG} when is_list(RG)->
+          RestUG = UG -- RG,
+          if
+            length(UG)=:=length(RestUG) ->
+              % No intersection
+              throw(access_denied);
+            true ->
+              ecomet_subscription_object:subscribe(Subscribe#subscribe{
+                conditions = OID
+              })
+          end;
+        _->
+          throw(access_denied)
+      end;
+    {ok, is_admin} ->
       ecomet_subscription_object:subscribe(Subscribe#subscribe{
-        conditions = {<<".oid">>,'=',?OID(Path)}
+        conditions = OID
       });
     _->
-      ecomet_subscription_query:subscribe(Subscribe)
+      throw({client_not_authorized, Client})
+  end;
+init_subscription(Subscribe = #subscribe{
+  conditions = {<<".path">>,'=',Path}
+})->
+  init_subscription(Subscribe#subscribe{
+    conditions = {<<".oid">>,'=',?OID(Path)}
+  });
+init_subscription(Subscribe = #subscribe{
+  client = Client,
+  conditions = Conditions0
+})->
+  % Query subscription
+  case ecomet_user:get_user_rights( Client ) of
+    {ok, UG} when is_list(UG)->
+      ecomet_subscription_object:subscribe(Subscribe#subscribe{
+        conditions = {'AND',[
+          Conditions0,
+          {'OR',[{<<".readgroups">>,'=',GID}||GID<-UG]}
+        ]}
+      });
+    {ok, is_admin} ->
+      ecomet_subscription_object:subscribe(Subscribe);
+    _->
+      throw({client_not_authorized, Client})
   end.
-
 
 compile_subscribe_read([<<".oid">>],_Formatter)->
   {
@@ -1041,25 +1074,18 @@ read_up(none, get)->
   % Optimized for reading case
   fun(OID,Fields)->
     Object=ecomet_object:construct(OID),
-    query_object( Object, ecomet_object:read_fields(Object,Fields) )
+    ecomet_object:read_fields(Object,Fields)
   end;
 read_up(Lock, _Any)->
   fun(OID,Fields)->
     try
       Object = ecomet_object:open(OID,Lock),
-      query_object( Object, ecomet_object:read_fields(Object,Fields) )
+      ecomet_object:read_fields(Object,Fields)
     catch
       _:not_exists->
-        NoneValues = maps:from_list([{F,none}||F<-Fields]),
-        NoneValues#{ object => not_exists, <<".oid">> => OID }
+        maps:from_list([{F,none}||F<-Fields])
     end
   end.
-
-query_object( Object, Fields )->
-  Fields#{
-    <<".oid">> => ecomet_object:get_oid( Object ),
-    object => Object
-  }.
 
 %%--------Local presorting----------------------------------
 % Tree level is sorted list of tuples - { Key, ItemList }.

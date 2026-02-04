@@ -114,7 +114,6 @@ transform_test(_Config) ->
   Subscribe1 = #subscribe{
     id = id1,
     client = Client1,
-    usergroups = is_admin,
     dbs = [db1],
     read = Read,
     deps = [<<"f1">>,<<"f2">>],
@@ -205,7 +204,7 @@ transform_test(_Config) ->
   ),
 
   #{
-    Client2 := C2 = #client{
+    Client2 := #client{
       monitor_ref = Client2MRef
     }
   } = Clients2,

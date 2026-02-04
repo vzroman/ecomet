@@ -1076,7 +1076,7 @@ get_storage_indexes( Storages )->
 
 -record(s_data,{ oid, db, type, fields, data ,index, tags }).
 %-------------------------Create commit---------------------------------------------
-commit_object(on_create, #object{oid = OID, pattern = P, db = DB} = Object, Changes )->
+commit_object(on_create, #object{oid = OID, pattern = P, db = DB}, Changes )->
 
   {ByStorageTypes, IndexedFields} = changes_by_storage( Changes, ?map( P ) ),
 
@@ -1103,7 +1103,7 @@ commit_object(on_create, #object{oid = OID, pattern = P, db = DB} = Object, Chan
   #{
     action => create,
     oid => OID,
-    fields => log_fields( Object, Fields ),
+    fields => Fields,
     db => DB,
     ts => TS,
     tags => AddTags
@@ -1147,7 +1147,7 @@ commit_object(on_delete, #object{oid = OID, pattern = P, db = DB}, _Changes )->
   }.
 
 %-------------------------Light Edit commit (no tags changed)---------------------------------------------
-commit_update_light(#object{oid = OID, db = DB} = Object, Changes, ByStorageTypes, Storages )->
+commit_update_light(#object{oid = OID, db = DB}, Changes, ByStorageTypes, Storages )->
 
   %-----Commit changes---------------------------
   maps:foreach(fun(Type, Fields)->
@@ -1165,12 +1165,12 @@ commit_update_light(#object{oid = OID, db = DB} = Object, Changes, ByStorageType
   #{
     action => light_update,
     oid => OID,
-    fields => log_fields(Object, Fields)
+    fields => Fields
   }.
 %-------------------------Full Edit commit (tags changed)---------------------------------------------
 % The heaviest version of commit, because we need to build full object with it's tags to properly trigger query subscriptions
 -record(full_update_acc,{ add_tags, other_tags, del_tags, fields0 }).
-commit_update_full( #object{ oid = OID, pattern = P, db = DB } = Object, Changes, ByStorageTypes, IndexedFields , Storages0 )->
+commit_update_full( #object{ oid = OID, pattern = P, db = DB }, Changes, ByStorageTypes, IndexedFields , Storages0 )->
 
   % Load storages that are not loaded
   Storages = load_storage_types( OID, ecomet_pattern:get_storage_types( P ), Storages0 ),
@@ -1213,8 +1213,8 @@ commit_update_full( #object{ oid = OID, pattern = P, db = DB } = Object, Changes
   #{
     action => update,
     oid => OID,
-    fields => log_fields(Object, Fields),
-    fields0 => log_fields(Object, Fields0),
+    fields => Fields,
+    fields0 => Fields0,
     db => DB,
     ts => TS,
     tags => {AddTags, OtherTags, DelTags}
@@ -1400,13 +1400,6 @@ commit_storage_update(#s_data{
   Acc#full_update_acc{
     add_tags = ?SET_OR( AddTagsAcc, ?NEW_SET(AddTags) )
   }.
-
-log_fields( #object{ oid = OID } = Object, Fields )->
-  ecomet_query:query_object( Object#object{
-    pattern = get_pattern_oid( OID ),
-    edit = false,
-    move = false
-  }, Fields ).
 
 %%==============================================================================================
 %%	Reindexing

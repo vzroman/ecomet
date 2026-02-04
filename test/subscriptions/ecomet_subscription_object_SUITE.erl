@@ -36,17 +36,14 @@
 
 -record(client,{
   monitor,
-  usergroups,
   subs
 }).
 
 -record(o_client,{
-  access,
   subs
 }).
 
 -record(q_client,{
-  usergroups,
   subs_id,
   no_feedback,
   read
@@ -63,7 +60,6 @@
   oid,
   client_id,
   subs_id,
-  access,
   actor,
   action,
   no_feedback,
@@ -244,7 +240,6 @@ not_exists_test(_Config)->
   Subscribe0 = #subscribe{
     id = id1,
     client = Self,
-    usergroups = is_admin,
     dbs = [root],
     read = fun maps:with/2,
     deps = [<<"f1">>,<<"f2">>],
@@ -301,7 +296,6 @@ object_subscribe_test(Config) ->
   Subscribe1 = #subscribe{
     id = id1,
     client = Client1,
-    usergroups = is_admin,
     dbs = [db1],
     read = ReadF1F2,
     deps = F1_F2,
@@ -340,7 +334,6 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1])
           }
         },
@@ -374,7 +367,6 @@ object_subscribe_test(Config) ->
     #{
       Client1 => #client{
         monitor = W1_S1_C1_MRef,
-        usergroups = is_admin,
         subs = #{
           id1 => #o_sub{
             fields = F1_F2,
@@ -429,11 +421,9 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1])
           }
         },
@@ -469,7 +459,6 @@ object_subscribe_test(Config) ->
     #{
       Client1 => #client{
         monitor = W1_S1_C1_MRef,
-        usergroups = is_admin,
         subs = #{
           id1 => #o_sub{
             fields = F1_F2,
@@ -481,7 +470,6 @@ object_subscribe_test(Config) ->
       },
       Client2 => #client{
         monitor = W1_S2_C2_MRef,
-        usergroups = is_admin,
         subs = #{
           id1 => #o_sub{
             fields = F2_F3,
@@ -534,11 +522,9 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1,id2])
           }
         },
@@ -568,7 +554,6 @@ object_subscribe_test(Config) ->
     #{
       Client1 => #client{
         monitor = W1_S1_C1_MRef,
-        usergroups = is_admin,
         subs = #{
           id1 => #o_sub{
             fields = F1_F2,
@@ -580,7 +565,6 @@ object_subscribe_test(Config) ->
       },
       Client2 => #client{
         monitor = W1_S2_C2_MRef,
-        usergroups = is_admin,
         subs = #{
           id1 => #o_sub{
             fields = F2_F3,
@@ -639,11 +623,9 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1,id2])
           }
         },
@@ -694,11 +676,9 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
-            access = true,
             subs = ordsets:from_list([id2])
           }
         },
@@ -728,7 +708,6 @@ object_subscribe_test(Config) ->
     #{
       Client1 => #client{
         monitor = W1_S1_C1_MRef,
-        usergroups = is_admin,
         subs = #{
           id1 => #o_sub{
             fields = F1_F2,
@@ -740,7 +719,6 @@ object_subscribe_test(Config) ->
       },
       Client2 => #client{
         monitor = W1_S2_C2_MRef,
-        usergroups = is_admin,
         subs = #{
           id2 => #o_sub{
             fields = F1_F3,
@@ -778,7 +756,6 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client2 => #o_client{
-            access = true,
             subs = ordsets:from_list([id2])
           }
         },
@@ -806,7 +783,6 @@ object_subscribe_test(Config) ->
     #{
       Client2 => #client{
         monitor = W1_S2_C2_MRef,
-        usergroups = is_admin,
         subs = #{
           id2 => #o_sub{
             fields = F1_F3,
@@ -1161,7 +1137,6 @@ object_delete_test(Config)->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1])
           }
         },
@@ -1322,11 +1297,9 @@ object_update_rights_test(Config)->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
-            access = false,
             subs = ordsets:from_list([id1])
           }
         },
@@ -1386,11 +1359,9 @@ object_update_rights_test(Config)->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
-            access = false,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
-            access = false,
             subs = ordsets:from_list([id1])
           }
         },
@@ -1453,11 +1424,9 @@ object_update_rights_test(Config)->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
-            access = false,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
-            access = true,
             subs = ordsets:from_list([id1])
           }
         },
@@ -1638,7 +1607,6 @@ query_subscribe_test(Config)->
           fields = [<<"f1">>, <<"f2">>],
           clients = #{
             Client1 := #q_client{
-              usergroups = is_admin,
               subs_id = id1,
               no_feedback = false,
               read = _
@@ -1655,7 +1623,6 @@ query_subscribe_test(Config)->
           fields = [<<"f2">>, <<"f3">>],
           clients = #{
             Client2 := #q_client{
-              usergroups = is_admin,
               subs_id = id1,
               no_feedback = false,
               read = _
@@ -2127,13 +2094,11 @@ query_same_test(Config)->
         fields = [<<"f1">>, <<"f2">>],
         clients = #{
           Client1 := #q_client{
-            usergroups = _,
             subs_id = id1,
             no_feedback = false,
             read = _
           },
           Client2 := #q_client{
-            usergroups = _,
             subs_id = id2,
             no_feedback = false,
             read = _
@@ -2386,7 +2351,6 @@ query_light_update_test(Config)->
       instance = ecomet_object:construct(O1),
       clients = #{
         Client1 => #o_client{
-          access = true,
           subs = [id1]
         }
       },
@@ -2447,7 +2411,6 @@ query_light_update_test(Config)->
       instance = ecomet_object:construct(O1),
       clients = #{
         Client1 => #o_client{
-          access = true,
           subs = [id1]
         }
       },
@@ -2513,7 +2476,6 @@ query_light_update_test(Config)->
       instance = ecomet_object:construct(O1),
       clients = #{
         Client1 => #o_client{
-          access = true,
           subs = [id1]
         }
       },
@@ -2798,13 +2760,11 @@ query_no_feedback_test(Config)->
       fields = _,
       clients = #{
         Client1 := #q_client{
-          usergroups = _,
           subs_id = id1,
           no_feedback = false,
           read = _
         },
         Client2 := #q_client{
-          usergroups = _,
           subs_id = id1,
           no_feedback = true,
           read = _
@@ -3188,7 +3148,6 @@ query_wait_test(Config)->
     #subscribe{
       id = id1,
       client = Client1,
-      usergroups = is_admin,
       dbs = [root],
       read = Read,
       deps = Deps,
@@ -3273,7 +3232,6 @@ query_wait_test(Config)->
         fields = Deps,
         clients = #{
           Client1 => #q_client{
-            usergroups = is_admin,
             subs_id = id1,
             no_feedback = false,
             read = Read
@@ -3321,7 +3279,6 @@ query_wait_test(Config)->
     #subscribe{
       id = id2,
       client = Client1,
-      usergroups = is_admin,
       dbs = [root],
       read = Read,
       deps = Deps,
@@ -3377,7 +3334,6 @@ query_wait_test(Config)->
       fields = Deps,
       clients = #{
         Client1 => #q_client{
-          usergroups = is_admin,
           subs_id = id2,
           no_feedback = false,
           read = Read
