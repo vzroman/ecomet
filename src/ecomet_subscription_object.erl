@@ -883,8 +883,9 @@ real_subs_fields(SubsFields, OID)->
   case lists:member('*', SubsFields) of
     true ->
       PatternID = ecomet_object:get_pattern_oid(OID),
-      AllFields = ecomet_pattern:get_fields(PatternID),
-      ordsets:from_list(maps:keys(AllFields));
+      AllFields = maps:keys(ecomet_pattern:get_fields(PatternID)),
+      ServiceFields = ecomet_object:service_fields(),
+      ordsets:from_list(AllFields ++ ServiceFields);
     _->
       [F || F <- SubsFields, is_binary(F)]
   end.
@@ -1124,7 +1125,7 @@ init_subscription(
 
 init_subscription(
     #subscribe{
-      conditions = {<<".oid">>,'=',OID},
+      conditions = OID,
       client = ClientID,
       id = SubsID
     },

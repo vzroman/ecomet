@@ -56,6 +56,7 @@
   read_all/1,read_all/2,
   field_changes/2,
   object_changes/1,
+  service_fields/0,
   field_type/2,
   is_object/1,
   is_oid/1,
@@ -534,6 +535,9 @@ field_changes(#object{oid=OID},Field)->
 % Check changes for the field within the transaction
 object_changes(#object{ oid = OID })->
   ecomet_transaction:dict_get( {OID, data} ).
+
+service_fields()->
+  maps:keys(?SERVICE_FIELDS).
 
 field_type(#object{pattern = P},Field)->
   case ?SERVICE_FIELDS of

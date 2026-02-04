@@ -292,7 +292,7 @@ compile_subscribe_read(['*'],Formatter) when is_function(Formatter,2)->
   ReadField =
     fun(Object,Field)->
       Value = maps:get(Field,Object,none),
-      {ok,Type}=ecomet_object:field_type(maps:get(object,Object),Field),
+      {ok,Type}=ecomet_object:field_type(maps:get(<<".object">>,Object),Field),
       Formatter(Type,Value)
     end,
 
@@ -985,14 +985,14 @@ read_fun('*',Formatter)->
   Read =
     if
       is_function(Formatter,2) ->
-        fun(#{object:=Object})->ecomet_object:read_all(Object,#{format=>Formatter}) end;
+        fun(#{<<".object">>:=Object})->ecomet_object:read_all(Object,#{format=>Formatter}) end;
       true ->
-        fun(#{object:=Object})->ecomet_object:read_all(Object) end
+        fun(#{<<".object">>:=Object})->ecomet_object:read_all(Object) end
     end,
 
   #get{
     value = Read,
-    args = []
+    args = [<<".object">>]
   };
 read_fun({Aggregate,Value},_Formatter) when (Aggregate=:=sum) or (Aggregate=:=max) or (Aggregate=:=min)->
   Get=read_fun(Value,undefined),
@@ -1024,10 +1024,9 @@ read_fun(FieldName,Formatter) when is_binary(FieldName)->
   GetValue =
     fun(Fields)->
       case Fields of
-        #{FieldName:=Value}->Value;
-        #{object:=Object} when FieldName=:=<<".path">>->
-          ecomet:to_path(Object);
-        #{object:=Object}->
+        #{FieldName:=Value}->
+          Value;
+        #{<<".object">>:=Object}->
           case ecomet_object:field_type(Object,FieldName) of
             {ok,_}->none;
             _->undefined_field
@@ -1042,16 +1041,23 @@ read_fun(FieldName,Formatter) when is_binary(FieldName)->
             undefined_field->
               Formatter(string,undefined_field);
             Value->
-              {ok,Type}=ecomet_object:field_type(maps:get(object,Object),FieldName),
+              {ok,Type}=ecomet_object:field_type(maps:get(<<".object">>,Object),FieldName),
               Formatter(Type,Value)
           end
         end;
       true ->
         GetValue
     end,
+  Args =
+    if
+      is_function(Formatter, 2) ->
+        ordsets:from_list([FieldName,<<".object">>]);
+      true ->
+        [FieldName]
+    end,
   #get{
     value = Fun,
-    args = [FieldName]
+    args = Args
   };
 read_fun(Field,_Formatter)->erlang:error({invalid_query_field,Field}).
 
