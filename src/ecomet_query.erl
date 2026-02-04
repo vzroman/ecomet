@@ -711,7 +711,7 @@ map_reduce_plan(#{aggregate:=false}=Params)->
   LocalStorageFields=
     lists:foldl(fun(ID,Acc)->
       ordsets:union(field_args(maps:get(ID,Read)),Acc)
-    end,[],LocalReadUpFields),
+    end,[<<".oid">>,<<".object">>],LocalReadUpFields),
   GroupingFunList=
     [field_read_fun(maps:get(ID,Read))||ID<-GroupAndSortFields],
   OtherFieldsFunList=
@@ -747,7 +747,7 @@ map_reduce_plan(#{aggregate:=false}=Params)->
         OtherStorageFields=
           lists:foldl(fun(ID,Acc)->
             ordsets:union(field_args(maps:get(ID,Read)),Acc)
-          end,[],OtherFields),
+          end,[<<".oid">>,<<".object">>],OtherFields),
         fun(OID)->
           Object=ReadUp(OID,OtherStorageFields),
           LeafObjectFun(Object)
@@ -808,7 +808,7 @@ map_reduce_plan(#{group:=[]}=Params)->
   StorageFields=
     maps:fold(fun(_,#field{value = #get{args = Args}},Acc)->
       ordsets:union(Args,Acc)
-    end,[],Read),
+    end,[<<".oid">>,<<".object">>],Read),
 
   RowFieldsFunList=
     [F#field.value#get.value||{_,F}<-ordsets:from_list(maps:to_list(Read))],
