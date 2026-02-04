@@ -40,6 +40,7 @@
 }).
 
 -record(o_client,{
+  access,
   subs
 }).
 
@@ -72,7 +73,7 @@
 
 all()->
   [
-%%    not_exists_test,
+    not_exists_test,
     {group,object_subscribe}
 %%    {group,query_subscribe}
   ].
@@ -82,11 +83,11 @@ groups()->
     {object_subscribe,
       [sequence],
       [
-%%        object_subscribe_test,
-%%        object_stateless_test,
-%%        object_no_feedback_test,
-%%        object_delete_test,
-        object_rights_test
+        object_subscribe_test,
+        object_stateless_test,
+        object_no_feedback_test,
+        object_delete_test,
+        object_update_rights_test
       ]
     },
     {query_subscribe,
@@ -288,6 +289,8 @@ object_subscribe_test(Config) ->
   })),
 
   Client1 = start_client(<<"system">>),
+  timer:sleep(100),
+
   {F1_F2, ReadF1F2} = ecomet_query:compile_subscribe_read(
     [<<"f1">>,<<"f2">>],
     undefined
@@ -334,6 +337,7 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
+            access = true,
             subs = ordsets:from_list([id1])
           }
         },
@@ -379,6 +383,8 @@ object_subscribe_test(Config) ->
 
   %-------------------Client 2--------------------------------------
   Client2 = start_client(<<"system">>),
+  timer:sleep(100),
+
   {F2_F3, ReadF2F3} = ecomet_query:compile_subscribe_read(
     [<<"f2">>,<<"f3">>],
     fun ecomet:to_string/2
@@ -415,9 +421,11 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
+            access = true,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
+            access = true,
             subs = ordsets:from_list([id1])
           }
         },
@@ -512,9 +520,11 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
+            access = true,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
+            access = true,
             subs = ordsets:from_list([id1,id2])
           }
         },
@@ -609,9 +619,11 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
+            access = true,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
+            access = true,
             subs = ordsets:from_list([id1,id2])
           }
         },
@@ -658,9 +670,11 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
+            access = true,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
+            access = true,
             subs = ordsets:from_list([id2])
           }
         },
@@ -732,6 +746,7 @@ object_subscribe_test(Config) ->
         instance = ecomet_object:construct(O),
         clients = #{
           Client2 => #o_client{
+            access = true,
             subs = ordsets:from_list([id2])
           }
         },
@@ -1107,6 +1122,7 @@ object_delete_test(Config)->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
+            access = true,
             subs = ordsets:from_list([id1])
           }
         },
@@ -1170,7 +1186,7 @@ object_delete_test(Config)->
 
   ok.
 
-object_rights_test(Config)->
+object_update_rights_test(Config)->
   P1 = ?GET(p1,Config),
 
   UG1 = ?GET(ug1,Config),
@@ -1180,7 +1196,7 @@ object_rights_test(Config)->
   ecomet:dirty_login(<<"system">>),
 
   F = ?OID(ecomet:create_object(#{
-    <<".name">> => <<"object_rights_test">>,
+    <<".name">> => <<"object_update_rights_test">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
     <<".folder">> => ?OID(<<"/root">>)
   })),
@@ -1196,8 +1212,6 @@ object_rights_test(Config)->
   })),
 
   Client1 = start_client(<<"user1">>),
-  timer:sleep(100),
-
   Client2 = start_client(<<"user2">>),
   timer:sleep(100),
 
@@ -1213,19 +1227,16 @@ object_rights_test(Config)->
     }
   ),
 
-  ?assertThrow(
-    access_denied,
-    ecomet_query:subscribe(
-      id1,
-      [root],
-      [<<"f1">>, <<"f2">>],
-      {<<".oid">>,'=',O},
-      #{
-        stateless => false,
-        no_feedback => false,
-        client => Client2
-      }
-    )
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {<<".oid">>,'=',O},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client2
+    }
   ),
 
   ?assertEqual(
@@ -1264,6 +1275,11 @@ object_rights_test(Config)->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
+            access = true,
+            subs = ordsets:from_list([id1])
+          },
+          Client2 => #o_client{
+            access = false,
             subs = ordsets:from_list([id1])
           }
         },
@@ -1286,38 +1302,13 @@ object_rights_test(Config)->
     <<"f1">> => <<"f1 value 2">>
   }),
 
-  ?assertThrow(
-    access_denied,
-    ecomet_query:subscribe(
-      id_denied,
-      [root],
-      [<<"f1">>, <<"f2">>],
-      {<<".oid">>,'=',O},
-      #{
-        stateless => false,
-        no_feedback => false,
-        client => Client1
-      }
-    )
-  ),
-
-  ?assertThrow(
-    access_denied,
-    ecomet_query:subscribe(
-      id_denied,
-      [root],
-      [<<"f1">>, <<"f2">>],
-      {<<".oid">>,'=',O},
-      #{
-        stateless => false,
-        no_feedback => false,
-        client => Client2
-      }
-    )
-  ),
-
   ?assertEqual(
-    message_timeout,
+    ?SUBSCRIPTION(
+      id1,
+      delete,
+      O,
+      #{}
+    ),
     from_client(Client1)
   ),
 
@@ -1342,6 +1333,11 @@ object_rights_test(Config)->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
+            access = false,
+            subs = ordsets:from_list([id1])
+          },
+          Client2 => #o_client{
+            access = false,
             subs = ordsets:from_list([id1])
           }
         },
@@ -1398,24 +1394,20 @@ object_rights_test(Config)->
         instance = ecomet_object:construct(O),
         clients = #{
           Client1 => #o_client{
+            access = false,
             subs = ordsets:from_list([id1])
           },
           Client2 => #o_client{
+            access = true,
             subs = ordsets:from_list([id1])
           }
         },
         queries = [],
         fields = #{
-          <<".oid">> => O,
-          object => ecomet_object:construct(O),
-          <<".readgroups">> => [UG2],
           <<"f1">> => <<"f1 value 2">>,
           <<"f2">> => <<"f2 value 2">>
         },
         fields_ref = #{
-          <<".oid">> => 1,
-          object => 1,
-          <<".readgroups">> => 1,
           <<"f1">> => 2,
           <<"f2">> => 2
         }
@@ -1983,7 +1975,6 @@ query_same_test(Config)->
 
   Client1 = start_client(<<"system">>),
   Client2 = start_client(<<"system">>),
-
   timer:sleep(100),
 
   ok = ecomet_query:subscribe(
@@ -2251,7 +2242,6 @@ query_light_update_test(Config)->
 
   Client1 = start_client(<<"system">>),
   Client2 = start_client(<<"system">>),
-
   timer:sleep(100),
 
   ok = ecomet_query:subscribe(
