@@ -234,24 +234,7 @@ init_subscription(Subscribe = #subscribe{
 })->
   %-----------Object subscription------------------------------
   case ecomet_user:get_user_rights( Client ) of
-    {ok, UG} when is_list(UG)->
-      Object = ecomet_object:construct(OID),
-      case ecomet:read_field(Object, <<".readgroups">>) of
-        {ok, RG} when is_list(RG)->
-          RestUG = UG -- RG,
-          if
-            length(UG)=:=length(RestUG) ->
-              % No intersection
-              throw(access_denied);
-            true ->
-              ecomet_subscription_object:subscribe(Subscribe#subscribe{
-                conditions = OID
-              })
-          end;
-        _->
-          throw(access_denied)
-      end;
-    {ok, is_admin} ->
+    {ok, _UG} ->
       ecomet_subscription_object:subscribe(Subscribe#subscribe{
         conditions = OID
       });

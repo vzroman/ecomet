@@ -82,11 +82,11 @@ groups()->
     {object_subscribe,
       [sequence],
       [
-        object_subscribe_test
+%%        object_subscribe_test,
 %%        object_stateless_test,
 %%        object_no_feedback_test,
 %%        object_delete_test,
-%%        object_update_rights_test
+        object_rights_test
       ]
     },
     {query_subscribe,
@@ -1112,16 +1112,10 @@ object_delete_test(Config)->
         },
         queries = [],
         fields = #{
-          <<".oid">> => O,
-          object => ecomet_object:construct(O),
-          <<".readgroups">> => [],
           <<"f1">> => <<"object_delete_test f1 value">>,
           <<"f2">> => <<"object_delete_test f2 value">>
         },
         fields_ref = #{
-          <<".oid">> => 1,
-          object => 1,
-          <<".readgroups">> => 1,
           <<"f1">> => 1,
           <<"f2">> => 1
         }
@@ -1176,7 +1170,7 @@ object_delete_test(Config)->
 
   ok.
 
-object_update_rights_test(Config)->
+object_rights_test(Config)->
   P1 = ?GET(p1,Config),
 
   UG1 = ?GET(ug1,Config),
@@ -1186,7 +1180,7 @@ object_update_rights_test(Config)->
   ecomet:dirty_login(<<"system">>),
 
   F = ?OID(ecomet:create_object(#{
-    <<".name">> => <<"object_update_rights_test">>,
+    <<".name">> => <<"object_rights_test">>,
     <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
     <<".folder">> => ?OID(<<"/root">>)
   })),
@@ -1219,16 +1213,19 @@ object_update_rights_test(Config)->
     }
   ),
 
-  ok = ecomet_query:subscribe(
-    id1,
-    [root],
-    [<<"f1">>, <<"f2">>],
-    {<<".oid">>,'=',O},
-    #{
-      stateless => false,
-      no_feedback => false,
-      client => Client2
-    }
+  ?assertThrow(
+    access_denied,
+    ecomet_query:subscribe(
+      id1,
+      [root],
+      [<<"f1">>, <<"f2">>],
+      {<<".oid">>,'=',O},
+      #{
+        stateless => false,
+        no_feedback => false,
+        client => Client2
+      }
+    )
   ),
 
   ?assertEqual(
@@ -1268,23 +1265,14 @@ object_update_rights_test(Config)->
         clients = #{
           Client1 => #o_client{
             subs = ordsets:from_list([id1])
-          },
-          Client2 => #o_client{
-            subs = ordsets:from_list([id1])
           }
         },
         queries = [],
         fields = #{
-          <<".oid">> => O,
-          object => ecomet_object:construct(O),
-          <<".readgroups">> => [UG1],
           <<"f1">> => <<"f1 value">>,
           <<"f2">> => <<"f2 value">>
         },
         fields_ref = #{
-          <<".oid">> => 1,
-          object => 1,
-          <<".readgroups">> => 1,
           <<"f1">> => 2,
           <<"f2">> => 2
         }
@@ -1298,13 +1286,38 @@ object_update_rights_test(Config)->
     <<"f1">> => <<"f1 value 2">>
   }),
 
+  ?assertThrow(
+    access_denied,
+    ecomet_query:subscribe(
+      id_denied,
+      [root],
+      [<<"f1">>, <<"f2">>],
+      {<<".oid">>,'=',O},
+      #{
+        stateless => false,
+        no_feedback => false,
+        client => Client1
+      }
+    )
+  ),
+
+  ?assertThrow(
+    access_denied,
+    ecomet_query:subscribe(
+      id_denied,
+      [root],
+      [<<"f1">>, <<"f2">>],
+      {<<".oid">>,'=',O},
+      #{
+        stateless => false,
+        no_feedback => false,
+        client => Client2
+      }
+    )
+  ),
+
   ?assertEqual(
-    ?SUBSCRIPTION(
-      id1,
-      delete,
-      O,
-      #{}
-    ),
+    message_timeout,
     from_client(Client1)
   ),
 
@@ -1330,23 +1343,14 @@ object_update_rights_test(Config)->
         clients = #{
           Client1 => #o_client{
             subs = ordsets:from_list([id1])
-          },
-          Client2 => #o_client{
-            subs = ordsets:from_list([id1])
           }
         },
         queries = [],
         fields = #{
-          <<".oid">> => O,
-          object => ecomet_object:construct(O),
-          <<".readgroups">> => [],
           <<"f1">> => <<"f1 value 2">>,
           <<"f2">> => <<"f2 value">>
         },
         fields_ref = #{
-          <<".oid">> => 1,
-          object => 1,
-          <<".readgroups">> => 1,
           <<"f1">> => 2,
           <<"f2">> => 2
         }

@@ -81,6 +81,7 @@
 }).
 
 -record(o_client,{
+  access,
   subs
 }).
 
@@ -932,11 +933,16 @@ init_object_client(
     ClientID,
     SubsID,
     Object0 = #object{
+      instance = Object,
       clients = Clients0
     }
 )->
   %-----------Add new client-------------------
+  {ok,UG} = ecomet_user:get_user_rights(ClientID),
+  {ok,RG} = ecomet:read_field(Object,<<".readgroups">>),
+  Access = check_access(UG, RG),
   Client = #o_client{
+    access = Access,
     subs = ordsets:from_list([SubsID])
   },
 
@@ -1135,27 +1141,37 @@ init_subscription(
     }
 )->
   #object{
-    fields = Fields
-  } = maps:get(OID, Objects),
-
-  % Send create to the client
-  #client{
-    subs = #{
-      SubsID:=#o_sub{
-        read = Read
+    fields = Fields,
+    clients = #{
+      ClientID := #o_client{
+        access = HasAccess
       }
     }
-  } = maps:get(ClientID, Clients),
+  } = maps:get(OID, Objects),
 
-  send_notification(#notification{
-    oid = OID,
-    client_id = ClientID,
-    subs_id = SubsID,
-    action = create,
-    read = Read,
-    fields = Fields
+  if
+    HasAccess ->
+      % Send create to the client
+      #client{
+        subs = #{
+          SubsID:=#o_sub{
+            read = Read
+          }
+        }
+      } = maps:get(ClientID, Clients),
 
-  }).
+      send_notification(#notification{
+        oid = OID,
+        client_id = ClientID,
+        subs_id = SubsID,
+        action = create,
+        read = Read,
+        fields = Fields
+
+      });
+    true->
+      ignore
+  end.
 
 add_query_to_objects(
     Ref,
@@ -1264,6 +1280,17 @@ global_reset(
   State0#state{
     global = Global
   }.
+
+
+check_access(is_admin, _RG)->
+  true;
+check_access(UG, RG) when is_list(RG)->
+  case ordsets:intersection(UG, ordsets:from_list(RG)) of
+    [] -> false;
+    _->true
+  end;
+check_access(_UG, _RG)->
+  false.
 
 has_clients(#object{
   clients = Clients,
@@ -1430,6 +1457,131 @@ notify(
   end.
 
 %-------------------------------------------------
+% UPDATE OBJECT RIGHTS
+%-------------------------------------------------
+notify_update(
+    Log = #{
+      oid := OID,
+      self := Actor,
+      action := Action,
+      fields := ObjectUpdates = #{
+        <<".readgroups">> := RG
+      }
+    },
+    State0 = #state{
+      objects = Objects0,
+      queries = Queries,
+      clients = Clients
+    }
+)->
+  Object0 = #object{
+    fields = Fields0,
+    clients = ObjectClients0
+  }= maps:get(OID, Objects0),
+
+
+  Fields = maps:merge(
+    Fields0,
+    maps:with(maps:keys(Fields0), ObjectUpdates)
+  ),
+
+  Object1 = Object0#object{
+    fields = Fields
+  },
+
+
+  Updates = ordsets:from_list(maps:keys(ObjectUpdates)),
+
+  Notification0 = #notification{
+    oid = OID,
+    actor = Actor,
+    action = Action,
+    updates = Updates,
+    fields = Fields
+  },
+
+  %---------Notify Object Clients----------------------
+  ObjectClients =
+    maps:fold(
+      fun(
+          ClientID,
+          ObjectClient0 = #o_client{
+            access = HasAccess0,
+            subs = ClientObjectSubs
+          },
+          Acc
+      )->
+        #client{
+          subs = ClientSubs
+        } = maps:get(ClientID, Clients),
+        {ok, UG} = ecomet_user:get_user_rights(ClientID),
+        HasAccess = check_access(UG, RG),
+        Notification1 =
+          if
+            HasAccess =:= true, HasAccess0 =:= false ->
+              Notification0#notification{
+                action = create
+              };
+            HasAccess =:= false, HasAccess0 =:= true ->
+              Notification0#notification{
+                action = delete
+              };
+            HasAccess =:= true->
+              Notification0;
+            true ->
+              ignore
+          end,
+
+        if
+          Notification1 =/= ignore ->
+            [begin
+               #o_sub{
+                 fields = SubsFields,
+                 read = Read,
+                 no_feedback = NoFeedback
+               } = maps:get(SubsID, ClientSubs),
+
+               send_notification(Notification1#notification{
+                 client_id = ClientID,
+                 subs_id = SubsID,
+                 no_feedback = NoFeedback,
+                 subs_fields = SubsFields,
+                 read = Read
+               })
+             end || SubsID <- ClientObjectSubs];
+          true ->
+            ignore
+        end,
+
+        ObjectClient = ObjectClient0#o_client{
+          access = HasAccess
+        },
+        Acc#{
+          ClientID => ObjectClient
+        }
+      end,
+      #{},
+      ObjectClients0
+    ),
+
+  Object = Object1#object{
+    clients = ObjectClients
+  },
+
+  Objects = Objects0#{
+    OID => Object
+  },
+
+  State = State0#state{
+    objects = Objects
+  },
+
+  %--------Notify Query Clients--------------------------
+  queries_notify(Queries, Log, State),
+
+  State;
+
+%-------------------------------------------------
 % simple update
 %-------------------------------------------------
 notify_update(
@@ -1501,28 +1653,34 @@ clients_notify(
 
   maps:foreach(
     fun(ClientID, #o_client{
+      access = HasAccess,
       subs = ClientObjectSubs
     })->
-      #client{
-        subs = ClientSubs
-      } = maps:get(ClientID, Clients),
+      if
+        HasAccess =:= true ->
+          #client{
+            subs = ClientSubs
+          } = maps:get(ClientID, Clients),
 
-      [begin
-         #o_sub{
-           fields = SubsFields,
-           read = Read,
-           no_feedback = NoFeedback
-         } = maps:get(SubsID, ClientSubs),
+          [begin
+             #o_sub{
+               fields = SubsFields,
+               read = Read,
+               no_feedback = NoFeedback
+             } = maps:get(SubsID, ClientSubs),
 
-         send_notification(Notification#notification{
-           client_id = ClientID,
-           subs_id = SubsID,
-           no_feedback = NoFeedback,
-           subs_fields = SubsFields,
-           read = Read
-         })
-       end || SubsID <- ClientObjectSubs],
-      ok
+             send_notification(Notification#notification{
+               client_id = ClientID,
+               subs_id = SubsID,
+               no_feedback = NoFeedback,
+               subs_fields = SubsFields,
+               read = Read
+             })
+           end || SubsID <- ClientObjectSubs],
+          ok;
+        true ->
+          ignore
+      end
     end,
     ObjectClients
   ),
