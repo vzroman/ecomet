@@ -254,14 +254,14 @@ init_subscription(Subscribe = #subscribe{
   % Query subscription
   case ecomet_user:get_user_rights( Client ) of
     {ok, UG} when is_list(UG)->
-      ecomet_subscription_object:subscribe(Subscribe#subscribe{
+      ecomet_subscription_query:subscribe(Subscribe#subscribe{
         conditions = {'AND',[
           Conditions0,
           {'OR',[{<<".readgroups">>,'=',GID}||GID<-UG]}
         ]}
       });
     {ok, is_admin} ->
-      ecomet_subscription_object:subscribe(Subscribe);
+      ecomet_subscription_query:subscribe(Subscribe);
     _->
       throw({client_not_authorized, Client})
   end.

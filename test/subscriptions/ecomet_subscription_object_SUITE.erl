@@ -74,8 +74,8 @@
 all()->
   [
     not_exists_test,
-    {group,object_subscribe}
-%%    {group,query_subscribe}
+    {group,object_subscribe},
+    {group,query_subscribe}
   ].
 
 groups()->
@@ -1647,16 +1647,10 @@ query_subscribe_test(Config)->
       clients = #{},
       queries = [Q1_ref],
       fields = #{
-        <<".oid">> => O1,
-        object => ecomet_object:construct(O1),
-        <<".readgroups">> => [],
         <<"f1">> => <<"f1 value">>,
         <<"f2">> => <<"f2 value">>
       },
       fields_ref = #{
-        <<".oid">> => 1,
-        object => 1,
-        <<".readgroups">> => 1,
         <<"f1">> => 1,
         <<"f2">> => 1
       }
@@ -1685,16 +1679,10 @@ query_subscribe_test(Config)->
       clients = #{},
       queries = [Q2_ref],
       fields = #{
-        <<".oid">> => O2,
-        object => ecomet_object:construct(O2),
-        <<".readgroups">> => [],
         <<"f2">> => <<"f2 value">>,
         <<"f3">> => 23
       },
       fields_ref = #{
-        <<".oid">> => 1,
-        object => 1,
-        <<".readgroups">> => 1,
         <<"f2">> => 1,
         <<"f3">> => 1
       }
@@ -1747,16 +1735,10 @@ query_subscribe_test(Config)->
       clients = #{},
       queries = [Q1_ref],
       fields = #{
-        <<".oid">> => O3,
-        object => ecomet_object:construct(O3),
-        <<".readgroups">> => [],
         <<"f1">> => <<"f1 value">>,
         <<"f2">> => <<"f2 value">>
       },
       fields_ref = #{
-        <<".oid">> => 1,
-        object => 1,
-        <<".readgroups">> => 1,
         <<"f1">> => 1,
         <<"f2">> => 1
       }
@@ -1841,16 +1823,10 @@ query_subscribe_test(Config)->
       clients = #{},
       queries = [Q2_ref],
       fields = #{
-        <<".oid">> => O1,
-        object => ecomet_object:construct(O1),
-        <<".readgroups">> => [],
         <<"f2">> => <<"f2 value">>,
         <<"f3">> => 23
       },
       fields_ref = #{
-        <<".oid">> => 1,
-        object => 1,
-        <<".readgroups">> => 1,
         <<"f2">> => 1,
         <<"f3">> => 1
       }
@@ -2003,7 +1979,6 @@ query_same_test(Config)->
       {<<"f3">>,'=',12}
     ]},
     #{
-      format => fun(_Type, Value) -> {formatted, Value} end,
       stateless => false,
       no_feedback => false,
       client => Client2
@@ -2029,8 +2004,8 @@ query_same_test(Config)->
       create,
       O1,
       #{
-        <<"f1">> => {formatted, <<"f1 value">>},
-        <<"f2">> => {formatted, <<"f2 value">>}
+        <<"f1">> => <<"f1 value">>,
+        <<"f2">> => <<"f2 value">>
       }
     ),
     from_client(Client2)
@@ -2081,16 +2056,10 @@ query_same_test(Config)->
       clients = #{},
       queries = [Q1_ref],
       fields = #{
-        <<".oid">> => O1,
-        object => ecomet_object:construct(O1),
-        <<".readgroups">> => [],
         <<"f1">> => <<"f1 value">>,
         <<"f2">> => <<"f2 value">>
       },
       fields_ref = #{
-        <<".oid">> => 1,
-        object => 1,
-        <<".readgroups">> => 1,
         <<"f1">> => 1,
         <<"f2">> => 1
       }
@@ -2120,7 +2089,7 @@ query_same_test(Config)->
       update,
       O1,
       #{
-        <<"f1">> => {formatted, <<"f1 value 2">>}
+        <<"f1">> => <<"f1 value 2">>
       }
     ),
     from_client(Client2)
@@ -2147,16 +2116,10 @@ query_same_test(Config)->
       clients = #{},
       queries = [Q1_ref],
       fields = #{
-        <<".oid">> => O1,
-        object => ecomet_object:construct(O1),
-        <<".readgroups">> => [],
         <<"f1">> => <<"f1 value 2">>,
         <<"f2">> => <<"f2 value">>
       },
       fields_ref = #{
-        <<".oid">> => 1,
-        object => 1,
-        <<".readgroups">> => 1,
         <<"f1">> => 1,
         <<"f2">> => 1
       }
@@ -2315,22 +2278,17 @@ query_light_update_test(Config)->
       instance = ecomet_object:construct(O1),
       clients = #{
         Client1 => #o_client{
+          access = true,
           subs = [id1]
         }
       },
       queries = [Q1_ref],
       fields = #{
-        <<".oid">> => O1,
-        object => ecomet_object:construct(O1),
-        <<".readgroups">> => [],
         <<"f1">> => <<"f1 value">>,
         <<"f4">> => <<"f4 value">>,
         <<"f5">> => 23
       },
       fields_ref = #{
-        <<".oid">> => 1,
-        object => 1,
-        <<".readgroups">> => 1,
         <<"f1">> => 1,
         <<"f4">> => 1,
         <<"f5">> => 2
@@ -2375,22 +2333,17 @@ query_light_update_test(Config)->
       instance = ecomet_object:construct(O1),
       clients = #{
         Client1 => #o_client{
+          access = true,
           subs = [id1]
         }
       },
       queries = [Q1_ref],
       fields = #{
-        <<".oid">> => O1,
-        object => ecomet_object:construct(O1),
-        <<".readgroups">> => [],
         <<"f1">> => <<"f1 value">>,
         <<"f4">> => <<"f4 value 2">>,
         <<"f5">> => 23
       },
       fields_ref = #{
-        <<".oid">> => 1,
-        object => 1,
-        <<".readgroups">> => 1,
         <<"f1">> => 1,
         <<"f4">> => 1,
         <<"f5">> => 2
@@ -2440,22 +2393,17 @@ query_light_update_test(Config)->
       instance = ecomet_object:construct(O1),
       clients = #{
         Client1 => #o_client{
+          access = true,
           subs = [id1]
         }
       },
       queries = [Q1_ref],
       fields = #{
-        <<".oid">> => O1,
-        object => ecomet_object:construct(O1),
-        <<".readgroups">> => [],
         <<"f1">> => <<"f1 value">>,
         <<"f4">> => <<"f4 value 2">>,
         <<"f5">> => 34
       },
       fields_ref = #{
-        <<".oid">> => 1,
-        object => 1,
-        <<".readgroups">> => 1,
         <<"f1">> => 1,
         <<"f4">> => 1,
         <<"f5">> => 2
@@ -2588,16 +2536,10 @@ query_stateless_test(Config)->
       clients = #{},
       queries = [Q1_ref],
       fields = #{
-        <<".oid">> => O1,
-        object => ecomet_object:construct(O1),
-        <<".readgroups">> => [],
         <<"f4">> => <<"f4 value">>,
         <<"f5">> => 23
       },
       fields_ref = #{
-        <<".oid">> => 1,
-        object => 1,
-        <<".readgroups">> => 1,
         <<"f4">> => 1,
         <<"f5">> => 1
       }
@@ -3168,16 +3110,10 @@ query_wait_test(Config)->
         clients = #{},
         queries = [Q1_ref],
         fields = #{
-          <<".oid">> => O1,
-          object => ecomet_object:construct(O1),
-          <<".readgroups">> => [],
           <<"f1">> => <<"f1 value">>,
           <<"f2">> => <<"f2 value">>
         },
         fields_ref = #{
-          <<".oid">> => 1,
-          object => 1,
-          <<".readgroups">> => 1,
           <<"f1">> => 1,
           <<"f2">> => 1
         }

@@ -139,11 +139,32 @@ direct({Field,Oper,Value}, Fields)->
 		not is_list(FieldValue)->
 			direct_compare(Oper,Value,FieldValue);
 		true->
-			Object = maps:get(object, Fields),
-			case ecomet_object:field_type(Object, Field) of
-				{ok,{list,_}}->
+			% TODO. Dirty solution to obtain type of the field
+			IsList =
+				case Fields of
+					#{<<".pattern">> := PatternID}->
+						case ecomet_pattern:get_map(PatternID) of
+							#{Field :=_} = FieldsMap->
+								case ecomet_field:get_type(FieldsMap,Field) of
+									{ok,{list,_}} -> true;
+									_-> false
+								end;
+							_->
+								% It's might be service field or undefined_field
+								false
+						end;
+					#{<<".object">>:=Object}->
+						case ecomet_object:field_type(Object, Field) of
+							{ok,{list,_}} -> true;
+							_-> false
+						end;
+					_->
+						false
+				end,
+			if
+				IsList ->
 					direct_compare_list(Oper, Value, FieldValue);
-				_->
+				true ->
 					direct_compare(Oper, Value, FieldValue)
 			end
 	end.
