@@ -563,7 +563,7 @@ compile_map_reduce(set,Fields,Params)->
          % Formatted input
          Fun =
            fun(Object)->
-            {ok,Type} = ecomet_object:field_type(maps:get(object,Object),Field),
+            {ok,Type} = ecomet_object:field_type(maps:get(<<".object">>,Object),Field),
             Formatter(Type,Value)
            end,
          {Field,#get{
@@ -578,15 +578,15 @@ compile_map_reduce(set,Fields,Params)->
   ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
   Update =
     fun(OID, Acc)->
-      case ReadUp(OID,ReadFields) of
-        #{object := not_exists} -> Acc;
-        ObjectMap ->
+      case ReadUp(OID,[<<".object">>,ReadFields]) of
+        #{<<".object">> := none} -> Acc;
+        #{<<".object">>:=Object} = ObjectMap ->
           NewValues=
             [{Name,case Value of
               #get{value = Fun}->Fun(ObjectMap);
               _->Value
              end}||{Name,Value}<-Updates],
-          ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues)),
+          ecomet_object:edit(Object,maps:from_list(NewValues)),
           Acc + 1
       end
     end,
@@ -613,9 +613,9 @@ compile_map_reduce(delete,none,Params)->
     fun(Results)->
       ecomet_resultset:foldl(fun(OID,Acc)->
         try
-          #{object:=Object}=ReadUp(OID,[]),
+          #{<<".object">>:=Object}=ReadUp(OID,[<<".object">>]),
           if
-            Object =/= not_exists ->
+            Object =/= none ->
               ecomet_object:delete(Object),
               Acc+1;
             true ->
