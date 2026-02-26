@@ -20,3 +20,5 @@ rebar3.crashdump
 src/ecomet_ql_lexer.erl
 src/ecomet_ql_parser.erl
 Mnesia.nonode@nohost/
+DB/*
+rebar.lock
