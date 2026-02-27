@@ -8,6 +8,7 @@
 -define(CALL_TIMEOUT, 60000).
 -define(NAME(N),list_to_atom("ecomet_subscription_object_"++integer_to_list(N))).
 -define(WORKER(OID), ?NAME(erlang:phash2(OID, ecomet_subscription_pool:get_size()))).
+-define(GLOBAL_SYNC_RETRY_MS, 100).
 
 %%=================================================================
 %%        API
@@ -295,6 +296,17 @@ handle_cast({global_reset, Tag, Version}, State0) ->
 handle_cast(Request,State) ->
   ?LOGWARNING("unexpected cast request ~p", [Request]),
   {noreply, State}.
+
+handle_info(global_sync_retry, State0) ->
+  try
+    State = sync_global_snapshot( State0 ),
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("global sync retry error: ~p, stack ~p",[E,S]),
+      timer:send_after(?GLOBAL_SYNC_RETRY_MS, global_sync_retry),
+      {noreply, State0}
+  end;
 
 handle_info({'DOWN', _Ref, process, Client, Reason}, State0) ->
   ?LOGDEBUG("destroy_client ~p, reason ~p",[Client, Reason]),
@@ -1318,7 +1330,9 @@ sync_global_snapshot(State0)->
         global = Global,
         global_version = Version
       };
-    _->
+    Unexpected->
+      ?LOGWARNING("sync global snapshot get unexpeted result: ~p",[Unexpected]),
+      timer:send_after(?GLOBAL_SYNC_RETRY_MS, global_sync_retry),
       State0
   end.
 
@@ -2036,6 +2050,5 @@ delete_object_from_clients(
     State0,
     ObjectClients
   ).
-
 
 
