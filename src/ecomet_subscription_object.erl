@@ -31,7 +31,7 @@
 -export([
   init_query/3,
   add_query_client/2,
-  remove_query_client/2,
+  remove_query_client/3,
   global_set/1,
   global_reset/1
 ]).
@@ -86,7 +86,6 @@
 }).
 
 -record(q_client,{
-  subs_id,
   no_feedback,
   read
 }).
@@ -170,8 +169,8 @@ add_query_client(Ref, Subscription)->
   [gen_server:cast(?NAME(N), {add_query_client, Ref, Subscription}) || N <-ecomet_subscription_pool:get_workers()],
   ok.
 
-remove_query_client(Ref, ClientID)->
-  [gen_server:cast(?NAME(N), {remove_query_client, Ref, ClientID}) || N <-ecomet_subscription_pool:get_workers()],
+remove_query_client(Ref, ClientID, SubsID)->
+  [gen_server:cast(?NAME(N), {remove_query_client, Ref, ClientID, SubsID}) || N <-ecomet_subscription_pool:get_workers()],
   ok.
 
 global_set(Tag)->
@@ -270,10 +269,10 @@ handle_cast({add_query_client, Ref, Subscription}, State0) ->
       {noreply, State0}
   end;
 
-handle_cast({remove_query_client, Ref, ClientID}, State0) ->
-  ?LOGDEBUG("remove_query_client: Ref ~p, ClientID ~p",[Ref, ClientID]),
+handle_cast({remove_query_client, Ref, ClientID, SubsID}, State0) ->
+  ?LOGDEBUG("remove_query_client: Ref ~p, ClientID ~p, SubsID ~p",[Ref, ClientID, SubsID]),
   try
-    State = remove_query_client(Ref, ClientID, State0),
+    State = remove_query_client(Ref, ClientID, SubsID, State0),
     {noreply, State}
   catch
     _:E:S->
@@ -538,13 +537,14 @@ add_query_client(
 remove_query_client(
     Ref,
     ClientID,
+    SubsID,
     State0 = #state{
       queries = Queries0
     }
 )->
   case Queries0 of
     #{ Ref := Query0}->
-      Query = remove_client_from_query(ClientID, Query0),
+      Query = remove_client_from_query(ClientID, SubsID, Query0),
       case has_clients( Query ) of
         true ->
           Queries = Queries0#{
@@ -575,13 +575,17 @@ add_client_to_query(
     }
 )->
   Client = #q_client{
-    subs_id = SubsID,
     no_feedback = NoFeedback,
     read = Read
   },
 
+  ClientSubs0 = maps:get(ClientID, Clients0, #{}),
+  ClientSubs = ClientSubs0#{
+    SubsID => Client
+  },
+
   Clients = Clients0#{
-    ClientID => Client
+    ClientID => ClientSubs
   },
 
   Query0#query{
@@ -590,11 +594,26 @@ add_client_to_query(
 
 remove_client_from_query(
     ClientID,
+    SubsID,
     Query0 = #query{
       clients = QueryClients0
     }
 )->
-  QueryClients = maps:remove(ClientID, QueryClients0),
+  QueryClients =
+    case maps:get(ClientID, QueryClients0, undefined) of
+      undefined ->
+        QueryClients0;
+      ClientSubs0 when is_map(ClientSubs0) ->
+        ClientSubs = maps:remove(SubsID, ClientSubs0),
+        case map_size(ClientSubs) of
+          0 ->
+            maps:remove(ClientID, QueryClients0);
+          _->
+            QueryClients0#{
+              ClientID => ClientSubs
+            }
+        end
+    end,
   Query0#query{
     clients = QueryClients
   }.
@@ -603,7 +622,8 @@ remove_client_from_query(
 init_query_client(
     Ref,
     #subscribe{
-      client = ClientID
+      client = ClientID,
+      id = SubsID
     },
     #state{
       queries = Queries,
@@ -616,32 +636,36 @@ init_query_client(
     set = Set
   } = maps:get(Ref, Queries),
 
-  #q_client{
-    subs_id = SubsID,
-    read = Read
-  } = maps:get(ClientID, QueryClients),
+  ClientSubs = maps:get(ClientID, QueryClients, #{}),
 
-  Notification = #notification{
-    client_id = ClientID,
-    subs_id = SubsID,
-    action = create,
-    read = Read
-  },
+  case maps:find(SubsID, ClientSubs) of
+    {ok, #q_client{
+      read = Read
+    }} ->
+      Notification = #notification{
+        client_id = ClientID,
+        subs_id = SubsID,
+        action = create,
+        read = Read
+      },
 
-  ecomet_resultset:foldl(
-    fun(OID, Acc)->
-      #object{
-        fields = Fields
-      } = maps:get(OID, Objects),
-      send_notification(Notification#notification{
-        oid = OID,
-        fields = Fields
-      }),
-      Acc
-    end,
-    undefined,
-    Set
-  ),
+      ecomet_resultset:foldl(
+        fun(OID, Acc)->
+          #object{
+            fields = Fields
+          } = maps:get(OID, Objects),
+          send_notification(Notification#notification{
+            oid = OID,
+            fields = Fields
+          }),
+          Acc
+        end,
+        undefined,
+        Set
+      );
+    error->
+      ?LOGWARNING("attempt to init unknown query subscription ~p for client ~p",[SubsID, ClientID])
+  end,
 
   ok.
 
@@ -1783,19 +1807,26 @@ queries_notify(
           maps:foreach(
             fun(
                 ClientID,
-                #q_client{
-                  subs_id = SubsID,
-                  no_feedback = NoFeedback,
-                  read = Read
-                }
+                ClientSubs
             )->
-              send_notification(Notification#notification{
-                client_id = ClientID,
-                subs_id = SubsID,
-                no_feedback = NoFeedback,
-                read = Read,
-                subs_fields = SubsFields
-              })
+              maps:foreach(
+                fun(
+                    SubsID,
+                    #q_client{
+                      no_feedback = NoFeedback,
+                      read = Read
+                    }
+                )->
+                  send_notification(Notification#notification{
+                    client_id = ClientID,
+                    subs_id = SubsID,
+                    no_feedback = NoFeedback,
+                    read = Read,
+                    subs_fields = SubsFields
+                  })
+                end,
+                ClientSubs
+              )
             end,
             Clients
           )
@@ -1989,9 +2020,6 @@ delete_object_from_clients(
     State0,
     ObjectClients
   ).
-
-
-
 
 
 

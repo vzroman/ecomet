@@ -45,7 +45,6 @@
 }).
 
 -record(q_client,{
-  subs_id,
   no_feedback,
   read
 }).
@@ -95,6 +94,7 @@ groups()->
       [
         query_subscribe_test,
         query_additive_membership_test,
+        query_multi_subscriptions_per_client_test,
         query_same_test,
         query_light_update_test,
         query_stateless_test,
@@ -1573,10 +1573,11 @@ query_subscribe_test(Config)->
           ]},
           fields = [<<"f1">>, <<"f2">>],
           clients = #{
-            Client1 := #q_client{
-              subs_id = id1,
-              no_feedback = false,
-              read = _
+            Client1 := #{
+              id1 := #q_client{
+                no_feedback = false,
+                read = _
+              }
             }
           },
           set = Q1_Set
@@ -1589,10 +1590,11 @@ query_subscribe_test(Config)->
           ]},
           fields = [<<"f2">>, <<"f3">>],
           clients = #{
-            Client2 := #q_client{
-              subs_id = id1,
-              no_feedback = false,
-              read = _
+            Client2 := #{
+              id1 := #q_client{
+                no_feedback = false,
+                read = _
+              }
             }
           },
           set = Q2_Set
@@ -2095,6 +2097,148 @@ query_additive_membership_test(Config)->
 
   ok.
 
+query_multi_subscriptions_per_client_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"query_multi_subscriptions_per_client_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 12
+  })),
+
+  Client = start_client(<<"system">>),
+  timer:sleep(100),
+
+  Conditions = {'AND',[
+    {<<".folder">>,'=',F},
+    {<<".name">>,'=',<<"object1">>}
+  ]},
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>],
+    Conditions,
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"f1 value">>
+      }
+    ),
+    from_client(Client)
+  ),
+
+  ok = ecomet_query:subscribe(
+    id2,
+    [root],
+    [<<"f1">>],
+    Conditions,
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id2,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"f1 value">>
+      }
+    ),
+    from_client(Client)
+  ),
+
+  ecomet:edit_object(ecomet:open(O), #{
+    <<"f1">> => <<"f1 value 2">>
+  }),
+
+  UpdateID1 = ?SUBSCRIPTION(
+    id1,
+    update,
+    O,
+    #{
+      <<"f1">> => <<"f1 value 2">>
+    }
+  ),
+  UpdateID2 = ?SUBSCRIPTION(
+    id2,
+    update,
+    O,
+    #{
+      <<"f1">> => <<"f1 value 2">>
+    }
+  ),
+
+  Received1 = from_client(Client, 1000),
+  Received2 = from_client(Client, 1000),
+
+  ?assertEqual(
+    lists:sort([UpdateID1, UpdateID2]),
+    lists:sort([Received1, Received2])
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client, 300)
+  ),
+
+  ok = ecomet_query:unsubscribe(Client, id2),
+  timer:sleep(100),
+
+  ecomet:edit_object(ecomet:open(O), #{
+    <<"f1">> => <<"f1 value 3">>
+  }),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O,
+      #{
+        <<"f1">> => <<"f1 value 3">>
+      }
+    ),
+    from_client(Client, 1000)
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client, 300)
+  ),
+
+  ok = ecomet_query:unsubscribe(Client, id1),
+  timer:sleep(100),
+
+  exit(Client, stop),
+  timer:sleep(100),
+
+  ok.
+
 query_same_test(Config)->
   P1 = ?GET(p1,Config),
 
@@ -2201,15 +2345,17 @@ query_same_test(Config)->
         ]},
         fields = [<<"f1">>, <<"f2">>],
         clients = #{
-          Client1 := #q_client{
-            subs_id = id1,
-            no_feedback = false,
-            read = _
+          Client1 := #{
+            id1 := #q_client{
+              no_feedback = false,
+              read = _
+            }
           },
-          Client2 := #q_client{
-            subs_id = id2,
-            no_feedback = false,
-            read = _
+          Client2 := #{
+            id2 := #q_client{
+              no_feedback = false,
+              read = _
+            }
           }
         },
         set = _W1_S1_Q1_Set
@@ -2833,15 +2979,17 @@ query_no_feedback_test(Config)->
       conditions = _,
       fields = _,
       clients = #{
-        Client1 := #q_client{
-          subs_id = id1,
-          no_feedback = false,
-          read = _
+        Client1 := #{
+          id1 := #q_client{
+            no_feedback = false,
+            read = _
+          }
         },
-        Client2 := #q_client{
-          subs_id = id1,
-          no_feedback = true,
-          read = _
+        Client2 := #{
+          id1 := #q_client{
+            no_feedback = true,
+            read = _
+          }
         }
       },
       set = _
@@ -3299,10 +3447,11 @@ query_wait_test(Config)->
         ]},
         fields = Deps,
         clients = #{
-          Client1 => #q_client{
-            subs_id = id1,
-            no_feedback = false,
-            read = Read
+          Client1 => #{
+            id1 => #q_client{
+              no_feedback = false,
+              read = Read
+            }
           }
         },
         set = ecomet_resultset:add_oid(O1, ecomet_resultset:new())
@@ -3401,10 +3550,11 @@ query_wait_test(Config)->
       ]},
       fields = Deps,
       clients = #{
-        Client1 => #q_client{
-          subs_id = id2,
-          no_feedback = false,
-          read = Read
+        Client1 => #{
+          id2 => #q_client{
+            no_feedback = false,
+            read = Read
+          }
         }
       },
       set = ecomet_resultset:new()
