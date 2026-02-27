@@ -408,34 +408,41 @@ init_query(
       true -> DBs
     end,
   Index = compile_index( Tags, IndexDBs ),
-  build_index(Index, Ref),
 
-  % Prepare initial set
-  InitSet = ecomet_query:system(DBs,rs,Conditions0),
-  Subscription = Subscription0#subscribe{
-    conditions = Conditions
-  },
+  try
+    build_index(Index, Ref),
 
-  ecomet_subscription_object:init_query(Ref, Subscription, InitSet),
+    % Prepare initial set
+    InitSet = ecomet_query:system(DBs,rs,Conditions0),
+    Subscription = Subscription0#subscribe{
+      conditions = Conditions
+    },
 
-  Query = #query{
-    key = Key,
-    count = 1,
-    index = Index
-  },
+    ecomet_subscription_object:init_query(Ref, Subscription, InitSet),
 
-  Queries = Queries0#{
-    Ref => Query
-  },
+    Query = #query{
+      key = Key,
+      count = 1,
+      index = Index
+    },
 
-  Key2Ref = Key2Ref0#{
-    Key => Ref
-  },
+    Queries = Queries0#{
+      Ref => Query
+    },
 
-  State0#state{
-    key2ref = Key2Ref,
-    queries = Queries
-  }.
+    Key2Ref = Key2Ref0#{
+      Key => Ref
+    },
+
+    State0#state{
+      key2ref = Key2Ref,
+      queries = Queries
+    }
+  catch
+    Class:Reason:Stack ->
+      catch destroy_index(Index, Ref),
+      erlang:raise(Class, Reason, Stack)
+  end.
 
 remove_query_client(
     ClientID,
