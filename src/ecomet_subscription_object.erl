@@ -8,7 +8,7 @@
 -define(CALL_TIMEOUT, 60000).
 -define(NAME(N),list_to_atom("ecomet_subscription_object_"++integer_to_list(N))).
 -define(WORKER(OID), ?NAME(erlang:phash2(OID, ecomet_subscription_pool:get_size()))).
--define(GLOBAL_SYNC_RETRY_MS, 100).
+-define(GLOBAL_SYNC_CYCLE_MS, 1000).
 
 %%=================================================================
 %%        API
@@ -191,6 +191,7 @@ start_link(N)->
 
 
 init([]) ->
+  timer:send_after(?GLOBAL_SYNC_CYCLE_MS, global_sync),
   {ok, #state{
     objects = #{},
     clients = #{},
@@ -297,16 +298,17 @@ handle_cast(Request,State) ->
   ?LOGWARNING("unexpected cast request ~p", [Request]),
   {noreply, State}.
 
-handle_info(global_sync_retry, State0) ->
-  try
-    State = sync_global_snapshot( State0 ),
-    {noreply, State}
-  catch
-    _:E:S->
-      ?LOGERROR("global sync retry error: ~p, stack ~p",[E,S]),
-      timer:send_after(?GLOBAL_SYNC_RETRY_MS, global_sync_retry),
-      {noreply, State0}
-  end;
+handle_info(global_sync, State0) ->
+  State =
+    try
+      sync_global_snapshot(State0)
+    catch
+      _:E:S->
+        ?LOGERROR("global snapshot sync error: ~p, stack ~p",[E,S]),
+        State0
+    end,
+  timer:send_after(?GLOBAL_SYNC_CYCLE_MS, global_sync),
+  {noreply, State};
 
 handle_info({'DOWN', _Ref, process, Client, Reason}, State0) ->
   ?LOGDEBUG("destroy_client ~p, reason ~p",[Client, Reason]),
@@ -1323,19 +1325,21 @@ apply_global_reset(
       sync_global_snapshot(State0)
   end.
 
-sync_global_snapshot(State0)->
-  case catch ecomet_subscription_query:global_snapshot() of
-    {Version, Global} when is_integer(Version), Version >= 0 ->
+sync_global_snapshot(#state{
+  global_version = Version0
+} = State0)->
+  Version1 = ecomet_subscription_query:global_snapshot_version(),
+  if
+    is_integer(Version1), Version1 > Version0 ->
+      {Version, Global} = ecomet_subscription_query:global_snapshot_data(),
       State0#state{
         global = Global,
         global_version = Version
       };
-    Unexpected->
-      ?LOGWARNING("sync global snapshot get unexpeted result: ~p",[Unexpected]),
-      timer:send_after(?GLOBAL_SYNC_RETRY_MS, global_sync_retry),
+    true ->
+      ?LOGWARNING("sync global snapshot get unexpeted version: ~p, actual version: ~p",[Version1, Version0]),
       State0
   end.
-
 
 check_access(is_admin, _RG)->
   true;
@@ -2050,5 +2054,4 @@ delete_object_from_clients(
     State0,
     ObjectClients
   ).
-
 

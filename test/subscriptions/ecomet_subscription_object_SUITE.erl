@@ -3564,7 +3564,7 @@ query_global_sync_gap_test(_Config)->
   SubsID = {id_gap_sync, make_ref()},
   Client = spawn(fun()-> timer:sleep(infinity) end),
 
-  {Version0, Global0} = ecomet_subscription_query:global_snapshot(),
+  {Version0, Global0} = ecomet_subscription_query:global_snapshot_data(),
 
   ok = ecomet_subscription_query:subscribe(#subscribe{
     id = SubsID,
@@ -3579,7 +3579,7 @@ query_global_sync_gap_test(_Config)->
     }
   }),
 
-  {Version1, Global1} = ecomet_subscription_query:global_snapshot(),
+  {Version1, Global1} = ecomet_subscription_query:global_snapshot_data(),
   ?assertEqual(true, Version1 >= (Version0 + 1)),
   ?assertEqual(true, gb_sets:is_member(Tag, Global1)),
   ?assertEqual(
@@ -3598,6 +3598,7 @@ query_global_sync_gap_test(_Config)->
     gb_sets:to_list(WorkerGlobal1)
   ),
 
+  % stale version is ignored
   StaleTag = {<<"stale_tag">>,Unique,simple},
   gen_server:cast(Worker, {global_set, StaleTag, Version1}),
   timer:sleep(100),
@@ -3613,9 +3614,11 @@ query_global_sync_gap_test(_Config)->
     gb_sets:to_list(WorkerGlobal2)
   ),
 
+  % version gap is handled via snapshot sync path
   GapTag = {<<"gap_tag">>,Unique,simple},
-  gen_server:cast(Worker, {global_set, GapTag, Version1 + 50}),
-  timer:sleep(100),
+  GapVersion = Version1 + 50,
+  gen_server:cast(Worker, {global_set, GapTag, GapVersion}),
+  timer:sleep(200),
 
   #state{
     global = WorkerGlobal3,
@@ -3628,24 +3631,8 @@ query_global_sync_gap_test(_Config)->
     gb_sets:to_list(WorkerGlobal3)
   ),
 
-  gen_server:cast(Worker, {global_reset, Tag, Version1 + 51}),
-  timer:sleep(100),
-
-  #state{
-    global = WorkerGlobal4,
-    global_version = WorkerVersion4
-  } = sys:get_state(Worker),
-  ?assertEqual(Version1, WorkerVersion4),
-  ?assertEqual(true, gb_sets:is_member(Tag, WorkerGlobal4)),
-  ?assertEqual(
-    gb_sets:to_list(Global1),
-    gb_sets:to_list(WorkerGlobal4)
-  ),
-
   ok = ecomet_subscription_query:unsubscribe(Client, SubsID),
-  timer:sleep(100),
-
-  {Version2, Global2} = ecomet_subscription_query:global_snapshot(),
+  {Version2, Global2} = wait_global_snapshot(Global0, Version1 + 1, 3000),
   ?assertEqual(true, Version2 >= (Version1 + 1)),
   ?assertEqual(
     gb_sets:to_list(Global0),
@@ -3655,10 +3642,10 @@ query_global_sync_gap_test(_Config)->
   #state{
     global = WorkerGlobal5,
     global_version = WorkerVersion5
-  } = wait_worker_version(Worker, Version2, 2000),
-  ?assertEqual(Version2, WorkerVersion5),
+  } = wait_worker_global(Worker, Global0, 3000),
+  ?assertEqual(true, WorkerVersion5 >= Version1),
   ?assertEqual(
-    gb_sets:to_list(Global2),
+    gb_sets:to_list(Global0),
     gb_sets:to_list(WorkerGlobal5)
   ),
 
@@ -3714,3 +3701,29 @@ wait_worker_version(Worker, ExpectedVersion, Timeout) when Timeout > 0->
   end;
 wait_worker_version(Worker, _ExpectedVersion, _Timeout)->
   sys:get_state(Worker).
+
+wait_worker_global(Worker, ExpectedGlobal, Timeout) when Timeout > 0->
+  State = #state{
+    global = Global
+  } = sys:get_state(Worker),
+  case gb_sets:to_list(Global) =:= gb_sets:to_list(ExpectedGlobal) of
+    true ->
+      State;
+    false ->
+      timer:sleep(50),
+      wait_worker_global(Worker, ExpectedGlobal, Timeout - 50)
+  end;
+wait_worker_global(Worker, _ExpectedGlobal, _Timeout)->
+  sys:get_state(Worker).
+
+wait_global_snapshot(ExpectedGlobal, MinVersion, Timeout) when Timeout > 0->
+  Snapshot = {Version, Global} = ecomet_subscription_query:global_snapshot_data(),
+  case (Version >= MinVersion) andalso (gb_sets:to_list(Global) =:= gb_sets:to_list(ExpectedGlobal)) of
+    true ->
+      Snapshot;
+    false ->
+      timer:sleep(50),
+      wait_global_snapshot(ExpectedGlobal, MinVersion, Timeout - 50)
+  end;
+wait_global_snapshot(_ExpectedGlobal, _MinVersion, _Timeout)->
+  ecomet_subscription_query:global_snapshot_data().

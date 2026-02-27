@@ -8,15 +8,15 @@
 -define(CALL_TIMEOUT, 60000).
 -define(S_INDEX,ecomet_subscriptions_index).
 -define(S_GLOBAL, ecomet_subscriptions_global).
--define(GLOBAL_SNAPSHOT_META, snapshot).
+-define(GLOBAL_SNAPSHOT_VERSION, {snapshot, version}).
+-define(GLOBAL_SNAPSHOT_DATA, {snapshot, data}).
 
 %%=================================================================
 %%        API
 %%=================================================================
 -export([
   subscribe/1,
-  unsubscribe/2,
-  global_snapshot/0
+  unsubscribe/2
 ]).
 
 %%=================================================================
@@ -24,6 +24,14 @@
 %%=================================================================
 -export([
   find/2
+]).
+
+%%=================================================================
+%%        Global index sync API
+%%=================================================================
+-export([
+  global_snapshot_version/0,
+  global_snapshot_data/0
 ]).
 
 %%=================================================================
@@ -79,13 +87,16 @@ unsubscribe(Client, SubsID)->
   gen_server:cast(?MODULE, {unsubscribe, Client, SubsID}),
   ok.
 
-global_snapshot()->
-  case catch ets:lookup(?S_GLOBAL, ?GLOBAL_SNAPSHOT_META) of
-    [{_, Snapshot}] ->
-      Snapshot;
-    _->
-      {0, ?EMPTY_SET}
-  end.
+%%=================================================================
+%%        Global index sync API
+%%=================================================================
+global_snapshot_version()->
+  [{_, Version}] = ets:lookup(?S_GLOBAL, ?GLOBAL_SNAPSHOT_VERSION),
+  Version.
+
+global_snapshot_data()->
+  [{_, Snapshot}] = ets:lookup(?S_GLOBAL, ?GLOBAL_SNAPSHOT_DATA),
+  Snapshot.
 
 %%=================================================================
 %%        Transaction API
@@ -264,7 +275,10 @@ init([]) ->
     {write_concurrency,true}
   ]),
 
-  ets:insert(?S_GLOBAL, {?GLOBAL_SNAPSHOT_META, {0, ?EMPTY_SET}}),
+  ets:insert(?S_GLOBAL, [
+    {?GLOBAL_SNAPSHOT_VERSION, 0},
+    {?GLOBAL_SNAPSHOT_DATA, {0,?EMPTY_SET}}
+  ]),
 
   {ok, #state{
     queries = #{},
@@ -736,26 +750,32 @@ destroy_index([], _ID)->
   ok.
 
 global_set(Tag)->
-  {Version0, Global0} = global_snapshot(),
+  {Version0, Global0} = global_snapshot_data(),
   case gb_sets:is_member(Tag, Global0) of
     true ->
       ok;
     false ->
       Global = ?SET_ADD(Tag, Global0),
       Version = Version0 + 1,
-      ets:insert(?S_GLOBAL, {?GLOBAL_SNAPSHOT_META, {Version, Global}}),
+      ets:insert(?S_GLOBAL, [
+        {?GLOBAL_SNAPSHOT_VERSION, Version},
+        {?GLOBAL_SNAPSHOT_DATA, {Version,Global}}
+      ]),
       ecomet_subscription_object:global_set(Tag, Version)
   end.
 
 global_reset(Tag)->
-  {Version0, Global0} = global_snapshot(),
+  {Version0, Global0} = global_snapshot_data(),
   case gb_sets:is_member(Tag, Global0) of
     false ->
       ok;
     true ->
       Global = ?SET_DEL(Tag, Global0),
       Version = Version0 + 1,
-      ets:insert(?S_GLOBAL, {?GLOBAL_SNAPSHOT_META, {Version, Global}}),
+      ets:insert(?S_GLOBAL, [
+        {?GLOBAL_SNAPSHOT_VERSION, Version},
+        {?GLOBAL_SNAPSHOT_DATA, {Version,Global}}
+      ]),
       ecomet_subscription_object:global_reset(Tag, Version)
   end.
 
