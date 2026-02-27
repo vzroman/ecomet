@@ -1884,7 +1884,10 @@ add_queries_to_object(
     end,
 
   Object = Object0#object{
-    queries = ordsets:from_list(maps:keys(AddQueries))
+    queries = ordsets:union(
+      Object0#object.queries,
+      ordsets:from_list(maps:keys(AddQueries))
+    )
   },
 
   Objects0#{
@@ -1986,7 +1989,6 @@ delete_object_from_clients(
     State0,
     ObjectClients
   ).
-
 
 
 

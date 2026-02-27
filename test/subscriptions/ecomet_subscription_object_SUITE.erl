@@ -94,6 +94,7 @@ groups()->
       [sequence],
       [
         query_subscribe_test,
+        query_additive_membership_test,
         query_same_test,
         query_light_update_test,
         query_stateless_test,
@@ -1924,6 +1925,173 @@ query_subscribe_test(Config)->
       )
 
     end || N <-ecomet_subscription_pool:get_workers() ],
+
+  ok.
+
+query_additive_membership_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"query_additive_membership_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"f1 value">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 12,
+    <<"f4">> => <<"f4 value">>
+  })),
+
+  W = whereis(?WORKER(O)),
+
+  Client1 = start_client(<<"system">>),
+  Client2 = start_client(<<"system">>),
+  timer:sleep(100),
+
+  Conditions1 = {'AND',[
+    {<<".folder">>,'=',F},
+    {<<"f1">>,'=',<<"f1 value">>}
+  ]},
+  Conditions2 = {'AND',[
+    {<<".folder">>,'=',F},
+    {<<"f3">>,'=',23}
+  ]},
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f4">>],
+    Conditions1,
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client1
+    }
+  ),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f3">>, <<"f4">>],
+    Conditions2,
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client2
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f4">> => <<"f4 value">>
+      }
+    ),
+    from_client(Client1)
+  ),
+  ?assertEqual(
+    message_timeout,
+    from_client(Client2, 1000)
+  ),
+
+  #state{
+    objects = Objects1,
+    queries = Queries1
+  } = sys:get_state(W),
+  #object{
+    queries = ObjectQueries1
+  } = maps:get(O, Objects1),
+  ?assertEqual(1, length(ObjectQueries1)),
+
+  [Q1_ref] = [
+    Ref || {Ref, #query{conditions = QueryConditions}} <- maps:to_list(Queries1),
+      QueryConditions =:= Conditions1
+  ],
+  [Q2_ref] = [
+    Ref || {Ref, #query{conditions = QueryConditions}} <- maps:to_list(Queries1),
+      QueryConditions =:= Conditions2
+  ],
+
+  ecomet:edit_object(ecomet:open(O), #{ <<"f3">> => 23 }),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client1, 1000)
+  ),
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f3">> => 23,
+        <<"f4">> => <<"f4 value">>
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  #state{
+    objects = Objects2,
+    queries = Queries2
+  } = sys:get_state(W),
+  #object{
+    queries = ObjectQueries2
+  } = maps:get(O, Objects2),
+
+  ?assertEqual(
+    ordsets:from_list([Q1_ref, Q2_ref]),
+    ObjectQueries2
+  ),
+
+  #query{
+    set = Q1_Set
+  } = maps:get(Q1_ref, Queries2),
+  #query{
+    set = Q2_Set
+  } = maps:get(Q2_ref, Queries2),
+
+  ?assertEqual(true, ecomet_resultset:contains(O, Q1_Set)),
+  ?assertEqual(true, ecomet_resultset:contains(O, Q2_Set)),
+
+  ecomet:edit_object(ecomet:open(O), #{ <<"f4">> => <<"f4 value 2">> }),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O,
+      #{
+        <<"f4">> => <<"f4 value 2">>
+      }
+    ),
+    from_client(Client1)
+  ),
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O,
+      #{
+        <<"f4">> => <<"f4 value 2">>
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  exit(Client1, stop),
+  exit(Client2, stop),
+  timer:sleep(100),
 
   ok.
 
