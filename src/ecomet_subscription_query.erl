@@ -7,13 +7,16 @@
 
 -define(CALL_TIMEOUT, 60000).
 -define(S_INDEX,ecomet_subscriptions_index).
+-define(S_GLOBAL, ecomet_subscriptions_global).
+-define(GLOBAL_SNAPSHOT_META, snapshot).
 
 %%=================================================================
 %%        API
 %%=================================================================
 -export([
   subscribe/1,
-  unsubscribe/2
+  unsubscribe/2,
+  global_snapshot/0
 ]).
 
 %%=================================================================
@@ -75,6 +78,14 @@ subscribe(Subscription=#subscribe{ })->
 unsubscribe(Client, SubsID)->
   gen_server:cast(?MODULE, {unsubscribe, Client, SubsID}),
   ok.
+
+global_snapshot()->
+  case catch ets:lookup(?S_GLOBAL, ?GLOBAL_SNAPSHOT_META) of
+    [{_, Snapshot}] ->
+      Snapshot;
+    _->
+      {0, ?EMPTY_SET}
+  end.
 
 %%=================================================================
 %%        Transaction API
@@ -244,6 +255,16 @@ init([]) ->
     {read_concurrency, true},
     {write_concurrency,true}
   ]),
+
+  ets:new(?S_GLOBAL,[
+    named_table,
+    protected,
+    set,
+    {read_concurrency, true},
+    {write_concurrency,true}
+  ]),
+
+  ets:insert(?S_GLOBAL, {?GLOBAL_SNAPSHOT_META, {0, ?EMPTY_SET}}),
 
   {ok, #state{
     queries = #{},
@@ -715,10 +736,28 @@ destroy_index([], _ID)->
   ok.
 
 global_set(Tag)->
-  ecomet_subscription_object:global_set( Tag ).
+  {Version0, Global0} = global_snapshot(),
+  case gb_sets:is_member(Tag, Global0) of
+    true ->
+      ok;
+    false ->
+      Global = ?SET_ADD(Tag, Global0),
+      Version = Version0 + 1,
+      ets:insert(?S_GLOBAL, {?GLOBAL_SNAPSHOT_META, {Version, Global}}),
+      ecomet_subscription_object:global_set(Tag, Version)
+  end.
 
 global_reset(Tag)->
-  ecomet_subscription_object:global_reset( Tag ).
+  {Version0, Global0} = global_snapshot(),
+  case gb_sets:is_member(Tag, Global0) of
+    false ->
+      ok;
+    true ->
+      Global = ?SET_DEL(Tag, Global0),
+      Version = Version0 + 1,
+      ets:insert(?S_GLOBAL, {?GLOBAL_SNAPSHOT_META, {Version, Global}}),
+      ecomet_subscription_object:global_reset(Tag, Version)
+  end.
 
 %---------------------------------------------------------
 % Utilities

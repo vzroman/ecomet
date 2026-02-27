@@ -12,7 +12,8 @@
   objects,
   clients,
   queries,
-  global
+  global,
+  global_version = 0
 }).
 
 -record(object,{
@@ -100,6 +101,7 @@ groups()->
         query_stateless_test,
         query_no_feedback_test,
         query_update_rights_test,
+        query_global_sync_gap_test,
         query_wait_test
       ]
     }
@@ -1916,15 +1918,12 @@ query_subscribe_test(Config)->
       W = whereis(?NAME(N)),
       S = sys:get_state(W),
       ?LOGDEBUG("worker ~p State8 ~p",[N,S]),
-      ?assertEqual(
-        #state{
-          objects = #{},
-          clients = #{},
-          queries = #{},
-          global = ?EMPTY_SET
-        },
-        S
-      )
+      #state{
+        objects = #{},
+        clients = #{},
+        queries = #{},
+        global = ?EMPTY_SET
+      } = S
 
     end || N <-ecomet_subscription_pool:get_workers() ],
 
@@ -2481,15 +2480,12 @@ query_same_test(Config)->
   exit(Client2, stop),
   timer:sleep(100),
 
-  ?assertEqual(
-    #state{
-      objects = #{},
-      clients = #{},
-      queries = #{},
-      global = ?EMPTY_SET
-    },
-    sys:get_state(W1)
-  ),
+  #state{
+    objects = #{},
+    clients = #{},
+    queries = #{},
+    global = ?EMPTY_SET
+  } = sys:get_state(W1),
 
   ok.
 
@@ -2730,15 +2726,12 @@ query_light_update_test(Config)->
   exit(Client2, stop),
   timer:sleep(100),
 
-  ?assertEqual(
-    #state{
-      objects = #{},
-      clients = #{},
-      queries = #{},
-      global = ?EMPTY_SET
-    },
-    sys:get_state(W1)
-  ),
+  #state{
+    objects = #{},
+    clients = #{},
+    queries = #{},
+    global = ?EMPTY_SET
+  } = sys:get_state(W1),
   ok.
 
 query_stateless_test(Config)->
@@ -2865,15 +2858,12 @@ query_stateless_test(Config)->
   exit(Client2, stop),
   timer:sleep(100),
 
-  ?assertEqual(
-    #state{
-      objects = #{},
-      clients = #{},
-      queries = #{},
-      global = ?EMPTY_SET
-    },
-    sys:get_state(W1)
-  ),
+  #state{
+    objects = #{},
+    clients = #{},
+    queries = #{},
+    global = ?EMPTY_SET
+  } = sys:get_state(W1),
   ok.
 
 query_no_feedback_test(Config)->
@@ -3566,6 +3556,115 @@ query_wait_test(Config)->
   timer:sleep(100),
   ok.
 
+query_global_sync_gap_test(_Config)->
+  ecomet:dirty_login(<<"system">>),
+
+  Unique = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+  Tag = {<<"f1">>, Unique, simple},
+  SubsID = {id_gap_sync, make_ref()},
+  Client = spawn(fun()-> timer:sleep(infinity) end),
+
+  {Version0, Global0} = ecomet_subscription_query:global_snapshot(),
+
+  ok = ecomet_subscription_query:subscribe(#subscribe{
+    id = SubsID,
+    client = Client,
+    dbs = [root],
+    read = fun maps:with/2,
+    deps = [<<"f1">>],
+    conditions = {<<"f1">>,'=',Unique},
+    params = #{
+      stateless => true,
+      no_feedback => false
+    }
+  }),
+
+  {Version1, Global1} = ecomet_subscription_query:global_snapshot(),
+  ?assertEqual(true, Version1 >= (Version0 + 1)),
+  ?assertEqual(true, gb_sets:is_member(Tag, Global1)),
+  ?assertEqual(
+    gb_sets:to_list(?SET_ADD(Tag, Global0)),
+    gb_sets:to_list(Global1)
+  ),
+
+  Worker = whereis(?NAME(0)),
+  #state{
+    global = WorkerGlobal1,
+    global_version = WorkerVersion1
+  } = wait_worker_version(Worker, Version1, 2000),
+  ?assertEqual(Version1, WorkerVersion1),
+  ?assertEqual(
+    gb_sets:to_list(Global1),
+    gb_sets:to_list(WorkerGlobal1)
+  ),
+
+  StaleTag = {<<"stale_tag">>,Unique,simple},
+  gen_server:cast(Worker, {global_set, StaleTag, Version1}),
+  timer:sleep(100),
+
+  #state{
+    global = WorkerGlobal2,
+    global_version = WorkerVersion2
+  } = sys:get_state(Worker),
+  ?assertEqual(Version1, WorkerVersion2),
+  ?assertEqual(false, gb_sets:is_member(StaleTag, WorkerGlobal2)),
+  ?assertEqual(
+    gb_sets:to_list(Global1),
+    gb_sets:to_list(WorkerGlobal2)
+  ),
+
+  GapTag = {<<"gap_tag">>,Unique,simple},
+  gen_server:cast(Worker, {global_set, GapTag, Version1 + 50}),
+  timer:sleep(100),
+
+  #state{
+    global = WorkerGlobal3,
+    global_version = WorkerVersion3
+  } = sys:get_state(Worker),
+  ?assertEqual(Version1, WorkerVersion3),
+  ?assertEqual(false, gb_sets:is_member(GapTag, WorkerGlobal3)),
+  ?assertEqual(
+    gb_sets:to_list(Global1),
+    gb_sets:to_list(WorkerGlobal3)
+  ),
+
+  gen_server:cast(Worker, {global_reset, Tag, Version1 + 51}),
+  timer:sleep(100),
+
+  #state{
+    global = WorkerGlobal4,
+    global_version = WorkerVersion4
+  } = sys:get_state(Worker),
+  ?assertEqual(Version1, WorkerVersion4),
+  ?assertEqual(true, gb_sets:is_member(Tag, WorkerGlobal4)),
+  ?assertEqual(
+    gb_sets:to_list(Global1),
+    gb_sets:to_list(WorkerGlobal4)
+  ),
+
+  ok = ecomet_subscription_query:unsubscribe(Client, SubsID),
+  timer:sleep(100),
+
+  {Version2, Global2} = ecomet_subscription_query:global_snapshot(),
+  ?assertEqual(true, Version2 >= (Version1 + 1)),
+  ?assertEqual(
+    gb_sets:to_list(Global0),
+    gb_sets:to_list(Global2)
+  ),
+
+  #state{
+    global = WorkerGlobal5,
+    global_version = WorkerVersion5
+  } = wait_worker_version(Worker, Version2, 2000),
+  ?assertEqual(Version2, WorkerVersion5),
+  ?assertEqual(
+    gb_sets:to_list(Global2),
+    gb_sets:to_list(WorkerGlobal5)
+  ),
+
+  exit(Client, shutdown),
+  ok.
+
 
 %%-------------client loop--------------------
 start_client(User)->
@@ -3601,3 +3700,17 @@ client_run(Client, Fun)->
   receive
     {Client, result, Result} -> Result
   end.
+
+wait_worker_version(Worker, ExpectedVersion, Timeout) when Timeout > 0->
+  State = #state{
+    global_version = Version
+  } = sys:get_state(Worker),
+  case Version >= ExpectedVersion of
+    true ->
+      State;
+    false ->
+      timer:sleep(50),
+      wait_worker_version(Worker, ExpectedVersion, Timeout - 50)
+  end;
+wait_worker_version(Worker, _ExpectedVersion, _Timeout)->
+  sys:get_state(Worker).

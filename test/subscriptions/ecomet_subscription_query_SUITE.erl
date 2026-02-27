@@ -754,7 +754,7 @@ assert_workers_global(Global)->
   lists:foreach(
     fun(N)->
       Worker = whereis(?NAME(N)),
-      {state, _, _, _, WorkerGlobal} = sys:get_state(Worker),
+      {state, _, _, _, WorkerGlobal, _WorkerVersion} = sys:get_state(Worker),
       ?assertEqual(gb_sets:to_list(Global), gb_sets:to_list(WorkerGlobal))
     end,
     ecomet_subscription_pool:get_workers()

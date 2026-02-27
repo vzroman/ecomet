@@ -32,8 +32,8 @@
   init_query/3,
   add_query_client/2,
   remove_query_client/3,
-  global_set/1,
-  global_reset/1
+  global_set/2,
+  global_reset/2
 ]).
 
 %%=================================================================
@@ -53,7 +53,8 @@
   objects,
   clients,
   queries,
-  global
+  global,
+  global_version
 }).
 
 -record(object,{
@@ -173,23 +174,12 @@ remove_query_client(Ref, ClientID, SubsID)->
   [gen_server:cast(?NAME(N), {remove_query_client, Ref, ClientID, SubsID}) || N <-ecomet_subscription_pool:get_workers()],
   ok.
 
-global_set(Tag)->
-  Ref = make_ref(),
-  ReplyTo = self(),
-  [gen_server:cast(?NAME(N), {global_set, Ref, Tag, ReplyTo}) || N <-ecomet_subscription_pool:get_workers()],
-  wait_confirm(ecomet_subscription_pool:get_size(), Ref).
+global_set(Tag, Version)->
+  [gen_server:cast(?NAME(N), {global_set, Tag, Version}) || N <-ecomet_subscription_pool:get_workers()],
+  ok.
 
-global_reset(Tag)->
-  Ref = make_ref(),
-  ReplyTo = self(),
-  [gen_server:cast(?NAME(N), {global_reset, Ref, Tag, ReplyTo}) || N <-ecomet_subscription_pool:get_workers()],
-  wait_confirm(ecomet_subscription_pool:get_size(), Ref).
-
-wait_confirm(Rest, Ref) when Rest > 0->
-  receive
-    {confirm, Ref} -> wait_confirm(Rest-1, Ref)
-  end;
-wait_confirm(_Rest, _Ref)->
+global_reset(Tag, Version)->
+  [gen_server:cast(?NAME(N), {global_reset, Tag, Version}) || N <-ecomet_subscription_pool:get_workers()],
   ok.
 
 %%=================================================================
@@ -200,12 +190,12 @@ start_link(N)->
 
 
 init([]) ->
-
   {ok, #state{
     objects = #{},
     clients = #{},
     queries = #{},
-    global = ?EMPTY_SET
+    global = ?EMPTY_SET,
+    global_version = 0
   }}.
 
 %%===================================================================
@@ -280,11 +270,10 @@ handle_cast({remove_query_client, Ref, ClientID, SubsID}, State0) ->
       {noreply, State0}
   end;
 
-handle_cast({global_set, Ref, Tag, ReplyTo}, State0) ->
+handle_cast({global_set, Tag, Version}, State0) ->
   ?LOGDEBUG("global_set: Tag ~p",[Tag]),
   try
-    State = global_set(Tag, State0),
-    catch ReplyTo ! {confirm, Ref},
+    State = apply_global_set(Tag, Version, State0),
     {noreply, State}
   catch
     _:E:S->
@@ -292,11 +281,10 @@ handle_cast({global_set, Ref, Tag, ReplyTo}, State0) ->
       {noreply, State0}
   end;
 
-handle_cast({global_reset, Ref, Tag, ReplyTo}, State0) ->
-  ?LOGDEBUG("global_set: Tag ~p",[Tag]),
+handle_cast({global_reset, Tag, Version}, State0) ->
+  ?LOGDEBUG("global_reset: Tag ~p",[Tag]),
   try
-    State = global_reset(Tag, State0),
-    catch ReplyTo ! {confirm, Ref},
+    State = apply_global_reset(Tag, Version, State0),
     {noreply, State}
   catch
     _:E:S->
@@ -1283,27 +1271,56 @@ remove_query_from_object(
     queries = Queries
   }.
 
-global_set(
+apply_global_set(
     Tag,
+    Version,
     State0 = #state{
-      global = Global0
+      global = Global0,
+      global_version = LocalVersion
     }
 )->
-  Global = ?SET_ADD(Tag, Global0),
-  State0#state{
-    global = Global
-  }.
+  case Version of
+    V when (not is_integer(V)) orelse (V =< LocalVersion) ->
+      State0;
+    V when V =:= (LocalVersion + 1) ->
+      State0#state{
+        global = ?SET_ADD(Tag, Global0),
+        global_version = V
+      };
+    _ ->
+      sync_global_snapshot(State0)
+  end.
 
-global_reset(
+apply_global_reset(
     Tag,
+    Version,
     State0 = #state{
-      global = Global0
+      global = Global0,
+      global_version = LocalVersion
     }
 )->
-  Global = ?SET_DEL( Tag, Global0),
-  State0#state{
-    global = Global
-  }.
+  case Version of
+    V when (not is_integer(V)) orelse (V =< LocalVersion) ->
+      State0;
+    V when V =:= (LocalVersion + 1) ->
+      State0#state{
+        global = ?SET_DEL(Tag, Global0),
+        global_version = V
+      };
+    _ ->
+      sync_global_snapshot(State0)
+  end.
+
+sync_global_snapshot(State0)->
+  case catch ecomet_subscription_query:global_snapshot() of
+    {Version, Global} when is_integer(Version), Version >= 0 ->
+      State0#state{
+        global = Global,
+        global_version = Version
+      };
+    _->
+      State0
+  end.
 
 
 check_access(is_admin, _RG)->
@@ -1400,7 +1417,6 @@ notify(
       objects = Objects0
     }
 )->
-
   Fields = maps:merge(Fields0, Fields1),
   QueriesToCheck = ecomet_subscription_query:find(Log, Global),
   #{
@@ -2020,13 +2036,6 @@ delete_object_from_clients(
     State0,
     ObjectClients
   ).
-
-
-
-
-
-
-
 
 
 
