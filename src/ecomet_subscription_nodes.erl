@@ -82,7 +82,7 @@ handle_info({Ref, join, ?MODULE, PIDs}, #state{
   monitor_ref = Ref
 } = State) ->
 
-  NewNodes = [ node(PID) || PID <- PIDs, PID =/= self() ],
+  NewNodes = ordsets:from_list([ node(PID) || PID <- PIDs, PID =/= self() ]),
   ExistingNodes = get_active(),
   ActiveNodes = ordsets:union( ExistingNodes, NewNodes ),
 
@@ -94,7 +94,7 @@ handle_info({Ref, leave, ?MODULE, PIDs}, #state{
   monitor_ref = Ref
 } = State) ->
 
-  DownNodes = [ node(PID) || PID <- PIDs, PID =/= self() ],
+  DownNodes = ordsets:from_list([ node(PID) || PID <- PIDs, PID =/= self() ]),
   ExistingNodes = get_active(),
   ActiveNodes = ordsets:subtract( ExistingNodes, DownNodes ),
 
