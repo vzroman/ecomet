@@ -1336,6 +1336,8 @@ sync_global_snapshot(#state{
         global = Global,
         global_version = Version
       };
+    is_integer(Version1), Version1 =:= Version0 ->
+      State0;
     true ->
       ?LOGWARNING("sync global snapshot get unexpeted version: ~p, actual version: ~p",[Version1, Version0]),
       State0
