@@ -41,6 +41,7 @@
   andnot_norm/1,
   direct_norm/1,
   optimize/1,
+  oid_helpers/1,
   prepare_summary/1
 ]).
 
@@ -83,6 +84,7 @@ groups()->[
         ]
       },
       optimize,
+      oid_helpers,
       prepare_summary
     ]
   },
@@ -1071,6 +1073,39 @@ optimize(_Config)->
     },'UNDEFINED'}
   ],'UNDEFINED'},
   S9=ecomet_resultset:optimize(S9).
+
+oid_helpers(Config)->
+  PatternID = ?config(pattern_id1, Config),
+  DBID = ecomet_schema:get_db_id(root),
+  ServiceID = ecomet_object:get_service_id(DBID, PatternID),
+  OID1 = {ServiceID, 100},
+  OID2 = {ServiceID, 101},
+  MissingOID = {ServiceID, 102},
+
+  % Keep second object visible after removing the first one
+  RS0 = ecomet_resultset:new(),
+  RS1 = ecomet_resultset:add_oid(OID1, RS0),
+  RS2 = ecomet_resultset:add_oid(OID2, RS1),
+  2 = ecomet_resultset:count(RS2),
+  RS3 = ecomet_resultset:remove_oid(OID1, RS2),
+  false = ecomet_resultset:contains(OID1, RS3),
+  true = ecomet_resultset:contains(OID2, RS3),
+  1 = ecomet_resultset:count(RS3),
+
+  % Removing a missing OID should not change the set
+  RS4 = ecomet_resultset:remove_oid(MissingOID, RS3),
+  true = ecomet_resultset:contains(OID2, RS4),
+  1 = ecomet_resultset:count(RS4),
+
+  % Adding/removing in another DB must not drop existing DB branches
+  GhostDB = ghost_db,
+  GhostRS = [{GhostDB, ecomet_resultset:new_branch()}],
+  RS5 = ecomet_resultset:add_oid(OID1, GhostRS),
+  true = lists:keymember(GhostDB, 1, RS5),
+  true = ecomet_resultset:contains(OID1, RS5),
+  RS6 = ecomet_resultset:remove_oid(OID1, GhostRS),
+  true = lists:keymember(GhostDB, 1, RS6),
+  0 = ecomet_resultset:count(RS6).
 
 prepare_summary(Config)->
   PatternID1=?config(pattern_id1,Config),

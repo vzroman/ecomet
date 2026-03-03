@@ -513,10 +513,10 @@ add_oid( OID, RS )->
 
 	Empty = ecomet_bitmap:create(),
 
-	{ {_,{PBits0, PMap0}}, RestDBs} =
+	{{PBits0, PMap0}, RestDBs} =
 		case lists:keytake(DB,1,RS) of
-			{value, DB_RS0, Rest }-> {DB_RS0, Rest};
-			false -> { {DB,new_branch()}, []}
+			{value, {_, DB_RS0}, Rest }-> {DB_RS0, Rest};
+			false -> {new_branch(), RS}
 		end,
 
 	PBits= ecomet_bitmap:set_bit(PBits0, P),
@@ -541,37 +541,53 @@ remove_oid( OID, RS )->
 	H=ObjectID div ?BITSTRING_LENGTH,
 	L=ObjectID rem ?BITSTRING_LENGTH,
 
-	Empty = ecomet_bitmap:create(),
-
-	{ {_,{PBits0, PMap0}}, RestDBs} =
-		case lists:keytake(DB,1,RS) of
-			{value, DB_RS0, Rest }-> {DB_RS0, Rest};
-			false -> { {DB,new_branch()}, []}
-		end,
-
-	PBits= ecomet_bitmap:reset_bit(PBits0, P),
-
-	{HBits0, HMap0 } = maps:get( P, PMap0, { Empty, #{} } ),
-	HBits= ecomet_bitmap:reset_bit(HBits0, H),
-
-	LBits0 = maps:get(H, HMap0, Empty ),
-	LBits= ecomet_bitmap:reset_bit(LBits0, L),
-
-	HMap =
-		if
-			LBits =:= Empty -> maps:remove(H, HMap0);
-			true -> HMap0#{ H => LBits }
-		end,
-	PMap =
-		if
-			HBits =:= Empty-> maps:remove( P, PMap0 );
-			true -> PMap0#{ P => {HBits, HMap} }
-		end,
-
-	if
-		PBits =:= Empty -> RestDBs;
-		true ->
-			[ {DB, {PBits, PMap}} |RestDBs ]
+	case lists:keytake(DB,1,RS) of
+		false ->
+			RS;
+		{value, {_, {PBits0, PMap0}}, RestDBs} ->
+			case maps:find(P, PMap0) of
+				error ->
+					[{DB, {PBits0, PMap0}} | RestDBs];
+				{ok, {HBits0, HMap0}} ->
+					case maps:find(H, HMap0) of
+						error ->
+							[{DB, {PBits0, PMap0}} | RestDBs];
+						{ok, LBits0} ->
+							LBits = ecomet_bitmap:reset_bit(LBits0, L),
+							{HBits, HMap} =
+								case ecomet_bitmap:is_empty(LBits) of
+									true ->
+										{
+											ecomet_bitmap:reset_bit(HBits0, H),
+											maps:remove(H, HMap0)
+										};
+									false ->
+										{
+											HBits0,
+											HMap0#{H => LBits}
+										}
+								end,
+							{PBits, PMap} =
+								case ecomet_bitmap:is_empty(HBits) of
+									true ->
+										{
+											ecomet_bitmap:reset_bit(PBits0, P),
+											maps:remove(P, PMap0)
+										};
+									false ->
+										{
+											PBits0,
+											PMap0#{P => {HBits, HMap}}
+										}
+								end,
+							case ecomet_bitmap:is_empty(PBits) of
+								true ->
+									RestDBs;
+								false ->
+									[{DB, {PBits, PMap}} | RestDBs]
+							end
+					end
+			end
 	end.
 
 contains( OID, RS )->
@@ -1466,4 +1482,3 @@ find_roots( Name )->
 
 empty_tag()->
 	{'TAG',{<<".name">>,none,'simple'},'UNDEFINED'}.
-
