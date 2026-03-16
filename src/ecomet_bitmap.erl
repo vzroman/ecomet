@@ -49,7 +49,8 @@
 %%------------------------------------------------------------------------------------
 -export([
   foldl/4,
-  foldr/4
+  foldr/4,
+  page/4
 ]).
 
 %%------------------------------------------------------------------------------------
@@ -182,7 +183,29 @@ foldr(Fun,InAcc,Set,{From,To})->
     {Count1, Acc1}
   end, { _Count=0, InAcc }, Bits).
 
-
+page(_Direction, none, _Offset, _Limit) -> [];
+page(_Direction, [], _Offset, _Limit) -> [];
+page(foldl, Bitmap, Offset, Limit) ->
+  TotalCount = eroaring:count(Bitmap),
+  if
+    Offset >= TotalCount ->
+      [];
+    true ->
+      % Convert 0-based offset to 1-based index and request only limited N-items.
+      lists:sublist(eroaring:to_list(Bitmap), Offset + 1, Limit)
+  end;
+page(foldr, Bitmap, Offset, Limit) ->
+  TotalCount = eroaring:count(Bitmap),
+  if
+    Offset >= TotalCount ->
+      [];
+    true ->
+      % Limit slice size to the number of remaining items.
+      SliceSize = min(Limit, TotalCount - Offset),
+      % Find where the window begins when counting from the front of the list.
+      SliceStart = TotalCount - Offset - SliceSize + 1,
+      lists:reverse(lists:sublist(eroaring:to_list(Bitmap), SliceStart, SliceSize))
+  end.
 
 
 

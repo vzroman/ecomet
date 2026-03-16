@@ -1129,19 +1129,96 @@ fold(F,Acc,RS,Scan,none)->
       end,RSP,get_branch([IDP],DB_RS),{none,none}))
     end,RSD,get_branch([],DB_RS),{none,none}))
   end,Acc,RS);
-fold(F,Acc,RS,Scan,{Page,Length})->
-  From=(Page-1)*Length,
-  To=From+Length,
-  lists:Scan(fun({_DB,DB_RS},RSD)->
-    element(2,ecomet_bitmap:Scan(fun(IDP,RSP)->
-      element(2,ecomet_bitmap:Scan(fun(IDH,{Count,RSH})->
-				{BitsCount,NewAcc}=ecomet_bitmap:Scan(fun(IDL,RSL)->
-					F({IDP,IDH*?BITSTRING_LENGTH+IDL},RSL)
-        end,RSH,get_branch([IDP,IDH],DB_RS),{From-Count,To-Count}),
-				{Count+BitsCount,NewAcc}
-      end,RSP,get_branch([IDP],DB_RS),{none,none}))
-    end,RSD,get_branch([],DB_RS),{none,none}))
-  end,{0,Acc},RS).
+fold(Callback, Acc, ResultSet, Direction, {PageNumber, PageSize}) ->
+  TotalCount = count(ResultSet),
+  % Number of items to skip to reach the start of the requested page.
+  Offset = (PageNumber - 1) * PageSize,
+  if
+    Offset >= TotalCount ->
+      {TotalCount, Acc};
+    true ->
+    	% Limit page size to the number of remaining items
+      Limit = min(PageSize, TotalCount - Offset),
+      PageResult = fold_db(Callback, Acc, ResultSet, Direction, Offset, Limit),
+      {TotalCount, PageResult}
+  end.
+
+%% Step #1: Iterate databases.
+%% Notes:
+%% 	Offset left: how many items still need to be skipped before collecting start
+%%  Limit left: how many items still need to be collected before stopping
+fold_db(Callback, Acc, ResultSet, Direction, Offset, Limit) ->
+  {_, _, PageResult} =
+		lists:foldl(
+			fun({_DB, ResultSetDB}, {OffsetLeft, LimitLeft, CollectedAcc}) ->
+				if
+					LimitLeft =:= 0 ->
+						{OffsetLeft, 0, CollectedAcc};
+					true ->
+						fold_patterns(Callback, CollectedAcc, ResultSetDB, Direction, OffsetLeft, LimitLeft)
+				end
+			end,
+			_InitState = {Offset, Limit, Acc},
+			scan_order(ResultSet, Direction)
+		),
+  PageResult.
+
+%% Step #2: Iterate patterns.
+fold_patterns(Callback, Acc, ResultSetDB, Direction, Offset, Limit) ->
+  lists:foldl(
+    fun(PatternID, {OffsetLeft, LimitLeft, CollectedAcc}) ->
+      if
+        LimitLeft =:= 0 ->
+        	{OffsetLeft, 0, CollectedAcc};
+        true ->
+        	fold_idh(Callback, CollectedAcc, ResultSetDB, PatternID, Direction, OffsetLeft, LimitLeft)
+      end
+    end,
+    {Offset, Limit, Acc},
+    scan_bits(get_branch([], ResultSetDB), Direction)
+  ).
+
+%% Step #3: Iterate IDHs and return IDLs.
+fold_idh(Callback, Acc, ResultSetDB, PatternID, Direction, Offset, Limit) ->
+  lists:foldl(
+    fun(IDH, {OffsetLeft, LimitLeft, CollectedAcc}) ->
+      if
+        LimitLeft =:= 0 ->
+          {OffsetLeft, 0, CollectedAcc};
+        true ->
+          BitmapIDH = get_branch([PatternID, IDH], ResultSetDB),
+          BucketSize = ecomet_bitmap:count(BitmapIDH),
+          if
+            % Entire IDH falls to the skip, ignore it.
+            BucketSize =< OffsetLeft ->
+              {OffsetLeft - BucketSize, LimitLeft, CollectedAcc};
+            true ->
+              % Get remaining items to be collected from what is left in the limit.
+              ToCollect = min(LimitLeft, BucketSize - OffsetLeft),
+              ListIDL = ecomet_bitmap:page(Direction, BitmapIDH, OffsetLeft, ToCollect),
+              UpdatedAcc =
+              	lists:foldl(
+              		fun(IDL, OIDAcc) ->
+              			Callback({PatternID, IDH * ?BITSTRING_LENGTH + IDL}, OIDAcc)
+									end,
+									CollectedAcc,
+									ListIDL
+								),
+              % All items in this bucket are collected, update the remaining items to collect.
+              {0, LimitLeft - ToCollect, UpdatedAcc}
+          end
+      end
+    end,
+    {Offset, Limit, Acc},
+    scan_bits(get_branch([PatternID], ResultSetDB), Direction)
+  ).
+
+scan_bits(_Bitmap = none, _Direction) -> [];
+scan_bits(Bitmap, foldl) -> eroaring:to_list(Bitmap);
+scan_bits(Bitmap, foldr) -> lists:reverse(eroaring:to_list(Bitmap)).
+
+scan_order(Items, foldl) -> Items;
+scan_order(Items, foldr) -> lists:reverse(Items).
 
 %%=====================================================================
 %%	Internal helpers
