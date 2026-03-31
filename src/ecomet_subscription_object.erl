@@ -704,7 +704,8 @@ add_object_sub(
   %---------Update already existing object---------------
   Object0 = maps:get(OID, Objects0),
 
-  Object1 = add_fields(SubsFields, _UpdateFields = #{},Object0),
+  FieldCounts = subs_field_counts(SubsFields, OID),
+  Object1 = add_fields(FieldCounts, _UpdateFields = #{},Object0),
   Object = add_object_client(ClientID, SubsID, Object1),
 
   Objects = Objects0#{
@@ -727,7 +728,8 @@ init_object(
     }
 )->
   %---------Init new object---------------
-  Object0 = init_new_object(OID, SubsFields, _UpdateFields = #{}),
+  FieldCounts = subs_field_counts(SubsFields, OID),
+  Object0 = init_new_object(OID, FieldCounts, _UpdateFields = #{}),
 
   Object = add_object_client(ClientID, SubsID, Object0),
 
@@ -739,26 +741,13 @@ init_object(
     objects = Objects
   }.
 
-init_new_object(OID, SubsFields, UpdateFields)->
+init_new_object(OID, FieldCounts, UpdateFields)->
   case ecomet_object:exists(OID) of
     false -> throw({not_exists, OID});
     true -> ok
   end,
   Instance = ecomet_object:construct( OID ),
-  RealSubsFields = real_subs_fields(SubsFields, OID),
-
-  InitFields =
-    lists:foldl(
-      fun(F, Acc)->
-        case Acc of
-          #{F := _}-> Acc;
-          _->
-            Acc#{ F => none }
-        end
-      end,
-      #{},
-      RealSubsFields
-    ),
+  InitFields = maps:map(fun(_F, _Count)-> none end, FieldCounts),
 
   Fields0 = maps:with(maps:keys(InitFields), UpdateFields),
   Fields =
@@ -772,7 +761,7 @@ init_new_object(OID, SubsFields, UpdateFields)->
         )
     end,
 
-  FieldsRef = maps:map(fun(_F,_V)->1 end, Fields),
+  FieldsRef = FieldCounts,
 
   #object{
     instance = Instance,
@@ -802,7 +791,8 @@ remove_object_subscription(
   Object0 = maps:get(OID, Objects0),
 
   Object1 = remove_object_client(ClientID, SubsID, Object0),
-  Object = remove_fields(SubsFields, Object1),
+  FieldCounts = subs_field_counts(SubsFields, OID),
+  Object = remove_fields(FieldCounts, Object1),
 
   Objects =
     case has_clients(Object) of
@@ -820,7 +810,7 @@ remove_object_subscription(
 
 
 add_fields(
-    SubsFields,
+    FieldCounts,
     UpdateFields,
     Object0 = #object{
       instance = Instance,
@@ -829,11 +819,8 @@ add_fields(
     }
 )->
 
-  OID = ecomet_object:get_oid(Instance),
-  RealSubsFields = real_subs_fields(SubsFields, OID),
-
   Fields =
-    case RealSubsFields -- maps:keys( Fields0 ) of
+    case maps:keys( FieldCounts ) -- maps:keys( Fields0 ) of
       [] ->
         Fields0;
       NewFields->
@@ -850,17 +837,14 @@ add_fields(
     end,
 
   FieldsRef =
-    lists:foldl(
-      fun(F, Acc)->
-        case Acc of
-          #{F:=Count} ->
-            Acc#{ F=> Count + 1 };
-          _->
-            Acc#{ F=>1 }
-        end
+    maps:fold(
+      fun(F, Count, Acc)->
+        Acc#{
+          F => maps:get(F, Acc, 0) + Count
+        }
       end,
       FieldsRef0,
-      RealSubsFields
+      FieldCounts
     ),
 
   Object0#object{
@@ -869,35 +853,27 @@ add_fields(
   }.
 
 remove_fields(
-    SubsFields,
+    FieldCounts,
     Object0 = #object{
-      instance = Instance,
       fields = Fields0,
       fields_ref = FieldsRef0
     }
 )->
 
-  OID = ecomet_object:get_oid(Instance),
-  RealSubsFields = real_subs_fields(SubsFields, OID),
-
   FieldsRef =
-    lists:foldl(
-      fun(F, Acc)->
-        case Acc of
-          #{ F:= Count0 }->
-            Count = Count0 - 1,
-            if
-              Count > 0->
-                Acc#{ F=>Count };
-              true->
-                maps:remove(F, Acc)
-            end;
-          _->
+    maps:fold(
+      fun(F, Count, Acc)->
+        case maps:find(F, Acc) of
+          {ok, Count0} when Count0 > Count ->
+            Acc#{ F => Count0 - Count };
+          {ok, _Count0} ->
+            maps:remove(F, Acc);
+          error ->
             Acc
         end
       end,
       FieldsRef0,
-      RealSubsFields
+      FieldCounts
     ),
 
   Fields = maps:with(maps:keys(FieldsRef), Fields0),
@@ -905,6 +881,17 @@ remove_fields(
     fields = Fields,
     fields_ref = FieldsRef
   }.
+
+subs_field_counts(SubsFields, OID) when is_list(SubsFields)->
+  lists:foldl(
+    fun(F, Acc)->
+      Acc#{
+        F => 1
+      }
+    end,
+    #{},
+    real_subs_fields(SubsFields, OID)
+  ).
 
 real_subs_fields(SubsFields, OID)->
   case lists:member('*', SubsFields) of
@@ -914,8 +901,19 @@ real_subs_fields(SubsFields, OID)->
       ServiceFields = ecomet_object:service_fields(),
       ordsets:from_list(AllFields ++ ServiceFields);
     _->
-      [F || F <- SubsFields, is_binary(F)]
+      ordsets:from_list([F || F <- SubsFields, is_binary(F)])
   end.
+
+merge_field_counts(Counts1, Counts2)->
+  maps:fold(
+    fun(F, Count, Acc)->
+      Acc#{
+        F => maps:get(F, Acc, 0) + Count
+      }
+    end,
+    Counts1,
+    Counts2
+  ).
 
 add_object_client(
     ClientID,
@@ -1210,12 +1208,13 @@ add_query_to_objects(
   ecomet_resultset:foldl(
     fun(OID, Acc)->
       try
+        FieldCounts = subs_field_counts(SubsFields, OID),
         Object1 =
           case Acc of
             #{ OID := Object0 }->
-              add_fields(SubsFields, _UpdateFields = #{}, Object0);
+              add_fields(FieldCounts, _UpdateFields = #{}, Object0);
             _->
-              init_new_object(OID, SubsFields, _UpdateFields = #{})
+              init_new_object(OID, FieldCounts, _UpdateFields = #{})
           end,
         Object = add_query_to_object(Ref, Object1),
         Acc#{
@@ -1243,7 +1242,8 @@ remove_query_from_objects(
     fun(OID, Acc)->
       case Acc of
         #{ OID := Object0 }->
-          Object1 = remove_fields(SubsFields, Object0),
+          FieldCounts = subs_field_counts(SubsFields, OID),
+          Object1 = remove_fields(FieldCounts, Object0),
           Object= remove_query_from_object(Ref, Object1),
           case has_clients(Object) of
             true ->
@@ -1930,24 +1930,21 @@ add_queries_to_object(
     UpdateFields,
     Objects0
 ) when map_size(AddQueries) > 0->
-  SubsFields =
+  FieldCounts =
     maps:fold(
       fun(_Ref, #query{fields = QueryFields}, Acc)->
-        ordsets:union(
-          ordsets:from_list(QueryFields),
-          Acc
-        )
+        merge_field_counts(Acc, subs_field_counts(QueryFields, OID))
       end,
-      [],
+      #{},
       AddQueries
     ),
 
   Object0 =
     case Objects0 of
       #{OID := ExistingObject} ->
-        add_fields(SubsFields, UpdateFields, ExistingObject);
+        add_fields(FieldCounts, UpdateFields, ExistingObject);
       _->
-        init_new_object(OID, SubsFields, UpdateFields)
+        init_new_object(OID, FieldCounts, UpdateFields)
     end,
 
   Object = Object0#object{
@@ -1976,15 +1973,21 @@ remove_queries_from_object(
 ) when map_size(RemoveQueries) > 0->
   case Objects0 of
     #{OID := Object0}->
-      Object =
+      FieldCounts =
         maps:fold(
-          fun(Ref, #query{fields = SubsFields}, Acc)->
-            Acc1 = remove_fields(SubsFields, Acc),
-            remove_query_from_object(Ref, Acc1)
+          fun(_Ref, #query{fields = SubsFields}, Acc)->
+            merge_field_counts(Acc, subs_field_counts(SubsFields, OID))
           end,
-          Object0,
+          #{},
           RemoveQueries
         ),
+      Object1 = remove_fields(FieldCounts, Object0),
+      Object = Object1#object{
+        queries = ordsets:subtract(
+          Object1#object.queries,
+          ordsets:from_list(maps:keys(RemoveQueries))
+        )
+      },
       case has_clients(Object) of
         true ->
           Objects0#{
@@ -2056,4 +2059,3 @@ delete_object_from_clients(
     State0,
     ObjectClients
   ).
-

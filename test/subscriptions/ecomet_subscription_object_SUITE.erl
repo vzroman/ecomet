@@ -95,6 +95,7 @@ groups()->
       [
         query_subscribe_test,
         query_additive_membership_test,
+        query_simultaneous_add_overlap_refcount_test,
         query_multi_subscriptions_per_client_test,
         query_same_test,
         query_light_update_test,
@@ -2092,6 +2093,212 @@ query_additive_membership_test(Config)->
 
   exit(Client1, stop),
   exit(Client2, stop),
+  timer:sleep(100),
+
+  ok.
+
+query_simultaneous_add_overlap_refcount_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"query_simultaneous_add_overlap_refcount_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"no">>,
+    <<"f2">> => <<"f2 value">>,
+    <<"f3">> => 0,
+    <<"f4">> => <<"shared value">>
+  })),
+
+  W = whereis(?WORKER(O)),
+
+  Client1 = start_client(<<"system">>),
+  Client2 = start_client(<<"system">>),
+  timer:sleep(100),
+
+  Format = fun ecomet:to_string/2,
+  Conditions1 = {'AND',[
+    {<<".folder">>,'=',F},
+    {<<"f1">>,'=',<<"yes">>}
+  ]},
+  Conditions2 = {'AND',[
+    {<<".folder">>,'=',F},
+    {<<"f3">>,'=',1}
+  ]},
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f4">>],
+    Conditions1,
+    #{
+      stateless => false,
+      no_feedback => false,
+      format => Format,
+      client => Client1
+    }
+  ),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f4">>],
+    Conditions2,
+    #{
+      stateless => false,
+      no_feedback => false,
+      format => Format,
+      client => Client2
+    }
+  ),
+
+  ?assertEqual(message_timeout, from_client(Client1, 1000)),
+  ?assertEqual(message_timeout, from_client(Client2, 1000)),
+
+  #state{
+    queries = Queries1
+  } = sys:get_state(W),
+
+  [Q1_ref] = [
+    Ref || {Ref, #query{conditions = QueryConditions}} <- maps:to_list(Queries1),
+      QueryConditions =:= Conditions1
+  ],
+  [Q2_ref] = [
+    Ref || {Ref, #query{conditions = QueryConditions}} <- maps:to_list(Queries1),
+      QueryConditions =:= Conditions2
+  ],
+
+  ecomet:edit_object(ecomet:open(O), #{
+    <<"f1">> => <<"yes">>,
+    <<"f3">> => 1
+  }),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f4">> => <<"shared value">>
+      }
+    ),
+    from_client(Client1)
+  ),
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f4">> => <<"shared value">>
+      }
+    ),
+    from_client(Client2)
+  ),
+
+  #state{
+    objects = Objects2,
+    queries = Queries2
+  } = sys:get_state(W),
+  #object{
+    queries = ObjectQueries2,
+    fields = ObjectFields2,
+    fields_ref = ObjectFieldsRef2
+  } = maps:get(O, Objects2),
+
+  ?assertEqual(
+    ordsets:from_list([Q1_ref, Q2_ref]),
+    ObjectQueries2
+  ),
+  ?assertEqual(true, maps:is_key(<<".object">>, ObjectFields2)),
+  ?assertEqual(2, maps:get(<<".object">>, ObjectFieldsRef2)),
+  ?assertEqual(2, maps:get(<<"f4">>, ObjectFieldsRef2)),
+
+  #query{
+    set = Q1_Set
+  } = maps:get(Q1_ref, Queries2),
+  #query{
+    set = Q2_Set
+  } = maps:get(Q2_ref, Queries2),
+  ?assertEqual(true, ecomet_resultset:contains(O, Q1_Set)),
+  ?assertEqual(true, ecomet_resultset:contains(O, Q2_Set)),
+
+  ecomet:edit_object(ecomet:open(O), #{
+    <<"f1">> => <<"no">>
+  }),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(id1, delete, O, #{}),
+    from_client(Client1)
+  ),
+  ?assertEqual(message_timeout, from_client(Client2, 1000)),
+
+  #state{
+    objects = Objects3,
+    queries = Queries3
+  } = sys:get_state(W),
+  #object{
+    queries = ObjectQueries3,
+    fields = ObjectFields3,
+    fields_ref = ObjectFieldsRef3
+  } = maps:get(O, Objects3),
+
+  ?assertEqual(
+    ordsets:from_list([Q2_ref]),
+    ObjectQueries3
+  ),
+  ?assertEqual(true, maps:is_key(<<".object">>, ObjectFields3)),
+  ?assertEqual(1, maps:get(<<".object">>, ObjectFieldsRef3)),
+  ?assertEqual(1, maps:get(<<"f4">>, ObjectFieldsRef3)),
+
+  #query{
+    set = Q1_Set3
+  } = maps:get(Q1_ref, Queries3),
+  #query{
+    set = Q2_Set3
+  } = maps:get(Q2_ref, Queries3),
+  ?assertEqual(false, ecomet_resultset:contains(O, Q1_Set3)),
+  ?assertEqual(true, ecomet_resultset:contains(O, Q2_Set3)),
+
+  Client3 = start_client(<<"system">>),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id3,
+    [root],
+    [<<"f4">>],
+    Conditions2,
+    #{
+      stateless => false,
+      no_feedback => false,
+      format => Format,
+      client => Client3
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id3,
+      create,
+      O,
+      #{
+        <<"f4">> => <<"shared value">>
+      }
+    ),
+    from_client(Client3)
+  ),
+
+  exit(Client1, stop),
+  exit(Client2, stop),
+  exit(Client3, stop),
   timer:sleep(100),
 
   ok.
