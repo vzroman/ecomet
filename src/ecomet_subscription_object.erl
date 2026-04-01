@@ -257,7 +257,7 @@ handle_cast({add_query_client, Ref, Subscription}, State0) ->
     {noreply, State}
   catch
     _:E:S->
-      ?LOGERROR("add query client error: ~p, stack ~p",[E,S]),
+      ?LOGERROR("~p add query client error: ~p, stack ~p",[Ref,E,S]),
       {noreply, State0}
   end;
 
@@ -618,7 +618,13 @@ remove_client_from_query(
     end,
   Query0#query{
     clients = QueryClients
-  }.
+  };
+remove_client_from_query(
+    _ClientID,
+    _SubsID,
+    Query0 = #wait_query{}
+)->
+  Query0.
 
 
 init_query_client(
