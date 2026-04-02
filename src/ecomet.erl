@@ -113,6 +113,8 @@
   ts/0,
   stop/0,
   rebuild_index/1,
+  cleanup_stale_index_oids/0,
+  cleanup_stale_index_oids/1,
   wait_dbs/1,
   wait_local_dbs/0,
   db_available_nodes/1
@@ -402,6 +404,12 @@ stop()->
 
 rebuild_index(OID)->
   ecomet_object:rebuild_index( OID ).
+
+cleanup_stale_index_oids()->
+  ecomet_index_cleanup:cleanup_stale_oids().
+
+cleanup_stale_index_oids(DBs)->
+  ecomet_index_cleanup:cleanup_stale_oids(DBs).
 
 wait_dbs( DBs )->
   ecomet_db:wait_dbs( DBs ).

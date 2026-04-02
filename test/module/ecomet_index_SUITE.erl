@@ -45,6 +45,7 @@
   create_index/1,
   add_to_index/1,
   delete_object/1,
+  cleanup_stale_oids/1,
   unchanged/1,
   concurrent_build/1,
   concurrent_check/1
@@ -56,6 +57,7 @@ all()->
     {group,merge_backtag},
     {group,dump_log},
     unchanged,
+    cleanup_stale_oids,
     {group,concurrent}
   ].
 
@@ -839,6 +841,38 @@ delete_object(_Config)->
   % Delete OID2
   ecomet:transaction(fun()-> ecomet_index:delete_object(OID2,Tags2) end).
 
+cleanup_stale_oids(_Config)->
+  ExistingOID = ?OID(<<"/root">>),
+  Db = ecomet_object:get_db_name(ExistingOID),
+  PatternID = element(1, ExistingOID),
+  StaleOID = find_absent_oid(PatternID, ?BITSTRING_LENGTH - 1),
+  Unique = integer_to_binary(erlang:unique_integer([positive,monotonic])),
+  SharedTag = {<<"cleanup_shared">>,Unique,simple},
+  StaleOnlyTag = {<<"cleanup_stale_only">>,Unique,simple},
+
+  inject_tag(Db, ram, SharedTag, ExistingOID),
+  inject_tag(Db, ram, SharedTag, StaleOID),
+  inject_tag(Db, ram, StaleOnlyTag, StaleOID),
+
+  check_tag(SharedTag,Db,[ram],[ExistingOID,StaleOID]),
+  check_tag(StaleOnlyTag,Db,[ram],[StaleOID]),
+
+  #{
+    dbs := #{
+      Db := Report
+    },
+    totals := Totals
+  } = ecomet_index_cleanup:cleanup_stale_oids(Db),
+
+  ok = maps:get(status, Report),
+  true = maps:get(removed_refs, Report) >= 2,
+  true = maps:get(updated_index_keys, Report) >= 2,
+  true = maps:get(processed_dbs, Totals) >= 1,
+  true = maps:get(removed_refs, Totals) >= 2,
+
+  check_tag(SharedTag,Db,[ram],[ExistingOID]),
+  check_tag(StaleOnlyTag,Db,[],[]).
+
 
 check_tag(Tag,Db,StorageTypes,OIDs)->
   ct:pal("Tag ~p ,Db ~p ,StorageTypes  ~p", [Tag,Db,StorageTypes]),
@@ -874,6 +908,18 @@ check_tag(Tag,Db,StorageTypes,OIDs)->
   []=lists:subtract(OIDs,FoundOIDs),
   % Did not found unexpected
   []=lists:subtract(FoundOIDs,OIDs).
+
+inject_tag(Db, Storage, Tag, {PatternID,ObjectID})->
+  IDH = ObjectID div ?BITSTRING_LENGTH,
+  IDL = ObjectID rem ?BITSTRING_LENGTH,
+  ok = ecomet_db:write(Db, ?INDEX, Storage, {Tag,[idl,PatternID,IDH,IDL]}, true).
+
+find_absent_oid(PatternID, ObjectID) when ObjectID >= 0->
+  OID = {PatternID,ObjectID},
+  case ecomet_object:exists(OID) of
+    false->OID;
+    true->find_absent_oid(PatternID, ObjectID - 1)
+  end.
 
 
 %%--------------------------------------------------------------
@@ -989,4 +1035,3 @@ concurrent_check(_Config)->
     UniqueTag={<<"field2">>,<<"unique_value_",UInt/binary>>,simple},
     check_tag(UniqueTag,Db,[ram],ProcessOIDs)
     end,PIDList).
-
