@@ -29,6 +29,7 @@
   check_name_test/1,
   check_id_test/1,
   register_node_test/1,
+  node_id_not_reused_test/1,
   on_create_test/1,
   on_edit_test/1,
   on_delete_test/1
@@ -39,6 +40,7 @@ all() ->
     check_name_test,
     check_id_test,
     register_node_test,
+    node_id_not_reused_test,
     on_create_test,
     on_edit_test,
     on_delete_test
@@ -131,6 +133,19 @@ register_node_test(_Config) ->
   ok
 .
 
+node_id_not_reused_test(_Config) ->
+  Node1 = 'nodeid-reuse-1@faceplate.com',
+  Node2 = 'nodeid-reuse-2@faceplate.com',
+
+  {ok, ID1} = ecomet_schema:add_node(Node1),
+  ok = ecomet_schema:remove_node(Node1),
+
+  {ok, ID2} = ecomet_schema:add_node(Node2),
+  ok = ecomet_schema:remove_node(Node2),
+
+  ?assert(ID2 > ID1)
+.
+
 
 
 on_create_test(_Config) ->
@@ -184,4 +199,3 @@ on_delete_test(_Config) ->
 
   meck:unload(ecomet)
 .
-
