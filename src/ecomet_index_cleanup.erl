@@ -102,7 +102,7 @@ index_query()->
   }.
 
 scan_index_entry(DB, Cache, {#key{type = Storage, storage = ?INDEX, key = {Tag,[idl,PatternID,IDH]}}, Bitmap}, Acc0)->
-  {OIDRefsScanned, BitmapAcc} = scan_bitmap(Cache, PatternID, IDH, Bitmap),
+  {OIDRefsScanned, BitmapAcc} = scan_bitmap(DB, Cache, Storage, Tag, PatternID, IDH, Bitmap),
   #bitmap_acc{
     stale_idls = StaleIDLs,
     existence_checks = ExistenceChecks,
@@ -128,43 +128,77 @@ scan_index_entry(DB, Cache, {#key{type = Storage, storage = ?INDEX, key = {Tag,[
       })
   end.
 
-scan_bitmap(Cache, PatternID, IDH, Bitmap)->
+scan_bitmap(DB, Cache, Storage, Tag, PatternID, IDH, Bitmap)->
   ecomet_bitmap:foldl(fun(IDL, Acc)->
-    scan_oid(Cache, PatternID, IDH, IDL, Acc)
+    scan_oid(DB, Cache, Storage, Tag, PatternID, IDH, IDL, Acc)
   end, #bitmap_acc{}, Bitmap, {none, none}).
 
-scan_oid(Cache, PatternID, IDH, IDL, Acc)->
+cached_has_index_tag(Cache, DB, Storage, OID, Tag)->
+  CacheKey = {data_index, Storage, OID},
+  case ets:lookup(Cache, CacheKey) of
+    [{CacheKey, IndexState}]->
+      {has_index_tag(IndexState, Tag), false};
+    []->
+      IndexState = load_index_state(DB, Storage, OID),
+      true = ets:insert(Cache, {CacheKey, IndexState}),
+      {has_index_tag(IndexState, Tag), true}
+  end.
+
+load_index_state(DB, Storage, OID)->
+  case ecomet_db:read(DB, ?DATA, Storage, OID) of
+    #{index := Index} when is_map(Index)->
+      {index, Index};
+    not_found->
+      not_found;
+    _->
+      no_index
+  end.
+
+has_index_tag({index, Index}, {Field, Value, IndexType})->
+  case Index of
+    #{Field := TypeIndex} ->
+      case TypeIndex of
+        #{IndexType := Values} when is_list(Values) ->
+          lists:member(Value, Values);
+        _->
+          false
+      end;
+    _->
+      false
+  end;
+has_index_tag(_IndexState, _Tag)->
+  false.
+
+mark_stale_oid_once(Cache, OID)->
+  ets:insert_new(Cache, {{stale_oid, OID}, true}).
+
+scan_oid(DB, Cache, Storage, Tag, PatternID, IDH, IDL, Acc) ->
   OID = {PatternID, IDH * ?BITSTRING_LENGTH + IDL},
-  case cached_exists(Cache, OID) of
-    {true, true}->
+  case cached_has_index_tag(Cache, DB, Storage, OID, Tag) of
+    {true, true} ->
       maybe_set_sample_live_oid(OID, Acc#bitmap_acc{
         existence_checks = Acc#bitmap_acc.existence_checks + 1
       });
-    {true, false}->
+    {true, false} ->
       maybe_set_sample_live_oid(OID, Acc);
-    {false, true}->
-      Acc#bitmap_acc{
+    {false, WasChecked} ->
+      Acc1 = Acc#bitmap_acc{
         stale_idls = [IDL | Acc#bitmap_acc.stale_idls],
-        existence_checks = Acc#bitmap_acc.existence_checks + 1,
-        stale_oids = Acc#bitmap_acc.stale_oids + 1,
+        existence_checks = Acc#bitmap_acc.existence_checks + bool_to_int(WasChecked),
         removed_refs = Acc#bitmap_acc.removed_refs + 1
-      };
-    {false, false}->
-      Acc#bitmap_acc{
-        stale_idls = [IDL | Acc#bitmap_acc.stale_idls],
-        removed_refs = Acc#bitmap_acc.removed_refs + 1
-      }
+      },
+      case mark_stale_oid_once(Cache, OID) of
+        true ->
+          Acc1#bitmap_acc{stale_oids = Acc1#bitmap_acc.stale_oids + 1};
+        false ->
+          Acc1
+      end
   end.
 
-cached_exists(Cache, OID)->
-  case ets:lookup(Cache, OID) of
-    [{OID, Exists}]->
-      {Exists, false};
-    []->
-      Exists = ecomet_object:exists(OID),
-      true = ets:insert(Cache, {OID, Exists}),
-      {Exists, true}
-  end.
+bool_to_int(true)->
+  1;
+bool_to_int(false)->
+  0.
 
 maybe_set_sample_live_oid(OID, #bitmap_acc{sample_live_oid = none} = Acc)->
   Acc#bitmap_acc{sample_live_oid = OID};

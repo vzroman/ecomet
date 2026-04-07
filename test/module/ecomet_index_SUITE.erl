@@ -847,15 +847,17 @@ cleanup_stale_oids(_Config)->
   PatternID = element(1, ExistingOID),
   StaleOID = find_absent_oid(PatternID, ?BITSTRING_LENGTH - 1),
   Unique = integer_to_binary(erlang:unique_integer([positive,monotonic])),
-  SharedTag = {<<"cleanup_shared">>,Unique,simple},
+  {Storage, SharedTag} = find_existing_index_tag(Db, ExistingOID),
+  ExistingStaleTag = {<<"cleanup_existing_stale">>,Unique,simple},
   StaleOnlyTag = {<<"cleanup_stale_only">>,Unique,simple},
 
-  inject_tag(Db, ram, SharedTag, ExistingOID),
-  inject_tag(Db, ram, SharedTag, StaleOID),
-  inject_tag(Db, ram, StaleOnlyTag, StaleOID),
+  inject_tag(Db, Storage, SharedTag, StaleOID),
+  inject_tag(Db, Storage, ExistingStaleTag, ExistingOID),
+  inject_tag(Db, Storage, StaleOnlyTag, StaleOID),
 
-  check_tag(SharedTag,Db,[ram],[ExistingOID,StaleOID]),
-  check_tag(StaleOnlyTag,Db,[ram],[StaleOID]),
+  check_tag(SharedTag,Db,[Storage],[ExistingOID,StaleOID]),
+  check_tag(ExistingStaleTag,Db,[Storage],[ExistingOID]),
+  check_tag(StaleOnlyTag,Db,[Storage],[StaleOID]),
 
   #{
     dbs := #{
@@ -865,12 +867,13 @@ cleanup_stale_oids(_Config)->
   } = ecomet_index_cleanup:cleanup_stale_oids(Db),
 
   ok = maps:get(status, Report),
-  true = maps:get(removed_refs, Report) >= 2,
-  true = maps:get(updated_index_keys, Report) >= 2,
+  true = maps:get(removed_refs, Report) >= 3,
+  true = maps:get(updated_index_keys, Report) >= 3,
   true = maps:get(processed_dbs, Totals) >= 1,
-  true = maps:get(removed_refs, Totals) >= 2,
+  true = maps:get(removed_refs, Totals) >= 3,
 
-  check_tag(SharedTag,Db,[ram],[ExistingOID]),
+  check_tag(SharedTag,Db,[Storage],[ExistingOID]),
+  check_tag(ExistingStaleTag,Db,[],[]),
   check_tag(StaleOnlyTag,Db,[],[]).
 
 
@@ -913,6 +916,44 @@ inject_tag(Db, Storage, Tag, {PatternID,ObjectID})->
   IDH = ObjectID div ?BITSTRING_LENGTH,
   IDL = ObjectID rem ?BITSTRING_LENGTH,
   ok = ecomet_db:write(Db, ?INDEX, Storage, {Tag,[idl,PatternID,IDH,IDL]}, true).
+
+find_existing_index_tag(Db, OID)->
+  case find_existing_index_tag(Db, OID, [ram, ramdisc, disc]) of
+    {ok, Result}->
+      Result;
+    not_found->
+      ct:fail({no_existing_index_tag, Db, OID})
+  end.
+
+find_existing_index_tag(_Db, _OID, [])->
+  not_found;
+find_existing_index_tag(Db, OID, [Storage | Rest])->
+  case ecomet_db:read(Db, ?DATA, Storage, OID) of
+    #{index := Index} when is_map(Index)->
+      case first_index_tag(Index) of
+        none->
+          find_existing_index_tag(Db, OID, Rest);
+        Tag->
+          {ok, {Storage, Tag}}
+      end;
+    _->
+      find_existing_index_tag(Db, OID, Rest)
+  end.
+
+first_index_tag(Index)->
+  maps:fold(fun
+    (_Field, _TypeIndex, Acc) when Acc =/= none->
+      Acc;
+    (Field, TypeIndex, none)->
+      maps:fold(fun
+        (_IndexType, _Values, TagAcc) when TagAcc =/= none->
+          TagAcc;
+        (IndexType, [Value | _], none)->
+          {Field, Value, IndexType};
+        (_IndexType, _Values, none)->
+          none
+      end, none, TypeIndex)
+  end, none, Index).
 
 find_absent_oid(PatternID, ObjectID) when ObjectID >= 0->
   OID = {PatternID,ObjectID},
