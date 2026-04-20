@@ -22,3 +22,4 @@ src/ecomet_ql_parser.erl
 Mnesia.nonode@nohost/
 DB/*
 rebar.lock
+.codex
