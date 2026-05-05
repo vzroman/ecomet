@@ -62,7 +62,7 @@ init_per_suite(Config)->
   ?BACKEND_INIT(),
   Config.
 end_per_suite(_Config)->
-  ?BACKEND_STOP(30000),
+  ?BACKEND_STOP(),
   ok.
 
 check_name_test(_Config) ->

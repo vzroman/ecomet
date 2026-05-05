@@ -911,23 +911,18 @@ new_db_id(Other, I)->
   end.
 
 new_node_id()->
-  zaya:read( ?SCHEMA, [node_counter], write),
-  Id = new_node_id(zaya:next(?SCHEMA, #nodeId{k=-1}), 0),
+  % Node IDs are embedded into object OIDs, so reusing a freed node ID can
+  % recreate old OIDs when a replacement node starts its local counters from 0.
+  Id =
+    case zaya:read(?SCHEMA, [node_counter], write) of
+      [] -> 0;
+      [{_, LastId}] -> LastId + 1
+    end,
   if
-    Id < (1 bsl ?NODE_ID_LENGTH) -> Id;
+    Id < (1 bsl ?NODE_ID_LENGTH) ->
+      ok = zaya:write(?SCHEMA, [{node_counter, Id}], write),
+      Id;
     true -> throw({max_nodes_number_reached, (1 bsl ?NODE_ID_LENGTH) -1 })
-  end.
-new_node_id({#nodeId{k=NextId}, _}=Next, I) when NextId > I->
-  case zaya:read( ?SCHEMA, [#nodeId{k=I}], write) of
-    []-> I;
-    _-> new_node_id(Next, I+1)
-  end;
-new_node_id({#nodeId{k=Next}, _}, _I)->
-  new_node_id(zaya:next(?SCHEMA, #nodeId{k=Next}), Next+1);
-new_node_id(Other, I)->
-  case zaya:read( ?SCHEMA, [#nodeId{k=I}], write) of
-    []-> I;
-    _-> new_node_id(Other, I+1)
   end.
 
 init_tree(FolderID,Items)->

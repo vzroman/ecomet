@@ -31,13 +31,12 @@
   run_statements/1,
   get/3,get/4,
   subscribe/4,subscribe/5,
-  unsubscribe/1,
+  unsubscribe/1, unsubscribe/2,
   set/3,set/4,
   insert/2,
   delete/2,delete/3,
   compile/3,compile/4,
-  system/3,
-  query_object/2
+  system/3
 ]).
 
 %%====================================================================
@@ -208,18 +207,20 @@ subscribe(ID,DBs,Fields,Conditions,InParams) when is_list(InParams)->
 subscribe(ID,DBs,Fields,Conditions,InParams)->
 
   Params = #{
-    format := Formatter         % Format fields according to their types
+    format := Formatter,         % Format fields according to their types
+    client := Client
   } = maps:merge(#{
     stateless => false,
     no_feedback => false,
-    format => undefined
+    format => undefined,
+    client => self()
   },InParams),
 
   {Deps, Read} = compile_subscribe_read(Fields,Formatter),
 
-  ecomet_subscription:subscribe(#subscription{
+  init_subscription(#subscribe{
     id = ID,
-    owner = self(),
+    client = Client,
     dbs = DBs,
     read = Read,
     deps = Deps,
@@ -227,29 +228,88 @@ subscribe(ID,DBs,Fields,Conditions,InParams)->
     params = Params
   }).
 
+init_subscription(Subscribe = #subscribe{
+  client = Client,
+  conditions = {<<".oid">>,'=',OID}
+})->
+  %-----------Object subscription------------------------------
+  case ecomet_user:get_user_rights( Client ) of
+    {ok, _UG} ->
+      ecomet_subscription_object:subscribe(Subscribe#subscribe{
+        conditions = OID
+      });
+    _->
+      throw({client_not_authorized, Client})
+  end;
+init_subscription(Subscribe = #subscribe{
+  conditions = {<<".path">>,'=',Path}
+})->
+  init_subscription(Subscribe#subscribe{
+    conditions = {<<".oid">>,'=',?OID(Path)}
+  });
+init_subscription(Subscribe = #subscribe{
+  client = Client,
+  conditions = Conditions0
+})->
+  % Query subscription
+  case ecomet_user:get_user_rights( Client ) of
+    {ok, UG} when is_list(UG)->
+      ecomet_subscription_query:subscribe(Subscribe#subscribe{
+        conditions = {'AND',[
+          Conditions0,
+          {'OR',[{<<".readgroups">>,'=',GID}||GID<-UG]}
+        ]}
+      });
+    {ok, is_admin} ->
+      ecomet_subscription_query:subscribe(Subscribe);
+    _->
+      throw({client_not_authorized, Client})
+  end.
 
 compile_subscribe_read([<<".oid">>],_Formatter)->
   {
     [],
-    fun(_Object)-> #{} end
+    fun(_Updates, _FieldsValues)-> #{} end
   };
 compile_subscribe_read(['*'],Formatter) when is_function(Formatter,2)->
   ReadField =
     fun(Object,Field)->
       Value = maps:get(Field,Object,none),
-      {ok,Type}=ecomet_object:field_type(maps:get(object,Object),Field),
+      {ok,Type}=ecomet_object:field_type(maps:get(<<".object">>,Object),Field),
       Formatter(Type,Value)
     end,
 
   Read =
-    fun(Object)->
-      maps:map(fun(Field,_)-> ReadField(Object,Field) end,Object)
+    fun(Updates, FieldsValues)->
+      lists:foldl(
+        fun
+          (Field, Acc) when is_binary(Field)->
+            Value = ReadField(FieldsValues, Field),
+            Acc#{ Field => Value };
+          (_Field, Acc)->
+            % Skip virtual fields
+            Acc
+        end,
+        #{},
+        Updates
+      )
     end,
   {['*'], Read};
 compile_subscribe_read(['*'],_Formatter)->
   Read =
-    fun(Object)->
-      maps:map(fun(Field,_)-> maps:get(Field,Object,none) end,Object)
+    fun(Updates, FieldsValues)->
+      lists:foldl(
+        fun
+          (Field, Acc) when is_binary(Field)->
+            Value = maps:get(Field, FieldsValues, none),
+            Acc#{ Field => Value };
+          (_Field, Acc)->
+            % Skip virtual fields
+            Acc
+        end,
+        #{},
+        Updates
+      )
     end,
   { ['*'], Read };
 
@@ -264,16 +324,15 @@ compile_subscribe_read(Fields,Formatter)->
     end,[],ReadMap),
 
   Read =
-    fun(Object)->
-      Changed = ordsets:from_list( maps:keys( Object )),
+    fun(Updates, FieldsValues)->
       maps:fold(fun(_,#field{alias = Alias,value = #get{args = Args,value=Fun}},Acc)->
-        case ordsets:intersection(Changed,Args) of
+        case ordsets:intersection(Updates, Args) of
           []->
             % If the changes are not among the function arguments list the field is not affected
             Acc;
           _->
             % The value has to be recalculated
-            Acc#{Alias=>Fun(Object)}
+            Acc#{Alias=>Fun(FieldsValues)}
         end
       end,#{},ReadMap)
     end,
@@ -281,7 +340,10 @@ compile_subscribe_read(Fields,Formatter)->
 
 
 unsubscribe(ID)->
-  ecomet_subscription:unsubscribe( ID ).
+  unsubscribe(_Client = self(), ID).
+unsubscribe(Client, ID)->
+  ecomet_subscription_object:unsubscribe(Client, ID),
+  ecomet_subscription_query:unsubscribe(Client, ID).
 
 %%=====================================================================
 %%	SET
@@ -501,7 +563,7 @@ compile_map_reduce(set,Fields,Params)->
          % Formatted input
          Fun =
            fun(Object)->
-            {ok,Type} = ecomet_object:field_type(maps:get(object,Object),Field),
+            {ok,Type} = ecomet_object:field_type(maps:get(<<".object">>,Object),Field),
             Formatter(Type,Value)
            end,
          {Field,#get{
@@ -516,15 +578,15 @@ compile_map_reduce(set,Fields,Params)->
   ReadFields=ordsets:union([Args||{_,#get{args = Args}}<-Updates]),
   Update =
     fun(OID, Acc)->
-      case ReadUp(OID,ReadFields) of
-        #{object := not_exists} -> Acc;
-        ObjectMap ->
+      case ReadUp(OID,[<<".object">>,ReadFields]) of
+        #{<<".object">> := none} -> Acc;
+        #{<<".object">>:=Object} = ObjectMap ->
           NewValues=
             [{Name,case Value of
               #get{value = Fun}->Fun(ObjectMap);
               _->Value
              end}||{Name,Value}<-Updates],
-          ecomet_object:edit(maps:get(object,ObjectMap),maps:from_list(NewValues)),
+          ecomet_object:edit(Object,maps:from_list(NewValues)),
           Acc + 1
       end
     end,
@@ -551,9 +613,9 @@ compile_map_reduce(delete,none,Params)->
     fun(Results)->
       ecomet_resultset:foldl(fun(OID,Acc)->
         try
-          #{object:=Object}=ReadUp(OID,[]),
+          #{<<".object">>:=Object}=ReadUp(OID,[<<".object">>]),
           if
-            Object =/= not_exists ->
+            Object =/= none ->
               ecomet_object:delete(Object),
               Acc+1;
             true ->
@@ -649,7 +711,7 @@ map_reduce_plan(#{aggregate:=false}=Params)->
   LocalStorageFields=
     lists:foldl(fun(ID,Acc)->
       ordsets:union(field_args(maps:get(ID,Read)),Acc)
-    end,[],LocalReadUpFields),
+    end,[<<".oid">>,<<".object">>],LocalReadUpFields),
   GroupingFunList=
     [field_read_fun(maps:get(ID,Read))||ID<-GroupAndSortFields],
   OtherFieldsFunList=
@@ -685,7 +747,7 @@ map_reduce_plan(#{aggregate:=false}=Params)->
         OtherStorageFields=
           lists:foldl(fun(ID,Acc)->
             ordsets:union(field_args(maps:get(ID,Read)),Acc)
-          end,[],OtherFields),
+          end,[<<".oid">>,<<".object">>],OtherFields),
         fun(OID)->
           Object=ReadUp(OID,OtherStorageFields),
           LeafObjectFun(Object)
@@ -746,7 +808,7 @@ map_reduce_plan(#{group:=[]}=Params)->
   StorageFields=
     maps:fold(fun(_,#field{value = #get{args = Args}},Acc)->
       ordsets:union(Args,Acc)
-    end,[],Read),
+    end,[<<".oid">>,<<".object">>],Read),
 
   RowFieldsFunList=
     [F#field.value#get.value||{_,F}<-ordsets:from_list(maps:to_list(Read))],
@@ -906,14 +968,14 @@ read_fun('*',Formatter)->
   Read =
     if
       is_function(Formatter,2) ->
-        fun(#{object:=Object})->ecomet_object:read_all(Object,#{format=>Formatter}) end;
+        fun(#{<<".object">>:=Object})->ecomet_object:read_all(Object,#{format=>Formatter}) end;
       true ->
-        fun(#{object:=Object})->ecomet_object:read_all(Object) end
+        fun(#{<<".object">>:=Object})->ecomet_object:read_all(Object) end
     end,
 
   #get{
     value = Read,
-    args = []
+    args = [<<".object">>]
   };
 read_fun({Aggregate,Value},_Formatter) when (Aggregate=:=sum) or (Aggregate=:=max) or (Aggregate=:=min)->
   Get=read_fun(Value,undefined),
@@ -945,10 +1007,9 @@ read_fun(FieldName,Formatter) when is_binary(FieldName)->
   GetValue =
     fun(Fields)->
       case Fields of
-        #{FieldName:=Value}->Value;
-        #{object:=Object} when FieldName=:=<<".path">>->
-          ecomet:to_path(Object);
-        #{object:=Object}->
+        #{FieldName:=Value}->
+          Value;
+        #{<<".object">>:=Object}->
           case ecomet_object:field_type(Object,FieldName) of
             {ok,_}->none;
             _->undefined_field
@@ -963,16 +1024,23 @@ read_fun(FieldName,Formatter) when is_binary(FieldName)->
             undefined_field->
               Formatter(string,undefined_field);
             Value->
-              {ok,Type}=ecomet_object:field_type(maps:get(object,Object),FieldName),
+              {ok,Type}=ecomet_object:field_type(maps:get(<<".object">>,Object),FieldName),
               Formatter(Type,Value)
           end
         end;
       true ->
         GetValue
     end,
+  Args =
+    if
+      is_function(Formatter, 2) ->
+        ordsets:from_list([FieldName,<<".object">>]);
+      true ->
+        [FieldName]
+    end,
   #get{
     value = Fun,
-    args = [FieldName]
+    args = Args
   };
 read_fun(Field,_Formatter)->erlang:error({invalid_query_field,Field}).
 
@@ -995,25 +1063,18 @@ read_up(none, get)->
   % Optimized for reading case
   fun(OID,Fields)->
     Object=ecomet_object:construct(OID),
-    query_object( Object, ecomet_object:read_fields(Object,Fields) )
+    ecomet_object:read_fields(Object,Fields)
   end;
 read_up(Lock, _Any)->
   fun(OID,Fields)->
     try
       Object = ecomet_object:open(OID,Lock),
-      query_object( Object, ecomet_object:read_fields(Object,Fields) )
+      ecomet_object:read_fields(Object,Fields)
     catch
       _:not_exists->
-        NoneValues = maps:from_list([{F,none}||F<-Fields]),
-        NoneValues#{ object => not_exists, <<".oid">> => OID }
+        maps:from_list([{F,none}||F<-Fields])
     end
   end.
-
-query_object( Object, Fields )->
-  Fields#{
-    <<".oid">> => ecomet_object:get_oid( Object ),
-    object => Object
-  }.
 
 %%--------Local presorting----------------------------------
 % Tree level is sorted list of tuples - { Key, ItemList }.

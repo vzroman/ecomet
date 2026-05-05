@@ -29,10 +29,6 @@
 %%=================================================================
 -export([
   on_init/0,
-  %-------Subscriptions---------------
-  register_subscription/3,
-  remove_subscription/1,
-
   get_active_users/0,
   get_sessions/0,get_sessions/1
 ]).
@@ -62,39 +58,13 @@
 %%	Service API
 %%=================================================================
 on_init()->
+
   % Prepare the storage for sessions
   ets:new(?SESSIONS,[named_table,public,ordered_set,{keypos, #session.id}]),
   % prepare tokens for temporary session 
-  ets:new(?ECOMET_SESSION_TOKENS,[named_table,public,set]),	
-
-  % Initialize subscriptions
-  case ?ENV(disable_subscriptions, false) of
-    false -> ecomet_subscription:on_init();
-    _-> ignore
-  end,
+  ets:new(?ECOMET_SESSION_TOKENS,[named_table,public,set]),
 
   ok.
-
-register_subscription(Id, Params, Timeout)->
-  CallTimeout =
-    if
-      is_integer(Timeout) -> Timeout;
-      true -> ?TIMEOUT
-    end,
-  case ecomet_user:get_session() of
-    {ok,PID}->
-      gen_server:call(PID,{register_subscription,Id,Params},CallTimeout);
-    {error,Error}->
-      ?ERROR(Error)
-  end.
-
-remove_subscription(ID)->
-  case ecomet_user:get_session() of
-    {ok,PID}->
-      gen_server:cast(PID,{remove_subscription,ID});
-    {error,Error}->
-      ?ERROR(Error)
-  end.
 
 get_active_users()->
   get_active_users(ets:next(?SESSIONS,{})).

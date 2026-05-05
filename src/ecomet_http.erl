@@ -37,7 +37,7 @@
   terminate/3
 ]).
 
--define(DEFAULT_STOP_TIMEOUT,60000). % 1 min.
+-define(DEFAULT_STOP_TIMEOUT,100). % 100 ms
 
 listener(http,Params)->
   #{
@@ -48,7 +48,7 @@ listener(http,Params)->
       #{env => #{dispatch=> dispatch_rules()} }
     ]},
     restart=>permanent,
-    shutdown=>?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+    shutdown=>?DEFAULT_STOP_TIMEOUT,
     type=>worker,
     modules=>[cowboy]
   };
@@ -63,7 +63,7 @@ listener(https,Params)->
       #{env => #{dispatch=> dispatch_rules() } }
     ]},
     restart=>permanent,
-    shutdown=>?ENV(stop_timeout, ?DEFAULT_STOP_TIMEOUT),
+    shutdown=>?DEFAULT_STOP_TIMEOUT,
     type=>worker,
     modules=>[cowboy]
   }.
