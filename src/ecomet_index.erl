@@ -25,7 +25,8 @@
 -export([
   build_index/3,
   destroy_index/2,
-  prepare_write/3
+  prepare_write/3,
+  prepare_rollback/1
 ]).
 
 %% ====================================================================
@@ -348,6 +349,13 @@ prepare_write(Module, Ref, Updates)->
   maps:fold(fun(Tag, Patterns, Acc)->
     update_tag(Module, Ref, Tag, Patterns, Acc)
   end, {[],[]} , ByTags).
+
+prepare_rollback([{Key, true} | Rest])->
+  [{Key, false} | prepare_rollback(Rest)];
+prepare_rollback([{Key, false} | Rest])->
+  [{Key, true} | prepare_rollback(Rest)];
+prepare_rollback([])->
+  [].
 
 group_by_tags( Updates )->
   % #{

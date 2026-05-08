@@ -63,9 +63,8 @@
 %%	TRANSACTION API
 -export([
   commit/3,
-  commit1/3,
-  commit2/2,
-  rollback/2
+  prepare_rollback/3,
+  is_persistent/0
 ]).
 
 %%	INFO API
@@ -403,7 +402,6 @@ commit(Ref, KVs, Keys) when map_size( Ref ) =:= 1->
   commit( Ref, Data, Delete, IndexLog );
 
 commit(Ref, KVs, Keys)->
-
   {Data, IndexLog} = prepare_write( KVs ),
   Delete = prepare_delete( Keys ),
   case needs_log( Data, Delete ) of
@@ -411,26 +409,13 @@ commit(Ref, KVs, Keys)->
     true -> two_phase_commit( Ref, Data, Delete, IndexLog )
   end.
 
-commit1(_Ref, KVs, Keys)->
-  {KVs, Keys}.
-
-commit2(Ref, {KVs, Keys})->
-  commit( Ref, KVs, Keys ).
-
-rollback( _Ref, _TRef )->
-  ok.
+is_persistent()->
+  true.
 
 commit(Ref, Data, Delete, IndexLog)->
 
   Storages = get_commit_storages( Data, Delete ),
-  case Storages -- maps:keys( Ref ) of
-    [] -> ok;
-    Invalid ->
-      %% ATTENTION! If the user tries to save object with storage type
-      %% that is not in the DB then it will crash here
-      ?LOGERROR("attempt to save to not configured storage types: ~p",[ Invalid ]),
-      throw({ invalid_storage_type, Invalid })
-  end,
+  validate_commit_storages(Ref, Storages),
 
   % Order commit the heavier types go first
   CommitOrder = [ ramdisc, disc, ram ],
@@ -536,6 +521,50 @@ needs_log( Data, Delete )->
 
 get_commit_storages( Data, Delete )->
   lists:usort( maps:keys( Data ) ++ maps:keys( Delete )).
+
+validate_commit_storages( Ref, Storages )->
+  case Storages -- maps:keys( Ref ) of
+    [] -> ok;
+    Invalid ->
+      %% ATTENTION! If the user tries to save object with storage type
+      %% that is not in the DB then it will crash here
+      ?LOGERROR("attempt to save to not configured storage types: ~p",[ Invalid ]),
+      throw({ invalid_storage_type, Invalid })
+  end.
+
+prepare_rollback(Ref, KVs, Keys)->
+  {Data, IndexLog} = prepare_write( KVs ),
+  Delete = prepare_delete( Keys ),
+  validate_commit_storages( Ref, get_commit_storages( Data, Delete ) ),
+  {RollbackWrite, RollbackDelete} = prepare_data_rollback( Ref, Data, Delete ),
+  {RollbackWrite ++ prepare_index_rollback( IndexLog ), RollbackDelete}.
+
+
+prepare_data_rollback(Ref, Data, Delete)->
+  lists:foldl(fun(T, {WriteAcc, DeleteAcc})->
+    {Module, TRef} = maps:get(T, Ref),
+    TData = maps:get(T, Data, []),
+    TDelete = maps:get(T, Delete, []),
+    {RollbackWrite, RollbackDelete} = Module:prepare_rollback(TRef, TData, TDelete),
+    {
+      wrap_rollback_write(T, RollbackWrite) ++ WriteAcc,
+      wrap_rollback_delete(T, RollbackDelete) ++ DeleteAcc
+    }
+  end, {[],[]}, get_commit_storages( Data, Delete )).
+
+wrap_rollback_write(T, RollbackWrite)->
+  [{#key{type = T, storage = S, key = K}, V} || {{S, [K]}, V} <- RollbackWrite].
+
+wrap_rollback_delete(T, RollbackDelete)->
+  [#key{type = T, storage = S, key = K} || {S, [K]} <- RollbackDelete].
+
+prepare_index_rollback(IndexLog)->
+  maps:fold(fun(T, Updates, Acc)->
+    wrap_index_rollback(T, ecomet_index:prepare_rollback(Updates)) ++ Acc
+  end, [], IndexLog).
+
+wrap_index_rollback(T, RollbackWrite)->
+  [{#key{type = T, storage = ?INDEX, key = K}, V} || {K, V} <- RollbackWrite].
 
 %%=================================================================
 %%	INFO
