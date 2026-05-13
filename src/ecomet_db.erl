@@ -396,17 +396,17 @@ dump_batch(Ref, KVs)->
 
 %%	TRANSACTION
 %-------------Commit to a single storage
-commit(Ref, KVs, Keys) when map_size( Ref ) =:= 1->
-  {Data, IndexLog} = prepare_write( KVs ),
-  Delete = prepare_delete( Keys ),
-  commit( Ref, Data, Delete, IndexLog );
+commit(Ref, Write, Delete) when map_size( Ref ) =:= 1->
+  {Data, IndexLog} = prepare_write( Write ),
+  Delete1 = prepare_delete( Delete ),
+  commit( Ref, Data, Delete1, IndexLog );
 
-commit(Ref, KVs, Keys)->
-  {Data, IndexLog} = prepare_write( KVs ),
-  Delete = prepare_delete( Keys ),
-  case needs_log( Data, Delete ) of
-    false -> commit( Ref, Data, Delete, IndexLog );
-    true -> two_phase_commit( Ref, Data, Delete, IndexLog )
+commit(Ref, Write, Delete)->
+  {Data, IndexLog} = prepare_write( Write ),
+  Delete1 = prepare_delete( Delete ),
+  case needs_log( Data, Delete1 ) of
+    false -> commit( Ref, Data, Delete1, IndexLog );
+    true -> two_phase_commit( Ref, Data, Delete1, IndexLog )
   end.
 
 is_persistent()->
@@ -532,10 +532,70 @@ validate_commit_storages( Ref, Storages )->
       throw({ invalid_storage_type, Invalid })
   end.
 
-prepare_rollback(Ref, KVs, Keys)->
-  {Data, IndexLog} = prepare_write( KVs ),
-  Delete = prepare_delete( Keys ),
-  validate_commit_storages( Ref, get_commit_storages( Data, Delete ) ),
+prepare_rollback(Ref, Write, Delete)->
+  {Data, IndexLog} = prepare_write(Write),
+  Delete = prepare_delete( Delete ),
+
+  Storages = get_commit_storages( Data, Delete ),
+  validate_commit_storages( Ref, Storages),
+
+  lists:foldl(
+    fun(T, Acc)->
+      Acc1 = data_rollback(T, Ref, Data, Delete, Acc),
+      index_rollback(T, IndexLog, Acc1)
+    end,
+    {_WriteAcc = [], _DeleteAcc = []},
+    Storages
+  ).
+
+data_rollback(T, Ref, Data, Delete, Acc)->
+  {Module, TRef} = maps:get(T, Ref),
+  TData = maps:get(T, Data, []),
+  TDelete = maps:get(T, Delete, []),
+  Rollback = Module:prepare_rollback(TRef, TData, TDelete),
+  merge_rollback(T, Rollback, Acc).
+
+index_rollback(T, IndexLog, Acc)->
+  case maps:get(T, IndexLog, []) of
+    [] ->
+      Acc;
+    TIndex->
+      IndexRollback0 = ecomet_index:prepare_rollback(TIndex),
+      IndexRollback = [{{?INDEX,[K]}, V} || {K, V}<-IndexRollback0],
+      merge_rollback(T, {IndexRollback,[]}, Acc)
+  end.
+
+merge_rollback(T, {Write, Delete}, {WriteAcc, DeleteAcc})->
+  WriteAcc1 = merge_write(Write, T, WriteAcc),
+  DeleteAcc1 = merge_delete(Delete, T, DeleteAcc),
+  {WriteAcc1, DeleteAcc1}.
+
+merge_write([{{S,[K]},V}|Rest], T, Acc)->
+  Acc1 = [{#key{type = T, storage = S, key = K}, V}|Acc],
+  merge_write(Rest, T, Acc1);
+merge_write([], _T, Acc)->
+  Acc.
+
+
+wrap_key(T, {S, [K]})->
+  #key{type = T, storage = S, key = K}.
+
+prepare_rollback(Type, Ref, Module, Data, Delete, Index)->
+  {RWrite0, RDelete0} = Module:prepare_rollback(Ref, Data, Delete),
+  RWrite1 = [{wrap_key(Type, K), V} || {K, V} <- RWrite0],
+  RDelete = [wrap_key(Type, K) || K <- RDelete0],
+  RWrite =
+    if
+      Index =:= [] ->
+        RWrite1;
+      true ->
+        RIndex0 = ecomet_index:prepare_rollback(Index),
+        RIndex1 = [{ wrap_key(Type,{?INDEX,[K]}), V} ||{K,V} <- RIndex0],
+    end,
+  {RWrite, RDelete};
+prepare_rollback(Type, Ref, Module, Data, Delete, Index)->
+
+
   {RollbackWrite, RollbackDelete} = prepare_data_rollback( Ref, Data, Delete ),
   {RollbackWrite ++ prepare_index_rollback( IndexLog ), RollbackDelete}.
 
