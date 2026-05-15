@@ -120,7 +120,12 @@ subscribe(
       conditions = OID
     }
 )->
-  gen_server:call(?WORKER(OID), Subscription, ?CALL_TIMEOUT).
+  case ecomet_subscription_pool:get_size() of
+    0 ->
+      throw(subscriptions_off);
+    _->
+      gen_server:call(?WORKER(OID), Subscription, ?CALL_TIMEOUT)
+  end.
 
 unsubscribe(Client, SubsID)->
   [gen_server:cast(?NAME(N), {unsubscribe, Client, SubsID}) || N <-ecomet_subscription_pool:get_workers()],
@@ -132,7 +137,10 @@ unsubscribe(Client, SubsID)->
 on_commit( Log ) when length(Log) > 0->
   Nodes = ecomet_subscription_nodes:get_active(),
   ecall:cast_all(Nodes, ?MODULE , notify,[ Log ] ),
-  notify( Log );
+  case ecomet_subscription_pool:get_size() of
+    0 -> ignore;
+    _-> notify( Log )
+  end;
 on_commit( _Log )->
   ignore.
 

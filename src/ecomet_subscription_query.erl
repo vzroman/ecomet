@@ -81,7 +81,12 @@
 %%        API
 %%=================================================================
 subscribe(Subscription=#subscribe{ })->
-  gen_server:call(?MODULE, Subscription, ?CALL_TIMEOUT).
+  case whereis(?MODULE) of
+    PID when is_pid(PID) ->
+      gen_server:call(?MODULE, Subscription, ?CALL_TIMEOUT);
+    _->
+      throw(subscriptions_off)
+  end.
 
 unsubscribe(Client, SubsID)->
   gen_server:cast(?MODULE, {unsubscribe, Client, SubsID}),

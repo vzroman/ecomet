@@ -30,7 +30,7 @@
 %%        API
 %%=================================================================
 get_size()->
-  persistent_term:get({?MODULE,pool_size},[]).
+  persistent_term:get({?MODULE,pool_size},0).
 
 get_workers()->
   PoolSize = get_size(),
