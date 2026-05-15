@@ -2,7 +2,7 @@
 
 {suites, 'SUBSCRIPTIONS_TEST', [
     ecomet_subscription_pool_SUITE,
+    ecomet_subscription_routing_SUITE,
     ecomet_subscription_query_SUITE,
     ecomet_subscription_object_SUITE
 ]}.
-

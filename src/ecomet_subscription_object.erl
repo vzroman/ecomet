@@ -7,7 +7,8 @@
 
 -define(CALL_TIMEOUT, 60000).
 -define(NAME(N),list_to_atom("ecomet_subscription_object_"++integer_to_list(N))).
--define(WORKER(OID), ?NAME(erlang:phash2(OID, ecomet_subscription_pool:get_size()))).
+-define(WORKER(OID, Size), ?NAME(erlang:phash2(OID, Size))).
+-define(WORKER(OID), ?WORKER(OID, ecomet_subscription_pool:get_size())).
 -define(GLOBAL_SYNC_CYCLE_MS, 1000).
 
 %%=================================================================
@@ -22,8 +23,7 @@
 %%        Transaction API
 %%=================================================================
 -export([
-  on_commit/1,
-  notify/1
+  on_commit/1
 ]).
 
 %%=================================================================
@@ -134,20 +134,38 @@ unsubscribe(Client, SubsID)->
 %%=================================================================
 %%        Transaction API
 %%=================================================================
-on_commit( Log ) when length(Log) > 0->
-  Nodes = ecomet_subscription_nodes:get_active(),
-  ecall:cast_all(Nodes, ?MODULE , notify,[ Log ] ),
-  case ecomet_subscription_pool:get_size() of
-    0 -> ignore;
-    _-> notify( Log )
-  end;
+on_commit([_|_] = Log)->
+  Nodes = with_local_node(ecomet_subscription_nodes:get_active()),
+  broadcast(Log, Nodes),
+  ok;
 on_commit( _Log )->
   ignore.
 
-notify([#{oid := OID} = Log | Rest] )->
-  gen_server:cast(?WORKER(OID), {notify, Log}),
-  notify( Rest );
-notify([])->
+with_local_node(Nodes)->
+  case ecomet_subscription_pool:get_size() of
+    Size when is_integer(Size), Size > 0 ->
+      [{node(), Size} | Nodes];
+    _->
+      Nodes
+  end.
+
+broadcast([Log = #{oid := OID} | Rest], Nodes)->
+  Message = {notify, Log},
+  broadcast_nodes(Nodes, OID, Message),
+  broadcast(Rest, Nodes);
+broadcast([], _Nodes)->
+  ok.
+
+broadcast_nodes([{Node, Size}|Rest], OID, Message)->
+  Worker = ?WORKER(OID, Size),
+  if
+    node()=:=Node ->
+      Worker ! Message;
+    true ->
+      ecall:send({Worker, Node}, Message)
+  end,
+  broadcast_nodes(Rest, OID, Message);
+broadcast_nodes([], _OID, _Message)->
   ok.
 
 %%=================================================================
@@ -225,17 +243,6 @@ handle_call(Request, _From, State) ->
   ?LOGWARNING("unexpected call request ~p", [Request]),
   {noreply, State}.
 
-handle_cast({notify, Log}, State0) ->
-  ?LOGDEBUG("notify ~p",[Log]),
-  try
-    State = notify(Log, State0),
-    {noreply, State}
-  catch
-    _:E:S->
-      ?LOGERROR("notify error: log ~p, error ~p, stack ~p",[Log,E,S]),
-      {noreply, State0}
-  end;
-
 handle_cast({unsubscribe, Client, SubsID}, State0) ->
   ?LOGDEBUG("unsubscribe ~p ~p",[Client, SubsID]),
   try
@@ -305,6 +312,17 @@ handle_cast({global_reset, Tag, Version}, State0) ->
 handle_cast(Request,State) ->
   ?LOGWARNING("unexpected cast request ~p", [Request]),
   {noreply, State}.
+
+handle_info({notify, Log}, State0) ->
+  ?LOGDEBUG("notify ~p",[Log]),
+  try
+    State = notify(Log, State0),
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("notify error: log ~p, error ~p, stack ~p",[Log,E,S]),
+      {noreply, State0}
+  end;
 
 handle_info(global_sync, State0) ->
   State =

@@ -52,7 +52,8 @@
 
 -export([
   transform_test/1,
-  index_test/1
+  index_test/1,
+  query_get/3
 ]).
 
 
