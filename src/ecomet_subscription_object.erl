@@ -552,307 +552,6 @@ init_query_set(
 init_query_set(_NoWaitQuery, _Subscription, Set)->
   Set.
 
-%-------------------------------------------------------------------
-%  Verification
-%-------------------------------------------------------------------
-verify_state(State)->
-  State1 = verify_queries(State),
-  verify_objects(State1).
-
-verify_queries(State0 = #state{queries = Queries})->
-  case worker_name() of
-    undefined ->
-      ?LOGWARNING("subscription object verification could not resolve worker name"),
-      State0;
-    WorkerName ->
-      maps:fold(
-        fun
-          (Ref, #query{}, State)->
-            verify_query(WorkerName, Ref, State);
-          (_Ref, #wait_query{}, State)->
-            State;
-          (_Ref, _Query, State)->
-            State
-        end,
-        State0,
-        Queries
-      )
-  end.
-
-worker_name()->
-  Names = [
-    ?NAME(N)
-    || N <- ecomet_subscription_pool:get_workers(),
-       whereis(?NAME(N)) =:= self()
-  ],
-  case Names of
-    [Name] ->
-      Name;
-    _->
-      undefined
-  end.
-
-verify_query(
-    WorkerName,
-    Ref,
-    State0 = #state{
-      queries = Queries
-    }
-)->
-  try
-    case maps:get(Ref, Queries, undefined) of
-      #query{
-        dbs = DBs,
-        conditions = Conditions,
-        set = Set
-      }->
-        ActualSet0 = ecomet_query:system(DBs, rs, Conditions),
-        ActualOIDs = resultset_oids(ActualSet0, WorkerName),
-        StateOIDs = resultset_oids(Set),
-        AddOIDs = ordsets:subtract(ActualOIDs, StateOIDs),
-        DelOIDs = ordsets:subtract(StateOIDs, ActualOIDs),
-        State1 = verify_query_add(Ref, AddOIDs, State0),
-        verify_query_delete(Ref, DelOIDs, State1);
-      _->
-        State0
-    end
-  catch
-    _:E:S->
-      ?LOGERROR("subscription object verification query ~p error: ~p, stack ~p",[Ref,E,S]),
-      State0
-  end.
-
-resultset_oids(RS)->
-  ecomet_resultset:foldl(
-    fun(OID, Acc)->
-      ordsets:add_element(OID, Acc)
-    end,
-    [],
-    RS
-  ).
-
-resultset_oids(RS, WorkerName)->
-  ecomet_resultset:foldl(
-    fun(OID, Acc)->
-      case ?WORKER(OID) of
-        WorkerName ->
-          ordsets:add_element(OID, Acc);
-        _->
-          Acc
-      end
-    end,
-    [],
-    RS
-  ).
-
-verify_query_add(Ref, AddOIDs, State0)->
-  lists:foldl(
-    fun(OID, State)->
-      verify_query_add_oid(Ref, OID, State)
-    end,
-    State0,
-    AddOIDs
-  ).
-
-verify_query_add_oid(
-    Ref,
-    OID,
-    State0 = #state{
-      queries = Queries0,
-      objects = Objects0
-    }
-)->
-  try
-    case maps:get(Ref, Queries0, undefined) of
-      Query0 = #query{set = Set0}->
-        case ecomet_resultset:contains(OID, Set0) of
-          true ->
-            State0;
-          _->
-            Object = ecomet_object:construct(OID),
-            ActualFields = ecomet_object:read_all(Object),
-            Set = ecomet_resultset:add_oid(OID, Set0),
-            Query = Query0#query{set = Set},
-            Objects = add_queries_to_object(#{Ref => Query}, OID, ActualFields, Objects0),
-            State = State0#state{
-              queries = Queries0#{Ref => Query},
-              objects = Objects
-            },
-            ?LOGINFO("subscription object verification add object ~p to query ~p",[OID,Ref]),
-            queries_notify(
-              [Ref],
-              #{
-                oid => OID,
-                self => undefined,
-                action => create,
-                fields => ActualFields
-              },
-              State
-            ),
-            State
-        end;
-      _->
-        State0
-    end
-  catch
-    _:E:S->
-      ?LOGERROR(
-        "subscription object verification query ~p add object ~p error: ~p, stack ~p",
-        [Ref,OID,E,S]
-      ),
-      State0
-  end.
-
-verify_query_delete(Ref, DelOIDs, State0)->
-  lists:foldl(
-    fun(OID, State)->
-      verify_query_delete_oid(Ref, OID, State)
-    end,
-    State0,
-    DelOIDs
-  ).
-
-verify_query_delete_oid(
-    Ref,
-    OID,
-    State0 = #state{
-      queries = Queries0,
-      objects = Objects0
-    }
-)->
-  try
-    case maps:get(Ref, Queries0, undefined) of
-      Query0 = #query{set = Set0}->
-        case ecomet_resultset:contains(OID, Set0) of
-          false ->
-            State0;
-          _->
-            queries_notify(
-              [Ref],
-              #{oid => OID, self => undefined, action => delete},
-              State0
-            ),
-            Set = ecomet_resultset:remove_oid(OID, Set0),
-            Query = Query0#query{set = Set},
-            Objects = remove_queries_from_object(#{Ref => Query0}, OID, Objects0),
-            ?LOGINFO("subscription object verification remove object ~p from query ~p",[OID,Ref]),
-            State0#state{
-              queries = Queries0#{Ref => Query},
-              objects = Objects
-            }
-        end;
-      _->
-        State0
-    end
-  catch
-    _:E:S->
-      ?LOGERROR(
-        "subscription object verification query ~p delete object ~p error: ~p, stack ~p",
-        [Ref,OID,E,S]
-      ),
-      State0
-  end.
-
-verify_objects(State0 = #state{objects = Objects})->
-  lists:foldl(
-    fun(OID, State)->
-      verify_object(OID, State)
-    end,
-    State0,
-    maps:keys(Objects)
-  ).
-
-verify_object(
-    OID,
-    State0 = #state{
-      objects = Objects
-    }
-)->
-  try
-    case maps:get(OID, Objects, undefined) of
-      Object = #object{} ->
-        verify_object_state(OID, Object, State0);
-      _->
-        State0
-    end
-  catch
-    _:E:S->
-      ?LOGERROR("subscription object verification object ~p error: ~p, stack ~p",[OID,E,S]),
-      State0
-  end.
-
-verify_object_state(
-    OID,
-    #object{
-      instance = Object,
-      fields = Fields
-    },
-    State0
-)->
-  case ecomet_object:exists(OID) of
-    true ->
-      verify_object_fields(OID, Object, Fields, State0);
-    _->
-      ?LOGINFO("subscription object verification delete object ~p",[OID]),
-      notify(#{oid => OID, self => undefined, action => delete}, State0)
-  end.
-
-verify_object_fields(_OID, _Object, Fields, State0) when map_size(Fields) =:= 0->
-  State0;
-verify_object_fields(OID, Object, Fields, State0)->
-  case read_verification_fields(OID, Object, Fields, State0) of
-    {ok, ActualFields} ->
-      apply_verified_object_fields(OID, Fields, ActualFields, State0);
-    {delete, State} ->
-      State
-  end.
-
-read_verification_fields(OID, Object, Fields, State0)->
-  try
-    {ok, ecomet_object:read_fields(Object, maps:keys(Fields))}
-  catch
-    C:E:S->
-      case ecomet_object:exists(OID) of
-        false ->
-          ?LOGINFO("subscription object verification delete object ~p",[OID]),
-          {delete, notify(#{oid => OID, self => undefined, action => delete}, State0)};
-        _->
-          erlang:raise(C,E,S)
-      end
-  end.
-
-apply_verified_object_fields(OID, Fields, ActualFields, State0)->
-  ChangedFields =
-    maps:fold(
-      fun(Field, ActualValue, Acc)->
-        case maps:get(Field, Fields) of
-          ActualValue ->
-            Acc;
-          _StaleValue ->
-            Acc#{
-              Field => ActualValue
-            }
-        end
-      end,
-      #{},
-      ActualFields
-    ),
-  case map_size(ChangedFields) of
-    0 ->
-      State0;
-    _->
-      ?LOGINFO(
-        "subscription object verification update object ~p fields ~p",
-        [OID, maps:keys(ChangedFields)]
-      ),
-      notify(#{
-        oid => OID,
-        self => undefined,
-        action => light_update,
-        fields => ChangedFields
-      }, State0)
-  end.
-
 add_query_client(
     Ref,
     Subscription = #subscribe{
@@ -2416,3 +2115,236 @@ delete_object_from_clients(
     State0,
     ObjectClients
   ).
+
+%%===================================================================
+%%  Verification
+%%===================================================================
+verify_state(State)->
+  State1 = verify_queries(State),
+  verify_objects(State1).
+
+%--------------------------------------------------------------------
+% Verify queries
+%--------------------------------------------------------------------
+verify_queries(State0 = #state{queries = Queries})->
+  Worker = worker_name(),
+  maps:fold(
+    fun
+      (Ref, #query{}, State)->
+        verify_query(Worker, Ref, State);
+      (_Ref, _Query, State)->
+        State
+    end,
+    State0,
+    Queries
+  ).
+
+worker_name()->
+  Self = self(),
+  [N] = [N || N <- ecomet_subscription_pool:get_workers(), whereis(?NAME(N)) =:= Self],
+  ?NAME(N).
+
+verify_query(
+    WorkerName,
+    Ref,
+    State0 = #state{
+      queries = Queries
+    }
+)->
+  try
+    #query{
+      dbs = DBs,
+      conditions = Conditions,
+      set = Set
+    } = maps:get(Ref, Queries),
+
+    ActualSet0 = ecomet_query:system(DBs, rs, Conditions),
+    ActualOIDs = resultset_oids(ActualSet0, WorkerName),
+    StateOIDs = resultset_oids(Set),
+    AddOIDs = ActualOIDs -- StateOIDs,
+    DelOIDs = StateOIDs -- ActualOIDs,
+    State1 = verify_query_add(Ref, AddOIDs, State0),
+    verify_query_delete(Ref, DelOIDs, State1)
+  catch
+    _:E:S->
+      ?LOGERROR("subscription object verification query ~p error: ~p, stack ~p",[Ref,E,S]),
+      State0
+  end.
+
+resultset_oids(RS)->
+  lists:reverse(ecomet_resultset:foldl(
+    fun(OID, Acc)-> [OID|Acc] end,
+    [],
+    RS
+  )).
+
+resultset_oids(RS, WorkerName)->
+  lists:reverse(ecomet_resultset:foldl(
+    fun(OID, Acc)->
+      case ?WORKER(OID) of
+        WorkerName ->
+          [OID|Acc];
+        _->
+          Acc
+      end
+    end,
+    [],
+    RS
+  )).
+
+verify_query_add(Ref, AddOIDs, State0)->
+  lists:foldl(
+    fun(OID, State)->
+      verify_query_add_oid(Ref, OID, State)
+    end,
+    State0,
+    AddOIDs
+  ).
+
+verify_query_add_oid(
+    Ref,
+    OID,
+    State0 = #state{
+      queries = Queries0,
+      objects = Objects0
+    }
+)->
+  try
+    Query0 = #query{set = Set0} = maps:get(Ref, Queries0),
+    Object = ecomet_object:construct(OID),
+    ActualFields = ecomet_object:read_all(Object),
+    Set = ecomet_resultset:add_oid(OID, Set0),
+    Query = Query0#query{set = Set},
+    Objects = add_queries_to_object(#{Ref => Query}, OID, ActualFields, Objects0),
+    State = State0#state{
+      queries = Queries0#{Ref => Query},
+      objects = Objects
+    },
+    ?LOGINFO("subscription object verification add object ~p to query ~p",[OID,Ref]),
+    queries_notify(
+      [Ref],
+      #{
+        oid => OID,
+        self => undefined,
+        action => create,
+        fields => ActualFields
+      },
+      State
+    ),
+    State
+  catch
+    _:E:S->
+      ?LOGERROR(
+        "subscription object verification query ~p add object ~p error: ~p, stack ~p",
+        [Ref,OID,E,S]
+      ),
+      State0
+  end.
+
+verify_query_delete(Ref, DelOIDs, State0)->
+  lists:foldl(
+    fun(OID, State)->
+      verify_query_delete_oid(Ref, OID, State)
+    end,
+    State0,
+    DelOIDs
+  ).
+
+verify_query_delete_oid(
+    Ref,
+    OID,
+    State0 = #state{
+      queries = Queries0,
+      objects = Objects0
+    }
+)->
+  try
+    Query0 = #query{set = Set0} = maps:get(Ref, Queries0),
+    queries_notify(
+      [Ref],
+      #{oid => OID, self => undefined, action => delete},
+      State0
+    ),
+    Set = ecomet_resultset:remove_oid(OID, Set0),
+    Query = Query0#query{set = Set},
+    Objects = remove_queries_from_object(#{Ref => Query0}, OID, Objects0),
+    ?LOGINFO("subscription object verification remove object ~p from query ~p",[OID,Ref]),
+    State0#state{
+      queries = Queries0#{Ref => Query},
+      objects = Objects
+    }
+  catch
+    _:E:S->
+      ?LOGERROR(
+        "subscription object verification query ~p delete object ~p error: ~p, stack ~p",
+        [Ref,OID,E,S]
+      ),
+      State0
+  end.
+
+%--------------------------------------------------------------------
+% Verify objects
+%--------------------------------------------------------------------
+verify_objects(State0 = #state{objects = Objects})->
+  maps:fold(
+    fun(OID, Object, State)->
+      try
+        verify_object_state(OID, Object, State)
+      catch
+        _:E:S->
+          ?LOGERROR("subscription object verification object ~p error: ~p, stack ~p",[OID,E,S]),
+          State
+      end
+    end,
+    State0,
+    Objects
+  ).
+
+verify_object_state(
+    OID,
+    #object{
+      instance = Object,
+      fields = Fields
+    },
+    State0
+)->
+  case ecomet_object:exists(OID) of
+    true ->
+      verify_object_fields(OID, Object, Fields, State0);
+    _->
+      ?LOGINFO("subscription object verification delete object ~p",[OID]),
+      notify(#{oid => OID, self => undefined, action => delete}, State0)
+  end.
+
+verify_object_fields(OID, Object, Fields, State0)->
+  ActualFields = ecomet_object:read_fields(Object, maps:keys(Fields)),
+  ChangedFields =
+    maps:fold(
+      fun(Field, ActualValue, Acc)->
+        case maps:get(Field, Fields) of
+          ActualValue ->
+            Acc;
+          _StaleValue ->
+            Acc#{
+              Field => ActualValue
+            }
+        end
+      end,
+      #{},
+      ActualFields
+    ),
+  case map_size(ChangedFields) of
+    0 ->
+      State0;
+    _->
+      ?LOGINFO(
+        "subscription object verification update object ~p fields ~p",
+        [OID, maps:keys(ChangedFields)]
+      ),
+      notify(#{
+        oid => OID,
+        self => undefined,
+        action => light_update,
+        fields => ChangedFields
+      }, State0)
+  end.
