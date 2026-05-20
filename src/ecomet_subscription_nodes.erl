@@ -4,6 +4,12 @@
 
 -include("ecomet.hrl").
 
+-ifdef(TEST).
+-define(SPLIT_BRAIN_VERIFY_DELAY_MS, 10).
+-else.
+-define(SPLIT_BRAIN_VERIFY_DELAY_MS, 60000).
+-endif.
+
 %%=================================================================
 %%        API
 %%=================================================================
@@ -73,6 +79,8 @@ init([IsActive]) ->
   ActiveNodes = request_pool_sizes(remote_nodes(PIDs)),
   persistent_term:put({?MODULE, ready_nodes }, ActiveNodes),
 
+  zaya:schema_subscribe(self()),
+
   {ok, #state{
     monitor_ref = Ref
   }}.
@@ -111,6 +119,22 @@ handle_info({Ref, leave, ?MODULE, PIDs}, #state{
 
   persistent_term:put({?MODULE, ready_nodes }, ActiveNodes),
 
+  {noreply, State};
+
+handle_info({split_brain, Node}, State) ->
+  ?LOGWARNING(
+    "split brain event from ~p, verify subscriptions in ~p ms",
+    [Node, ?SPLIT_BRAIN_VERIFY_DELAY_MS]
+  ),
+  erlang:send_after(
+    ?SPLIT_BRAIN_VERIFY_DELAY_MS,
+    self(),
+    split_brain_verify
+  ),
+  {noreply, State};
+
+handle_info(split_brain_verify, State) ->
+  ecomet_subscription_object:verify(),
   {noreply, State};
 
 handle_info(Info, State) ->

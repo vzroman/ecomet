@@ -82,6 +82,7 @@ init_per_testcase(_,Config)->
   Config.
 
 end_per_testcase(_,_Config)->
+  catch meck:unload(zaya),
   ok.
 
 %--------------------------------------------------------------
@@ -92,6 +93,7 @@ transform_test(_Config) ->
 
   meck:new(ecomet_query, [passthrough]),
   meck:expect(ecomet_query, system, fun ?MODULE:query_get/3),
+  mock_schema_subscribe(),
 
   {ok, _} = ecomet_subscription_sup:start_link(),
   QueryServer = whereis(ecomet_subscription_query),
@@ -405,6 +407,7 @@ index_test(_Config) ->
   meck:expect(ecomet_query, system, fun ?MODULE:query_get/3),
   meck:new(ecomet_schema, [passthrough]),
   meck:expect(ecomet_schema, get_db_tags, fun(_DB)->[] end),
+  mock_schema_subscribe(),
 
   ok = ensure_subscription_sup_started(),
 
@@ -691,6 +694,11 @@ index_test(_Config) ->
 %--------------------------------------------------------------
 query_get(_DBs,_Fields, _Conditions)->
   ecomet_resultset:new().
+
+mock_schema_subscribe()->
+  catch meck:unload(zaya),
+  meck:new(zaya, [passthrough]),
+  meck:expect(zaya, schema_subscribe, fun(_Pid)-> ok end).
 
 ensure_subscription_sup_started()->
   case whereis(ecomet_subscription_sup) of

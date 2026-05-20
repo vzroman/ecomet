@@ -17,6 +17,7 @@
 -export([
   notify_local_worker_test/1,
   notify_remote_worker_test/1,
+  nodes_split_brain_verifies_after_delay_test/1,
   nodes_request_pool_sizes_test/1,
   on_commit_routes_to_remote_and_local_workers_test/1
 ]).
@@ -28,6 +29,7 @@ all()->
   [
     notify_local_worker_test,
     notify_remote_worker_test,
+    nodes_split_brain_verifies_after_delay_test,
     nodes_request_pool_sizes_test,
     on_commit_routes_to_remote_and_local_workers_test
   ].
@@ -52,6 +54,8 @@ init_per_testcase(_, Config)->
 
 end_per_testcase(_, _Config)->
   catch meck:unload(ecall),
+  catch meck:unload(zaya),
+  catch meck:unload(ecomet_subscription_object),
   catch meck:unload(ecomet_subscription_nodes),
   catch meck:unload(ecomet_subscription_pool),
   ok.
@@ -116,6 +120,35 @@ nodes_request_pool_sizes_test(_Config) ->
     [{node_a, 3}, {node_b, 5}],
     lists:sort(ecomet_subscription_nodes:request_pool_sizes([node_b, node_a]))
   ).
+
+nodes_split_brain_verifies_after_delay_test(_Config) ->
+  Owner = self(),
+
+  meck:new(zaya, [passthrough]),
+  meck:expect(zaya, schema_subscribe, fun(Pid) ->
+    Owner ! {schema_subscribe, Pid},
+    ok
+  end),
+
+  meck:new(ecomet_subscription_object, [passthrough]),
+  meck:expect(ecomet_subscription_object, verify, fun() ->
+    Owner ! verify_called,
+    ok
+  end),
+
+  {ok, Pid} = ecomet_subscription_nodes:start_link(false),
+  ?assertEqual({schema_subscribe, Pid}, receive_schema_subscribe()),
+
+  Pid ! {split_brain, remote_node},
+  receive
+    verify_called->
+      error(verify_called_without_delay)
+  after 0 ->
+    ok
+  end,
+
+  ?assertEqual(verify_called, receive_verify_called()),
+  gen_server:stop(Pid).
 
 on_commit_routes_to_remote_and_local_workers_test(_Config) ->
   Owner = self(),
@@ -182,4 +215,20 @@ receive_ecall_send() ->
       {ecall_send, To, Message}
   after 1000 ->
     error(ecall_send_timeout)
+  end.
+
+receive_schema_subscribe() ->
+  receive
+    {schema_subscribe, Pid}->
+      {schema_subscribe, Pid}
+  after 1000 ->
+    error(schema_subscribe_timeout)
+  end.
+
+receive_verify_called() ->
+  receive
+    verify_called->
+      verify_called
+  after 1000 ->
+    error(verify_called_timeout)
   end.
