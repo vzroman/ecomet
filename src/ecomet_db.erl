@@ -534,14 +534,14 @@ validate_commit_storages( Ref, Storages )->
 
 prepare_rollback(Ref, Write, Delete)->
   {Data, IndexLog} = prepare_write(Write),
-  Delete = prepare_delete( Delete ),
+  Delete1 = prepare_delete( Delete ),
 
-  Storages = get_commit_storages( Data, Delete ),
-  validate_commit_storages( Ref, Storages),
+  Storages = get_commit_storages( Data, Delete1 ),
+  validate_commit_storages(Ref, Storages),
 
   lists:foldl(
     fun(T, Acc)->
-      Acc1 = data_rollback(T, Ref, Data, Delete, Acc),
+      Acc1 = data_rollback(T, Ref, Data, Delete1, Acc),
       index_rollback(T, IndexLog, Acc1)
     end,
     {_WriteAcc = [], _DeleteAcc = []},
@@ -576,55 +576,11 @@ merge_write([{{S,[K]},V}|Rest], T, Acc)->
 merge_write([], _T, Acc)->
   Acc.
 
-
-wrap_key(T, {S, [K]})->
-  #key{type = T, storage = S, key = K}.
-
-prepare_rollback(Type, Ref, Module, Data, Delete, Index)->
-  {RWrite0, RDelete0} = Module:prepare_rollback(Ref, Data, Delete),
-  RWrite1 = [{wrap_key(Type, K), V} || {K, V} <- RWrite0],
-  RDelete = [wrap_key(Type, K) || K <- RDelete0],
-  RWrite =
-    if
-      Index =:= [] ->
-        RWrite1;
-      true ->
-        RIndex0 = ecomet_index:prepare_rollback(Index),
-        RIndex1 = [{ wrap_key(Type,{?INDEX,[K]}), V} ||{K,V} <- RIndex0],
-    end,
-  {RWrite, RDelete};
-prepare_rollback(Type, Ref, Module, Data, Delete, Index)->
-
-
-  {RollbackWrite, RollbackDelete} = prepare_data_rollback( Ref, Data, Delete ),
-  {RollbackWrite ++ prepare_index_rollback( IndexLog ), RollbackDelete}.
-
-
-prepare_data_rollback(Ref, Data, Delete)->
-  lists:foldl(fun(T, {WriteAcc, DeleteAcc})->
-    {Module, TRef} = maps:get(T, Ref),
-    TData = maps:get(T, Data, []),
-    TDelete = maps:get(T, Delete, []),
-    {RollbackWrite, RollbackDelete} = Module:prepare_rollback(TRef, TData, TDelete),
-    {
-      wrap_rollback_write(T, RollbackWrite) ++ WriteAcc,
-      wrap_rollback_delete(T, RollbackDelete) ++ DeleteAcc
-    }
-  end, {[],[]}, get_commit_storages( Data, Delete )).
-
-wrap_rollback_write(T, RollbackWrite)->
-  [{#key{type = T, storage = S, key = K}, V} || {{S, [K]}, V} <- RollbackWrite].
-
-wrap_rollback_delete(T, RollbackDelete)->
-  [#key{type = T, storage = S, key = K} || {S, [K]} <- RollbackDelete].
-
-prepare_index_rollback(IndexLog)->
-  maps:fold(fun(T, Updates, Acc)->
-    wrap_index_rollback(T, ecomet_index:prepare_rollback(Updates)) ++ Acc
-  end, [], IndexLog).
-
-wrap_index_rollback(T, RollbackWrite)->
-  [{#key{type = T, storage = ?INDEX, key = K}, V} || {K, V} <- RollbackWrite].
+merge_delete([{S,[K]}|Rest], T, Acc)->
+  Acc1 = [#key{type = T, storage = S, key = K}|Acc],
+  merge_delete(Rest, T, Acc1);
+merge_delete([], _T, Acc)->
+  Acc.
 
 %%=================================================================
 %%	INFO

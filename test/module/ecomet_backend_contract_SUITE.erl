@@ -35,7 +35,7 @@
   db_prepare_rollback_returns_public_keys_for_data/1,
   db_prepare_rollback_routes_boolean_indexes_through_ecomet_index/1,
   db_commit_can_apply_prepared_mixed_rollback/1,
-  db_commit_can_apply_prepared_index_only_rollback/1
+  db_commit_can_apply_prepared_delete_with_index_rollback/1
 ]).
 
 %% Test backend API
@@ -54,7 +54,7 @@ all()->
     db_prepare_rollback_returns_public_keys_for_data,
     db_prepare_rollback_routes_boolean_indexes_through_ecomet_index,
     db_commit_can_apply_prepared_mixed_rollback,
-    db_commit_can_apply_prepared_index_only_rollback
+    db_commit_can_apply_prepared_delete_with_index_rollback
   ].
 
 groups()->
@@ -113,20 +113,23 @@ db_prepare_rollback_returns_public_keys_for_data(_Config)->
 
 db_prepare_rollback_routes_boolean_indexes_through_ecomet_index(_Config)->
   with_ref(fun(Ref)->
+    DataKey = #key{type = ram, storage = ?DATA, key = item},
     AddKey = {{<<"field">>, <<"value">>, simple}, [idl, 1, 0, 1]},
     DelKey = {{<<"field">>, <<"old">>, simple}, [idl, 1, 0, 1]},
     Write = [
+      {DataKey, new_value},
       {#key{type = ram, storage = ?INDEX, key = AddKey}, true},
       {#key{type = ram, storage = ?INDEX, key = DelKey}, false}
     ],
 
-    {RollbackWrite, []} = ecomet_db:prepare_rollback(Ref, Write, []),
+    {RollbackWrite, RollbackDelete} = ecomet_db:prepare_rollback(Ref, Write, []),
 
     Expected = [
       {#key{type = ram, storage = ?INDEX, key = AddKey}, false},
       {#key{type = ram, storage = ?INDEX, key = DelKey}, true}
     ],
-    ?assertEqual(lists:sort(Expected), lists:sort(RollbackWrite))
+    ?assertEqual(lists:sort(Expected), lists:sort(RollbackWrite)),
+    ?assertEqual([DataKey], RollbackDelete)
   end).
 
 db_commit_can_apply_prepared_mixed_rollback(_Config)->
@@ -150,21 +153,33 @@ db_commit_can_apply_prepared_mixed_rollback(_Config)->
     ?assertEqual([], find(RamRef, #{}))
   end).
 
-db_commit_can_apply_prepared_index_only_rollback(_Config)->
+db_commit_can_apply_prepared_delete_with_index_rollback(_Config)->
   with_ref(fun(Ref = #{ram := {_, RamRef}})->
+    DataKey = #key{type = ram, storage = ?DATA, key = item},
     IndexKey = {{<<"field">>, <<"value">>, simple}, [idl, 1, 0, 1]},
     IndexWrite = #key{type = ram, storage = ?INDEX, key = IndexKey},
-    ForwardWrite = [
+    ok = ecomet_db:commit(Ref, [
+      {DataKey, old_value},
       {IndexWrite, true}
-    ],
-
-    {RollbackWrite, []} = ecomet_db:prepare_rollback(Ref, ForwardWrite, []),
-    ok = ecomet_db:commit(Ref, ForwardWrite, []),
+    ], []),
+    [{_, old_value}] = read(RamRef, [{?DATA, [item]}]),
     [_ | _] = find(RamRef, #{}),
 
-    ok = ecomet_db:commit(Ref, RollbackWrite, []),
+    ForwardDelete = [DataKey],
+    ForwardWrite = [
+      {IndexWrite, false}
+    ],
 
-    ?assertEqual([], find(RamRef, #{}))
+    {RollbackWrite, RollbackDelete} =
+      ecomet_db:prepare_rollback(Ref, ForwardWrite, ForwardDelete),
+    ok = ecomet_db:commit(Ref, ForwardWrite, ForwardDelete),
+    [] = read(RamRef, [{?DATA, [item]}]),
+    ?assertEqual([], find(RamRef, #{})),
+
+    ok = ecomet_db:commit(Ref, RollbackWrite, RollbackDelete),
+
+    [{_, old_value}] = read(RamRef, [{?DATA, [item]}]),
+    [_ | _] = find(RamRef, #{})
   end).
 
 with_ref(Fun)->
