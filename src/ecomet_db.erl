@@ -28,6 +28,11 @@
   storages,
   tlog = undefined
 }).
+-record(commit,{
+  write,
+  delete,
+  index
+}).
 
 %%	SERVICE API
 -export([
@@ -172,6 +177,7 @@ wait_dbs( DBs )->
 %%=================================================================
 %%	SERVICE
 create( Params )->
+  %----------------Create storages---------------------------------
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
   Storages = maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
@@ -192,14 +198,25 @@ create( Params )->
         throw(E)
     end
   end,#{}, TypesParams ),
-  try open_ref(Params, Storages, create)
-  catch
-    Class:Reason:Stack ->
-      cleanup_storages(Storages),
-      erlang:raise(Class, Reason, Stack)
-  end.
+
+  %----------------Create transaction log-----------------------------
+  TLog =
+    try init_tlog(Params, create)
+    catch
+      Class:Reason:Stack ->
+        catch close_storages(Storages),
+        catch remove(Params),
+        erlang:raise(Class, Reason, Stack)
+    end,
+
+  #ref{
+    name = maps:get(name, Params),
+    storages = Storages,
+    tlog = TLog
+  }.
 
 open( Params )->
+  %----------------Open storages---------------------------------
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
   Storages = maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
@@ -219,82 +236,50 @@ open( Params )->
         throw(E)
     end
   end,#{}, TypesParams ),
-  Ref =
-    try open_ref(Params, Storages, open)
-    catch
-      Class:Reason:Stack ->
-        cleanup_storages(Storages),
-        erlang:raise(Class, Reason, Stack)
-    end,
-  try
-    ok = replay_tlog(Ref),
-    Ref
-  catch
-    Class1:Reason1:Stack1 ->
-      catch close(Ref),
-      erlang:raise(Class1, Reason1, Stack1)
-  end.
 
-open_ref(#{dir := Dir} = Params, Storages, Action)->
+  %----------------Open transaction log-----------------------------
   TLog =
-    case has_persistent_storage(Storages) of
-      true ->
-        case Action of
-          create -> ecomet_tlog:create(Dir);
-          open -> ecomet_tlog:open(Dir)
-        end;
-      false ->
-        undefined
+    try init_tlog(Params, open)
+    catch
+      C0:R0:S0 ->
+        close_storages(Storages),
+        erlang:raise(C0, R0, S0)
     end,
-  #ref{
+
+  Ref = #ref{
     name = maps:get(name, Params),
     storages = Storages,
     tlog = TLog
-  }.
+  },
+  %----------------Replay transaction log----------------------------
+  try replay_tlog(Ref)
+  catch
+    C1:R1:S1 ->
+      catch close(Ref),
+      erlang:raise(C1, R1, S1)
+  end,
 
-has_persistent_storage(Storages)->
-  lists:any(fun({_Type,{Module,_TRef}})->
-    Module:is_persistent()
-  end, maps:to_list(Storages)).
+  Ref.
 
-type_params(Type, Params, #{dir := Dir} = OtherParams )->
-  maps:merge( OtherParams#{ dir => Dir ++ "/" ++ atom_to_list(Type) }, maps:without([dir],Params) ).
-
-close( #ref{storages = Storages} = Ref )->
-  InitErrors =
-    case close_tlog(Ref) of
-      ok -> [];
-      {error, TLogErr} -> [TLogErr]
-    end,
-  case maps:fold(fun(_Type,{Module, TRef},Errs)->
-    try
-      Module:close( TRef ),
-      Errs
-    catch
-      _:E->[E|Errs]
-    end
-  end, InitErrors, Storages ) of
-    []->ok;
-    Errors->
-      throw(Errors)
+close(#ref{storages = Storages,tlog = TLog})->
+  case close_tlog(TLog) ++ close_storages(Storages) of
+    [] -> ok;
+    Errors -> throw(Errors)
   end.
 
-cleanup_storages(Storages)->
-  maps:map(fun(_Type,{Module, TRef})->
-    catch Module:close(TRef)
-  end, Storages),
-  ok.
-
-close_tlog(#ref{tlog = TLog})->
-  try
-    ecomet_tlog:close(TLog),
-    ok
-  catch
-    _:E -> {error, E}
-  end;
-close_tlog(_Ref)->
-  ok.
-
+close_storages(Storages)->
+  maps:fold(
+    fun(_Type,{Module, TRef},Errs)->
+      try
+        Module:close( TRef ),
+        Errs
+      catch
+        _:E->[E|Errs]
+      end
+    end,
+    [],
+    Storages
+  ).
 
 remove( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
@@ -311,21 +296,59 @@ remove( Params )->
     Errors->
       throw(Errors)
   end,
-  remove_tlog(Params, TypesParams).
+  remove_tlog(Params),
+  ok.
 
-remove_tlog(#{dir := Dir}, TypesParams)->
-  case has_persistent_params(TypesParams) of
+is_persistent(Params)->
+  TypesParams = maps:with(?STORAGE_TYPES, Params),
+  lists:any(
+    fun({_Type, #{module := Module}})->
+      Module:is_persistent()
+    end,
+    maps:to_list(TypesParams)
+  ).
+
+type_params(Type, Params, #{dir := Dir} = OtherParams )->
+  maps:merge( OtherParams#{ dir => Dir ++ "/" ++ atom_to_list(Type) }, maps:without([dir],Params) ).
+
+%%--------------------------------------------------------------
+%% Transaction log utilities
+%%--------------------------------------------------------------
+init_tlog(#{dir := Dir} = Params, Action)->
+  case is_persistent(Params) of
+    true ->
+      ecomet_tlog:Action(Dir);
+    false ->
+      undefined
+  end.
+
+replay_tlog(#ref{tlog = undefined})->
+  ok;
+replay_tlog(#ref{tlog = TLog} = Ref)->
+  ecomet_tlog:replay(
+    TLog,
+    fun(#commit{write = Write, delete = Delete, index = Index})->
+      commit(Ref, Write, Delete, Index)
+    end).
+
+close_tlog(undefined)->
+  [];
+close_tlog(TLog)->
+  try
+    ecomet_tlog:close(TLog),
+    []
+  catch
+    _:E -> [E]
+  end.
+
+remove_tlog(#{dir := Dir} = Params)->
+  case is_persistent(Params) of
     true -> ecomet_tlog:remove(Dir);
     false -> ok
   end.
 
-has_persistent_params(TypesParams)->
-  lists:any(fun({_Type, #{module := Module}})->
-    Module:is_persistent()
-  end, maps:to_list(TypesParams)).
-
 %%	LOW_LEVEL
-read( #ref{storages = Storages}= Ref, [#key{type = T,storage = S,key = K}=Key|Rest])->
+read(#ref{storages = Storages}= Ref, [#key{type = T,storage = S,key = K}=Key|Rest])->
   case Storages of
     #{ T := {Module, TRef} }->
       case try Module:read(TRef, [{S,[K]}]) catch _:_->error end of
@@ -487,25 +510,24 @@ commit(Ref, Write, Delete)->
   {Data, IndexLog} = prepare_write( Write ),
   Delete1 = prepare_delete( Delete ),
   case needs_log( Data, Delete1 ) of
-    false -> commit( Ref, Data, Delete1, IndexLog );
-    true -> two_phase_commit( Ref, Data, Delete1, IndexLog )
+    false -> commit(Ref, Data, Delete1, IndexLog);
+    true -> two_phase_commit(Ref, Data, Delete1, IndexLog)
   end.
 
 is_persistent()->
   true.
 
-commit(Ref, Data, Delete, IndexLog)->
+commit(#ref{storages = Storages}, Data, Delete, IndexLog)->
 
-  StoragesRef = storages(Ref),
-  Storages = get_commit_storages( Data, Delete ),
-  validate_commit_storages(StoragesRef, Storages),
+  CommitTo = get_commit_storages( Data, Delete ),
+  validate_commit_storages(Storages, CommitTo),
 
   % Order commit the heavier types go first
   CommitOrder = [ ramdisc, disc, ram ],
-  Ordered = CommitOrder -- ( CommitOrder -- Storages ),
+  Ordered = CommitOrder -- ( CommitOrder -- CommitTo ),
 
   [ begin
-      { Module, TRef } = maps:get(T, StoragesRef),
+      { Module, TRef } = maps:get(T, Storages),
       TData = maps:get( T, Data, none ),
       TDelete = maps:get( T, Delete, none ),
       TIndexLog = maps:get( T, IndexLog, none ),
@@ -566,78 +588,98 @@ commit(Ref, Module, Data, Delete, IndexLog)->
         Module:commit( Ref, Data ++ IndexWrite, Delete);
       length( IndexWrite ) =:= 0->
         Module:commit( Ref, Data, Delete ++ IndexDel);
-      true ->{1, _} -> commit( Ref, Data, Delete1, IndexLog );
+      true ->
         Module:commit( Ref, Data ++ IndexWrite, Delete ++ IndexDel)
     end
   after
     Unlock()
   end.
 
-two_phase_commit( Ref, Write, Delete0, Data, Delete, IndexLog )->
-  case tlog(Ref) of
-    undefined ->
-      commit( Ref, Data, Delete, IndexLog );
-    TLog ->
-      Seq = ecomet_tlog:seq(TLog),
-      Key = {commit, Seq},
-      ok = ecomet_tlog:commit(TLog, [{Key, {Write, Delete0}}], []),
-      try commit_logged(Ref, TLog, Key, Data, Delete, IndexLog)
+two_phase_commit(#ref{tlog = TLog, storages = Storages, name = Name} = Ref, Write, Delete, Index)->
+  %---------------PHASE 1-----------------------
+  CommitTo = get_commit_storages(Write, Delete),
+  validate_commit_storages(Storages, CommitTo),
+  Commit = #commit{
+    write = Write,
+    delete = Delete,
+    index = Index
+  },
+  TRef = ecomet_tlog:add(TLog, Commit),
+
+  %-------------PHASE 2-------------------------
+  CommitOrder = [ ramdisc, disc, ram ],
+  Ordered = CommitOrder -- (CommitOrder -- CommitTo),
+  Committed = apply_commit(Ordered, Ref, Commit, []),
+
+  if
+    length(Committed) =:= length(CommitTo)->
+      % Confirm commit
+      ecomet_tlog:delete(TLog, TRef);
+    length(Committed) =:= 0->
+      % Nothing is committed - rollback
+      try ecomet_tlog:delete(TLog, TRef)
       catch
-        Class:Reason:Stack ->
-          catch ecomet_tlog:commit(TLog, [], [Key]),
-          erlang:raise(Class, Reason, Stack)
+        _:E->
+          ?LOGWARNING("~p ROLLBACK ERROR: ~p. Init database recovery",[Name,E]),
+          init_recovery(Name)
+      end,
+      throw({commit_error, hd(CommitTo)});
+    true ->
+      % Partial commit, init database recovery
+      ?LOGWARNING("~p PARTIAL COMMIT. Init database recovery",[Name]),
+      init_recovery(Name)
+  end,
+  ok.
+
+apply_commit(
+    [T|Rest],
+    Ref = #ref{
+      name = Name,
+      storages = Storages
+    },
+    Commit = #commit{
+      write = Write,
+      delete = Delete,
+      index = Index
+    },
+    Acc
+)->
+  {Module, TRef} = maps:get(T, Storages),
+  TWrite = maps:get(T, Write, none),
+  TDelete = maps:get(T, Delete, none),
+  TIndex = maps:get(T, Index, none),
+  case
+    try
+      commit(TRef, Module, TWrite, TDelete, TIndex),
+      ok
+    catch
+      _:E:S->
+        ?LOGERROR("~p commit error to ~p, error: ~p, stack: ~p",[
+          Name, T, E, S
+        ]),
+        error
+    end
+  of
+    ok ->
+      apply_commit(Rest, Ref, Commit, [T|Acc]);
+    error ->
+      if
+        Acc =:= []->
+          % Nothing is committed yet, interrupt
+          Acc;
+        true ->
+          % Already partially committed
+          apply_commit(Rest, Ref, Commit, Acc)
       end
   end.
 
-commit_logged(Ref, TLog, Key, Data, Delete, IndexLog)->
-  StoragesRef = storages(Ref),
-  CommitStorages = get_commit_storages(Data, Delete),
-  validate_commit_storages(StoragesRef, CommitStorages),
-  CommitOrder = [ ramdisc, disc, ram ],
-  Ordered = CommitOrder -- ( CommitOrder -- CommitStorages ),
-  case do_commit_logged(Ordered, StoragesRef, Data, Delete, IndexLog, _PersistentAccepted = false, _HadError = false, Ref) of
-    ok ->
-      ok = ecomet_tlog:commit(TLog, [], [Key]);
-    recover ->
-      ok
-  end.
-
-do_commit_logged([T|Rest], StoragesRef, Data, Delete, IndexLog, PersistentAccepted, HadError, Ref)->
-  {Module, TRef} = maps:get(T, StoragesRef),
-  TData = maps:get(T, Data, none),
-  TDelete = maps:get(T, Delete, none),
-  TIndexLog = maps:get(T, IndexLog, none),
-  IsPersistent = Module:is_persistent(),
-  try
-    commit(TRef, Module, TData, TDelete, TIndexLog),
-    do_commit_logged(Rest, StoragesRef, Data, Delete, IndexLog, PersistentAccepted orelse IsPersistent, HadError, Ref)
-  catch
-    Class:Reason:Stack when PersistentAccepted ->
-      ?LOGERROR("~p database storage ~p commit error ~p:~p stack ~p",[
-        db_name(Ref), T, Class, Reason, Stack
-      ]),
-      spawn_recovery(Ref),
-      do_commit_logged(Rest, StoragesRef, Data, Delete, IndexLog, PersistentAccepted, true, Ref);
-    Class:Reason:Stack ->
-      erlang:raise(Class, Reason, Stack)
-  end;
-do_commit_logged([], _StoragesRef, _Data, _Delete, _IndexLog, _PersistentAccepted, false, _Ref)->
-  ok;
-do_commit_logged([], _StoragesRef, _Data, _Delete, _IndexLog, _PersistentAccepted, true, _Ref)->
-  recover.
-
-spawn_recovery(Ref)->
-  case db_name(Ref) of
-    undefined ->
-      ok;
-    Name ->
-      spawn(fun()->
-        catch zaya:db_close(Name),
-        wait_close(Name, node()),
-        catch zaya:db_open(Name)
-      end),
-      ok
-  end.
+init_recovery(DB)->
+  spawn(fun()->
+    catch zaya:db_close(DB, node()),
+    wait_close(DB, node()),
+    catch zaya:db_open(DB, node())
+  end),
+  ok.
 
 prepare_write( Write )->
   lists:foldl(fun( { #key{ type = T, storage = S, key = K }, V}, {DAcc, IAcc})->
@@ -667,8 +709,8 @@ needs_log( Data, Delete )->
 get_commit_storages( Data, Delete )->
   lists:usort( maps:keys( Data ) ++ maps:keys( Delete )).
 
-validate_commit_storages( Ref, Storages )->
-  case Storages -- maps:keys( Ref ) of
+validate_commit_storages(Storages, CommitTo)->
+  case CommitTo -- maps:keys( Storages ) of
     [] -> ok;
     Invalid ->
       %% ATTENTION! If the user tries to save object with storage type
@@ -677,21 +719,20 @@ validate_commit_storages( Ref, Storages )->
       throw({ invalid_storage_type, Invalid })
   end.
 
-prepare_rollback(Ref, Write, Delete)->
+prepare_rollback(#ref{storages = Storages}, Write, Delete)->
   {Data, IndexLog} = prepare_write(Write),
   Delete1 = prepare_delete( Delete ),
 
-  Storages = get_commit_storages( Data, Delete1 ),
-  StoragesRef = storages(Ref),
-  validate_commit_storages(StoragesRef, Storages),
+  CommitTo = get_commit_storages( Data, Delete1 ),
+  validate_commit_storages(Storages, CommitTo),
 
   lists:foldl(
     fun(T, Acc)->
-      Acc1 = data_rollback(T, StoragesRef, Data, Delete1, Acc),
+      Acc1 = data_rollback(T, Storages, Data, Delete1, Acc),
       index_rollback(T, IndexLog, Acc1)
     end,
     {_WriteAcc = [], _DeleteAcc = []},
-    Storages
+    CommitTo
   ).
 
 data_rollback(T, Ref, Data, Delete, Acc)->
@@ -731,20 +772,10 @@ merge_delete([], _T, Acc)->
 %%=================================================================
 %%	INFO
 %%=================================================================
-get_size( Ref )->
-  StoragesRef = storages(Ref),
+get_size( #ref{storages = Storages} )->
   maps:map(fun(_Type,{Module,TRef})->
     Module:get_size( TRef )
-  end, StoragesRef).
-
-replay_tlog(#ref{tlog = undefined})->
-  ok;
-replay_tlog(#ref{tlog = TLog} = Ref)->
-  ecomet_tlog:replay(TLog, fun({Write, Delete})->
-    {Data, IndexLog} = prepare_write(Write),
-    Delete1 = prepare_delete(Delete),
-    commit(Ref, Data, Delete1, IndexLog)
-  end).
+  end, Storages).
 
 %%================================================================
 %% ECOMET

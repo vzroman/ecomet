@@ -22,84 +22,40 @@
   open/1,
   close/1,
   remove/1,
-  seq/1,
-  commit/3,
+  add/2,
+  delete/2,
   replay/2
 ]).
 
--record(ref,{
-  db,
-  seq
-}).
-
--define(DEFAULT_ROCKSDB_PARAMS,#{
-  rocksdb => #{
-    open_options=>#{
-      paranoid_checks => false,
-      compression => none
-    },
-    read => #{
-      verify_checksums => false
-    },
-    write => #{
-      sync => true
-    }
-  },
-  pool => disabled
-}).
-
 create(DBDir)->
-  DBRef = zaya_rocksdb:create(params(DBDir)),
-  init_ref(DBRef).
+  zaya_rocksdb:create(db_params(DBDir)).
 
 open(DBDir)->
-  Params = params(DBDir),
-  DBRef =
-    case filelib:is_dir(log_dir(DBDir)) of
-      true -> zaya_rocksdb:open(Params);
-      false -> zaya_rocksdb:create(Params)
-    end,
-  init_ref(DBRef).
+  zaya_rocksdb:open(db_params(DBDir)).
 
-close(#ref{db = DBRef})->
-  zaya_rocksdb:close(DBRef).
+close(Ref)->
+  zaya_rocksdb:close(Ref).
 
 remove(DBDir)->
-  case filelib:is_dir(log_dir(DBDir)) of
-    true -> zaya_rocksdb:remove(params(DBDir));
-    false -> ok
-  end.
+  zaya_rocksdb:remove(db_params(DBDir)).
 
-seq(#ref{seq = SeqRef})->
-  atomics:add_get(SeqRef, 1, 1) - 1.
+db_params(DBDir)->
+  #{
+    dir => filename:join(DBDir, "TLOG")
+  }.
 
-commit(#ref{db = DBRef}, Write, Delete)->
-  zaya_rocksdb:commit(DBRef, Write, Delete).
+add(Ref, Ops)->
+  TRef = make_ref(),
+  zaya_rocksdb:write(Ref,[{TRef, Ops}]),
+  TRef.
 
-replay(#ref{db = DBRef} = Ref, Callback)->
-  Entries = zaya_rocksdb:find(DBRef, #{}),
-  lists:foreach(fun({Key, Ops})->
+delete(Ref, TRef)->
+  zaya_rocksdb:delete(Ref, [TRef]).
+
+replay(Ref, Callback)->
+  Entries = zaya_rocksdb:find(Ref, #{}),
+  lists:foreach(fun({TRef, Ops})->
     ok = Callback(Ops),
-    ok = commit(Ref, [], [Key])
+    ok = delete(Ref, TRef)
   end, Entries),
   ok.
-
-params(DBDir)->
-  maps:merge(?DEFAULT_ROCKSDB_PARAMS, #{
-    dir => log_dir(DBDir)
-  }).
-
-log_dir(DBDir)->
-  filename:join(DBDir, "TLOG").
-
-init_ref(DBRef)->
-  SeqRef = atomics:new(1, [{signed, false}]),
-  ok = atomics:put(SeqRef, 1, init_seq(DBRef)),
-  #ref{db = DBRef, seq = SeqRef}.
-
-init_seq(DBRef)->
-  zaya_rocksdb:foldl(DBRef, #{}, fun({{commit, Seq}, _Value}, Acc) when is_integer(Seq)->
-    erlang:max(Seq + 1, Acc);
-  (_Other, Acc)->
-    Acc
-  end, 0).
