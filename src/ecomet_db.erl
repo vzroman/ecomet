@@ -23,6 +23,11 @@
 %%	ZAYA API
 %%=================================================================
 -record(key,{type,storage,key}).
+-record(ref,{
+  name,
+  storages,
+  tlog = undefined
+}).
 
 %%	SERVICE API
 -export([
@@ -169,7 +174,7 @@ wait_dbs( DBs )->
 create( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
-  maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
+  Storages = maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
     try
       TypeRef = M:create( type_params(T, Ps, OtherParams) ),
       Acc#{ T => {M,TypeRef}}
@@ -186,12 +191,18 @@ create( Params )->
         end, Acc),
         throw(E)
     end
-  end,#{}, TypesParams ).
+  end,#{}, TypesParams ),
+  try open_ref(Params, Storages, create)
+  catch
+    Class:Reason:Stack ->
+      cleanup_storages(Storages),
+      erlang:raise(Class, Reason, Stack)
+  end.
 
 open( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
   OtherParams = maps:without(?STORAGE_TYPES, Params),
-  maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
+  Storages = maps:fold(fun(T, #{ module := M, params := Ps }, Acc)->
     try
       TypeRef = M:open( type_params(T, Ps, OtherParams) ),
       Acc#{ T => {M, TypeRef} }
@@ -207,12 +218,54 @@ open( Params )->
         end, Acc),
         throw(E)
     end
-  end,#{}, TypesParams ).
+  end,#{}, TypesParams ),
+  Ref =
+    try open_ref(Params, Storages, open)
+    catch
+      Class:Reason:Stack ->
+        cleanup_storages(Storages),
+        erlang:raise(Class, Reason, Stack)
+    end,
+  try
+    ok = replay_tlog(Ref),
+    Ref
+  catch
+    Class1:Reason1:Stack1 ->
+      catch close(Ref),
+      erlang:raise(Class1, Reason1, Stack1)
+  end.
+
+open_ref(#{dir := Dir} = Params, Storages, Action)->
+  TLog =
+    case has_persistent_storage(Storages) of
+      true ->
+        case Action of
+          create -> ecomet_tlog:create(Dir);
+          open -> ecomet_tlog:open(Dir)
+        end;
+      false ->
+        undefined
+    end,
+  #ref{
+    name = maps:get(name, Params),
+    storages = Storages,
+    tlog = TLog
+  }.
+
+has_persistent_storage(Storages)->
+  lists:any(fun({_Type,{Module,_TRef}})->
+    Module:is_persistent()
+  end, maps:to_list(Storages)).
 
 type_params(Type, Params, #{dir := Dir} = OtherParams )->
   maps:merge( OtherParams#{ dir => Dir ++ "/" ++ atom_to_list(Type) }, maps:without([dir],Params) ).
 
-close( Ref )->
+close( #ref{storages = Storages} = Ref )->
+  InitErrors =
+    case close_tlog(Ref) of
+      ok -> [];
+      {error, TLogErr} -> [TLogErr]
+    end,
   case maps:fold(fun(_Type,{Module, TRef},Errs)->
     try
       Module:close( TRef ),
@@ -220,11 +273,28 @@ close( Ref )->
     catch
       _:E->[E|Errs]
     end
-  end,[], Ref ) of
+  end, InitErrors, Storages ) of
     []->ok;
     Errors->
       throw(Errors)
   end.
+
+cleanup_storages(Storages)->
+  maps:map(fun(_Type,{Module, TRef})->
+    catch Module:close(TRef)
+  end, Storages),
+  ok.
+
+close_tlog(#ref{tlog = TLog})->
+  try
+    ecomet_tlog:close(TLog),
+    ok
+  catch
+    _:E -> {error, E}
+  end;
+close_tlog(_Ref)->
+  ok.
+
 
 remove( Params )->
   TypesParams = maps:with( ?STORAGE_TYPES, Params ),
@@ -240,11 +310,23 @@ remove( Params )->
     []->ok;
     Errors->
       throw(Errors)
+  end,
+  remove_tlog(Params, TypesParams).
+
+remove_tlog(#{dir := Dir}, TypesParams)->
+  case has_persistent_params(TypesParams) of
+    true -> ecomet_tlog:remove(Dir);
+    false -> ok
   end.
 
+has_persistent_params(TypesParams)->
+  lists:any(fun({_Type, #{module := Module}})->
+    Module:is_persistent()
+  end, maps:to_list(TypesParams)).
+
 %%	LOW_LEVEL
-read( Ref, [#key{type = T,storage = S,key = K}=Key|Rest])->
-  case Ref of
+read( #ref{storages = Storages}= Ref, [#key{type = T,storage = S,key = K}=Key|Rest])->
+  case Storages of
     #{ T := {Module, TRef} }->
       case try Module:read(TRef, [{S,[K]}]) catch _:_->error end of
         [{_,V}]->
@@ -283,55 +365,55 @@ delete(Ref, Keys)->
 
 
 %%	ITERATOR
-first( Ref )->
-  Types = lists:usort(maps:keys( Ref )),
-  first(Types, Ref).
-first([T|Rest], Ref)->
-  #{T := {Module, TRef}} = Ref,
+first(#ref{storages = Storages})->
+  Types = lists:usort(maps:keys( Storages )),
+  first(Types, Storages).
+first([T|Rest], Storages)->
+  #{T := {Module, TRef}} = Storages,
   try
     {{S,[Key]}, V} = Module:first(TRef),
     {#key{type = T, storage = S, key = Key }, V}
   catch
-    _:_->first( Rest, Ref )
+    _:_->first( Rest, Storages )
   end;
-first([], _Ref)->
+first([], _Storages)->
   undefined.
 
-last( Ref )->
-  Types = lists:usort(maps:keys( Ref )),
-  last(lists:reverse(Types), Ref).
-last([T|Rest], Ref)->
-  #{T := {Module, TRef}} = Ref,
+last(#ref{storages = Storages})->
+  Types = lists:usort(maps:keys( Storages )),
+  last(lists:reverse(Types), Storages).
+last([T|Rest], Storages)->
+  #{T := {Module, TRef}} = Storages,
   try
     {{S,[Key]}, V} = Module:last(TRef),
     {#key{type = T, storage = S, key = Key }, V}
   catch
-    _:_->last( Rest, Ref )
+    _:_->last( Rest, Storages )
   end;
-last([], _Ref)->
+last([], _Storages)->
   undefined.
 
-next( Ref, #key{type = T, storage = S, key = K}=Key)->
-  case Ref of
+next(#ref{storages = Storages}, #key{type = T, storage = S, key = K}=Key)->
+  case Storages of
     #{T := {Module, TRef}}->
       case Module:next(TRef,{S,[K]}) of
         {{S,[Next]}, V}->
           {Key#key{ key = Next }, V};
         _->
-          first( maps:filter(fun(Type,_)-> Type > T end, Ref) )
+          first( maps:filter(fun(Type,_)-> Type > T end, Storages) )
       end;
     _->
       throw(invalid_type)
   end.
 
-prev( Ref, #key{type = T, storage = S, key = K}=Key)->
-  case Ref of
+prev(#ref{storages = Storages}, #key{type = T, storage = S, key = K}=Key)->
+  case Storages of
     #{T := {Module, TRef}}->
       case Module:prev(TRef,{S,[K]}) of
         {{S,[Prev]}, V}->
           {Key#key{ key = Prev }, V};
         _->
-          last( maps:filter(fun(Type,_)-> Type < T end, Ref) )
+          last( maps:filter(fun(Type,_)-> Type < T end, Storages) )
       end;
     _->
       throw(invalid_type)
@@ -339,52 +421,52 @@ prev( Ref, #key{type = T, storage = S, key = K}=Key)->
 
 %%	HIGH-LEVEL
 %----------------------FIND------------------------------------------
-find( Ref, InQuery )->
-  {Types, Query} = query_types( InQuery, Ref),
-  find( Types, Ref, Query, [] ).
-find([T|Rest], Ref, Query, Acc)->
-  #{T := {Module, TRef}} = Ref,
+find(#ref{storages = Storages}, InQuery )->
+  {Types, Query} = query_types( InQuery, Storages),
+  find( Types, Storages, Query, [] ).
+find([T|Rest], Storages, Query, Acc)->
+  #{T := {Module, TRef}} = Storages,
   TypeResult = [{ #key{type = T, storage = S, key = K}, V } || {{S,[K]}, V} <- Module:find( TRef, Query )],
-  find(Rest, Ref, Query, [TypeResult|Acc]);
-find([], _Ref, _Query, Acc)->
+  find(Rest, Storages, Query, [TypeResult|Acc]);
+find([], _Storages, _Query, Acc)->
   lists:append( lists:reverse(Acc) ).
 
 %----------------------FOLD LEFT------------------------------------------
-foldl( Ref, InQuery, Fun, InAcc )->
-  {Types, Query} = query_types( InQuery, Ref),
-  foldl(Types, Ref, Query, Fun, InAcc).
-foldl([T|Rest], Ref, Query, InFun, InAcc )->
-  #{T := {Module, TRef}} = Ref,
+foldl(#ref{storages = Storages}, InQuery, Fun, InAcc )->
+  {Types, Query} = query_types( InQuery, Storages),
+  foldl(Types, Storages, Query, Fun, InAcc).
+foldl([T|Rest], Storages, Query, InFun, InAcc )->
+  #{T := {Module, TRef}} = Storages,
   Fun =
     fun({{S,[K]},V}, Acc)->
       InFun({#key{type = T, storage = S, key = K}, V}, Acc)
     end,
   Acc = Module:foldl(TRef, Query, Fun, InAcc),
-  foldl(Rest, Ref, Query, InFun, Acc);
-foldl([], _Ref, _Query, _Fun, Acc )->
+  foldl(Rest, Storages, Query, InFun, Acc);
+foldl([], _Storages, _Query, _Fun, Acc )->
   Acc.
 
 
 %----------------------FOLD RIGHT------------------------------------------
-foldr( Ref, InQuery, Fun, InAcc )->
-  {Types, Query} = query_types( InQuery, Ref),
-  foldr(lists:reverse(Types), Ref, Query, Fun, InAcc).
-foldr([T|Rest], Ref, Query, InFun, InAcc )->
-  #{T := {Module, TRef}} = Ref,
+foldr(#ref{storages = Storages}, InQuery, Fun, InAcc )->
+  {Types, Query} = query_types( InQuery, Storages),
+  foldr(lists:reverse(Types), Storages, Query, Fun, InAcc).
+foldr([T|Rest], Storages, Query, InFun, InAcc )->
+  #{T := {Module, TRef}} = Storages,
   Fun =
     fun({{S,[K]},V}, Acc)->
       InFun({#key{type = T, storage = S, key = K}, V}, Acc)
     end,
   Acc = Module:foldr(TRef, Query, Fun, InAcc),
-  foldr(Rest, Ref, Query, InFun, Acc);
-foldr([], _Ref, _Query, _Fun, Acc )->
+  foldr(Rest, Storages, Query, InFun, Acc);
+foldr([], _Storages, _Query, _Fun, Acc )->
   Acc.
 
-query_types( #{types := QueryTypes} = Query, Ref)->
-  Types = lists:usort([T || T <- QueryTypes, maps:is_key(T, Ref)]),
+query_types( #{types := QueryTypes} = Query, Storages)->
+  Types = lists:usort([T || T <- QueryTypes, maps:is_key(T, Storages)]),
   {Types, maps:remove(types, Query)};
-query_types(Query, Ref)->
-  Types = lists:usort(maps:keys( Ref )),
+query_types(Query, Storages)->
+  Types = lists:usort(maps:keys( Storages )),
   {Types, Query}.
 
 %%	COPY
@@ -414,15 +496,16 @@ is_persistent()->
 
 commit(Ref, Data, Delete, IndexLog)->
 
+  StoragesRef = storages(Ref),
   Storages = get_commit_storages( Data, Delete ),
-  validate_commit_storages(Ref, Storages),
+  validate_commit_storages(StoragesRef, Storages),
 
   % Order commit the heavier types go first
   CommitOrder = [ ramdisc, disc, ram ],
   Ordered = CommitOrder -- ( CommitOrder -- Storages ),
 
   [ begin
-      { Module, TRef } = maps:get(T, Ref),
+      { Module, TRef } = maps:get(T, StoragesRef),
       TData = maps:get( T, Data, none ),
       TDelete = maps:get( T, Delete, none ),
       TIndexLog = maps:get( T, IndexLog, none ),
@@ -483,16 +566,78 @@ commit(Ref, Module, Data, Delete, IndexLog)->
         Module:commit( Ref, Data ++ IndexWrite, Delete);
       length( IndexWrite ) =:= 0->
         Module:commit( Ref, Data, Delete ++ IndexDel);
-      true ->
+      true ->{1, _} -> commit( Ref, Data, Delete1, IndexLog );
         Module:commit( Ref, Data ++ IndexWrite, Delete ++ IndexDel)
     end
   after
     Unlock()
   end.
 
-two_phase_commit( Ref, Data, Delete, IndexLog )->
-  % TODO
-  commit( Ref, Data, Delete, IndexLog ).
+two_phase_commit( Ref, Write, Delete0, Data, Delete, IndexLog )->
+  case tlog(Ref) of
+    undefined ->
+      commit( Ref, Data, Delete, IndexLog );
+    TLog ->
+      Seq = ecomet_tlog:seq(TLog),
+      Key = {commit, Seq},
+      ok = ecomet_tlog:commit(TLog, [{Key, {Write, Delete0}}], []),
+      try commit_logged(Ref, TLog, Key, Data, Delete, IndexLog)
+      catch
+        Class:Reason:Stack ->
+          catch ecomet_tlog:commit(TLog, [], [Key]),
+          erlang:raise(Class, Reason, Stack)
+      end
+  end.
+
+commit_logged(Ref, TLog, Key, Data, Delete, IndexLog)->
+  StoragesRef = storages(Ref),
+  CommitStorages = get_commit_storages(Data, Delete),
+  validate_commit_storages(StoragesRef, CommitStorages),
+  CommitOrder = [ ramdisc, disc, ram ],
+  Ordered = CommitOrder -- ( CommitOrder -- CommitStorages ),
+  case do_commit_logged(Ordered, StoragesRef, Data, Delete, IndexLog, _PersistentAccepted = false, _HadError = false, Ref) of
+    ok ->
+      ok = ecomet_tlog:commit(TLog, [], [Key]);
+    recover ->
+      ok
+  end.
+
+do_commit_logged([T|Rest], StoragesRef, Data, Delete, IndexLog, PersistentAccepted, HadError, Ref)->
+  {Module, TRef} = maps:get(T, StoragesRef),
+  TData = maps:get(T, Data, none),
+  TDelete = maps:get(T, Delete, none),
+  TIndexLog = maps:get(T, IndexLog, none),
+  IsPersistent = Module:is_persistent(),
+  try
+    commit(TRef, Module, TData, TDelete, TIndexLog),
+    do_commit_logged(Rest, StoragesRef, Data, Delete, IndexLog, PersistentAccepted orelse IsPersistent, HadError, Ref)
+  catch
+    Class:Reason:Stack when PersistentAccepted ->
+      ?LOGERROR("~p database storage ~p commit error ~p:~p stack ~p",[
+        db_name(Ref), T, Class, Reason, Stack
+      ]),
+      spawn_recovery(Ref),
+      do_commit_logged(Rest, StoragesRef, Data, Delete, IndexLog, PersistentAccepted, true, Ref);
+    Class:Reason:Stack ->
+      erlang:raise(Class, Reason, Stack)
+  end;
+do_commit_logged([], _StoragesRef, _Data, _Delete, _IndexLog, _PersistentAccepted, false, _Ref)->
+  ok;
+do_commit_logged([], _StoragesRef, _Data, _Delete, _IndexLog, _PersistentAccepted, true, _Ref)->
+  recover.
+
+spawn_recovery(Ref)->
+  case db_name(Ref) of
+    undefined ->
+      ok;
+    Name ->
+      spawn(fun()->
+        catch zaya:db_close(Name),
+        wait_close(Name, node()),
+        catch zaya:db_open(Name)
+      end),
+      ok
+  end.
 
 prepare_write( Write )->
   lists:foldl(fun( { #key{ type = T, storage = S, key = K }, V}, {DAcc, IAcc})->
@@ -537,11 +682,12 @@ prepare_rollback(Ref, Write, Delete)->
   Delete1 = prepare_delete( Delete ),
 
   Storages = get_commit_storages( Data, Delete1 ),
-  validate_commit_storages(Ref, Storages),
+  StoragesRef = storages(Ref),
+  validate_commit_storages(StoragesRef, Storages),
 
   lists:foldl(
     fun(T, Acc)->
-      Acc1 = data_rollback(T, Ref, Data, Delete1, Acc),
+      Acc1 = data_rollback(T, StoragesRef, Data, Delete1, Acc),
       index_rollback(T, IndexLog, Acc1)
     end,
     {_WriteAcc = [], _DeleteAcc = []},
@@ -586,9 +732,19 @@ merge_delete([], _T, Acc)->
 %%	INFO
 %%=================================================================
 get_size( Ref )->
+  StoragesRef = storages(Ref),
   maps:map(fun(_Type,{Module,TRef})->
     Module:get_size( TRef )
-  end, Ref).
+  end, StoragesRef).
+
+replay_tlog(#ref{tlog = undefined})->
+  ok;
+replay_tlog(#ref{tlog = TLog} = Ref)->
+  ecomet_tlog:replay(TLog, fun({Write, Delete})->
+    {Data, IndexLog} = prepare_write(Write),
+    Delete1 = prepare_delete(Delete),
+    commit(Ref, Data, Delete1, IndexLog)
+  end).
 
 %%================================================================
 %% ECOMET
