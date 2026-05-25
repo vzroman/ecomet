@@ -8,6 +8,43 @@
 -define(NAME(N),list_to_atom("ecomet_subscription_object_"++integer_to_list(N))).
 -define(WORKER(OID), ?NAME(erlang:phash2(OID, ecomet_subscription_pool:get_size()))).
 
+%% API
+-export([
+  all/0,
+  groups/0,
+  init_per_testcase/2,
+  end_per_testcase/2,
+  init_per_group/2,
+  end_per_group/2,
+  init_per_suite/1,
+  end_per_suite/1
+]).
+
+-export([
+  not_exists_test/1,
+  object_subscribe_test/1,
+  object_stateless_test/1,
+  object_no_feedback_test/1,
+  object_delete_test/1,
+  object_update_rights_test/1,
+  query_subscribe_test/1,
+  query_additive_membership_test/1,
+  query_simultaneous_add_overlap_refcount_test/1,
+  query_multi_subscriptions_per_client_test/1,
+  query_same_test/1,
+  query_light_update_test/1,
+  query_stateless_test/1,
+  query_no_feedback_test/1,
+  query_update_rights_test/1,
+  query_global_sync_gap_test/1,
+  query_wait_test/1,
+  verify_object_update_test/1,
+  verify_object_delete_test/1,
+  verify_query_add_test/1,
+  verify_query_delete_test/1,
+  verify_noop_test/1
+]).
+
 -record(state, {
   objects,
   clients,
@@ -25,6 +62,7 @@
 }).
 
 -record(query,{
+  dbs,
   conditions,
   fields,
   clients,
@@ -75,7 +113,8 @@ all()->
   [
     not_exists_test,
     {group,object_subscribe},
-    {group,query_subscribe}
+    {group,query_subscribe},
+    {group,verification}
   ].
 
 groups()->
@@ -104,6 +143,16 @@ groups()->
         query_update_rights_test,
         query_global_sync_gap_test,
         query_wait_test
+      ]
+    },
+    {verification,
+      [sequence],
+      [
+        verify_object_update_test,
+        verify_object_delete_test,
+        verify_query_add_test,
+        verify_query_delete_test,
+        verify_noop_test
       ]
     }
   ].
@@ -3638,6 +3687,7 @@ query_wait_test(Config)->
   ?assertEqual(
     #{
       Q1_ref => #query{
+        dbs = [root],
         conditions = {'AND',[
           {<<".folder">>,'=',F},
           {<<"f3">>,'=',12}
@@ -3741,6 +3791,7 @@ query_wait_test(Config)->
 
   ?assertEqual(
     #query{
+      dbs = [root],
       conditions = {'AND',[
         {<<".folder">>,'=',F},
         {<<"f2">>,'=',<<"another value">>}
@@ -3934,3 +3985,384 @@ wait_global_snapshot(ExpectedGlobal, MinVersion, Timeout) when Timeout > 0->
   end;
 wait_global_snapshot(_ExpectedGlobal, _MinVersion, _Timeout)->
   ecomet_subscription_query:global_snapshot_data().
+
+verify_object_update_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  Unique = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"verify_object_update_test_", Unique/binary>>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"verify object update f1 old">>,
+    <<"f2">> => <<"verify object update f2">>
+  })),
+
+  Client = start_client(<<"system">>),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id_verify_object_update,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {<<".oid">>,'=',O},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id_verify_object_update,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"verify object update f1 old">>,
+        <<"f2">> => <<"verify object update f2">>
+      }
+    ),
+    from_client(Client)
+  ),
+
+  Worker = whereis(?WORKER(O)),
+  StaleState = sys:get_state(Worker),
+
+  ecomet:edit_object(ecomet:open(O), #{
+    <<"f1">> => <<"verify object update f1 new">>
+  }),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id_verify_object_update,
+      update,
+      O,
+      #{<<"f1">> => <<"verify object update f1 new">>}
+    ),
+    from_client(Client)
+  ),
+
+  sys:replace_state(Worker, fun(_State)-> StaleState end),
+
+  ?assertEqual(ok, ecomet_subscription_object:verify()),
+  #state{objects = Objects} = sys:get_state(Worker),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id_verify_object_update,
+      update,
+      O,
+      #{<<"f1">> => <<"verify object update f1 new">>}
+    ),
+    from_client(Client, 1000)
+  ),
+
+  #object{
+    fields = #{
+      <<"f1">> := <<"verify object update f1 new">>,
+      <<"f2">> := <<"verify object update f2">>
+    }
+  } = maps:get(O, Objects),
+
+  exit(Client, stop),
+  timer:sleep(100),
+
+  ok.
+
+verify_object_delete_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  Unique = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"verify_object_delete_test_", Unique/binary>>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"verify object delete f1">>,
+    <<"f2">> => <<"verify object delete f2">>
+  })),
+
+  Client = start_client(<<"system">>),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id_verify_object_delete,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    {<<".oid">>,'=',O},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id_verify_object_delete,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"verify object delete f1">>,
+        <<"f2">> => <<"verify object delete f2">>
+      }
+    ),
+    from_client(Client)
+  ),
+
+  Worker = whereis(?WORKER(O)),
+  StaleState = sys:get_state(Worker),
+
+  ok = ecomet:delete_object(ecomet:open(O)),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(id_verify_object_delete, delete, O, #{}),
+    from_client(Client)
+  ),
+
+  sys:replace_state(Worker, fun(_State)-> StaleState end),
+
+  ?assertEqual(ok, ecomet_subscription_object:verify()),
+  #state{objects = Objects, clients = Clients} = sys:get_state(Worker),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(id_verify_object_delete, delete, O, #{}),
+    from_client(Client, 1000)
+  ),
+
+  ?assertEqual(undefined, maps:get(O, Objects, undefined)),
+  ?assertEqual(#{}, Clients),
+
+  exit(Client, stop),
+  timer:sleep(100),
+
+  ok.
+
+verify_query_add_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  Unique = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"verify_query_add_test_", Unique/binary>>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"verify query add f1">>,
+    <<"f2">> => <<"verify query add f2">>,
+    <<"f3">> => 12
+  })),
+
+  Client = start_client(<<"system">>),
+  timer:sleep(100),
+
+  Conditions = {'AND',[
+    {<<".folder">>,'=',F},
+    {<<"f3">>,'=',12}
+  ]},
+
+  ok = ecomet_query:subscribe(
+    id_verify_query_add,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    Conditions,
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id_verify_query_add,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"verify query add f1">>,
+        <<"f2">> => <<"verify query add f2">>
+      }
+    ),
+    from_client(Client)
+  ),
+
+  Worker = whereis(?WORKER(O)),
+  State0 = #state{
+    objects = Objects0,
+    queries = Queries0
+  } = sys:get_state(Worker),
+
+  [{QueryRef, Query0 = #query{set = QuerySet0}}] = [
+    {Ref, Query}
+    || {Ref, Query = #query{conditions = QueryConditions}} <- maps:to_list(Queries0),
+       QueryConditions =:= Conditions
+  ],
+
+  StaleQuery = Query0#query{
+    set = ecomet_resultset:remove_oid(O, QuerySet0)
+  },
+  StaleState = State0#state{
+    objects = maps:remove(O, Objects0),
+    queries = Queries0#{QueryRef => StaleQuery}
+  },
+  sys:replace_state(Worker, fun(_State)-> StaleState end),
+
+  ?assertEqual(ok, ecomet_subscription_object:verify()),
+  #state{
+    objects = Objects1,
+    queries = Queries1
+  } = sys:get_state(Worker),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id_verify_query_add,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"verify query add f1">>,
+        <<"f2">> => <<"verify query add f2">>
+      }
+    ),
+    from_client(Client, 1000)
+  ),
+
+  #query{set = QuerySet1} = maps:get(QueryRef, Queries1),
+  ?assertEqual(true, ecomet_resultset:contains(O, QuerySet1)),
+
+  #object{
+    queries = ObjectQueries,
+    fields = #{
+      <<"f1">> := <<"verify query add f1">>,
+      <<"f2">> := <<"verify query add f2">>
+    }
+  } = maps:get(O, Objects1),
+  ?assertEqual(true, ordsets:is_element(QueryRef, ObjectQueries)),
+
+  exit(Client, stop),
+  timer:sleep(100),
+
+  ok.
+
+verify_query_delete_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  Unique = integer_to_binary(erlang:unique_integer([positive, monotonic])),
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"verify_query_delete_test_", Unique/binary>>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"verify query delete f1">>,
+    <<"f2">> => <<"verify query delete f2">>,
+    <<"f3">> => 12
+  })),
+
+  Client = start_client(<<"system">>),
+  timer:sleep(100),
+
+  Conditions = {'AND',[
+    {<<".folder">>,'=',F},
+    {<<"f3">>,'=',12}
+  ]},
+
+  ok = ecomet_query:subscribe(
+    id_verify_query_delete,
+    [root],
+    [<<"f1">>, <<"f2">>],
+    Conditions,
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client
+    }
+  ),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id_verify_query_delete,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"verify query delete f1">>,
+        <<"f2">> => <<"verify query delete f2">>
+      }
+    ),
+    from_client(Client)
+  ),
+
+  Worker = whereis(?WORKER(O)),
+  StaleState = #state{queries = Queries0} = sys:get_state(Worker),
+
+  [{QueryRef, _Query0}] = [
+    {Ref, Query}
+    || {Ref, Query = #query{conditions = QueryConditions}} <- maps:to_list(Queries0),
+       QueryConditions =:= Conditions
+  ],
+
+  ecomet:edit_object(ecomet:open(O), #{<<"f3">> => 13}),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(id_verify_query_delete, delete, O, #{}),
+    from_client(Client)
+  ),
+
+  sys:replace_state(Worker, fun(_State)-> StaleState end),
+
+  ?assertEqual(ok, ecomet_subscription_object:verify()),
+  #state{
+    objects = Objects1,
+    queries = Queries1
+  } = sys:get_state(Worker),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(id_verify_query_delete, delete, O, #{}),
+    from_client(Client, 1000)
+  ),
+
+  #query{set = QuerySet1} = maps:get(QueryRef, Queries1),
+  ?assertEqual(false, ecomet_resultset:contains(O, QuerySet1)),
+  ?assertEqual(undefined, maps:get(O, Objects1, undefined)),
+
+  exit(Client, stop),
+  timer:sleep(100),
+
+  ok.
+
+verify_noop_test(_Config)->
+  AllWorkers = [whereis(?NAME(N)) || N <- ecomet_subscription_pool:get_workers()],
+  State0 = [{W, sys:get_state(W)} || W <- AllWorkers],
+
+  ?assertEqual(ok, ecomet_subscription_object:verify()),
+
+  [?assertEqual(State, sys:get_state(W)) || {W, State} <- State0],
+
+  ok.

@@ -7,7 +7,8 @@
 
 -define(CALL_TIMEOUT, 60000).
 -define(NAME(N),list_to_atom("ecomet_subscription_object_"++integer_to_list(N))).
--define(WORKER(OID), ?NAME(erlang:phash2(OID, ecomet_subscription_pool:get_size()))).
+-define(WORKER(OID, Size), ?NAME(erlang:phash2(OID, Size))).
+-define(WORKER(OID), ?WORKER(OID, ecomet_subscription_pool:get_size())).
 -define(GLOBAL_SYNC_CYCLE_MS, 1000).
 
 %%=================================================================
@@ -15,15 +16,15 @@
 %%=================================================================
 -export([
   subscribe/1,
-  unsubscribe/2
+  unsubscribe/2,
+  verify/0
 ]).
 
 %%=================================================================
 %%        Transaction API
 %%=================================================================
 -export([
-  on_commit/1,
-  notify/1
+  on_commit/1
 ]).
 
 %%=================================================================
@@ -67,6 +68,7 @@
 }).
 
 -record(query,{
+  dbs,
   conditions,
   fields,
   clients,
@@ -120,26 +122,61 @@ subscribe(
       conditions = OID
     }
 )->
-  gen_server:call(?WORKER(OID), Subscription, ?CALL_TIMEOUT).
+  case ecomet_subscription_pool:get_size() of
+    0 ->
+      throw(subscriptions_off);
+    _->
+      gen_server:call(?WORKER(OID), Subscription, ?CALL_TIMEOUT)
+  end.
 
 unsubscribe(Client, SubsID)->
   [gen_server:cast(?NAME(N), {unsubscribe, Client, SubsID}) || N <-ecomet_subscription_pool:get_workers()],
   ok.
 
+verify()->
+  case ecomet_subscription_pool:get_size() of
+    0 ->
+      ignore;
+    _->
+      [gen_server:cast(?NAME(N), verify) || N <- ecomet_subscription_pool:get_workers()],
+      ok
+  end.
+
 %%=================================================================
 %%        Transaction API
 %%=================================================================
-on_commit( Log ) when length(Log) > 0->
-  Nodes = ecomet_subscription_nodes:get_active(),
-  ecall:cast_all(Nodes, ?MODULE , notify,[ Log ] ),
-  notify( Log );
+on_commit([_|_] = Log)->
+  Nodes = with_local_node(ecomet_subscription_nodes:get_active()),
+  broadcast(Log, Nodes),
+  ok;
 on_commit( _Log )->
   ignore.
 
-notify([#{oid := OID} = Log | Rest] )->
-  gen_server:cast(?WORKER(OID), {notify, Log}),
-  notify( Rest );
-notify([])->
+with_local_node(Nodes)->
+  case ecomet_subscription_pool:get_size() of
+    Size when is_integer(Size), Size > 0 ->
+      [{node(), Size} | Nodes];
+    _->
+      Nodes
+  end.
+
+broadcast([Log = #{oid := OID} | Rest], Nodes)->
+  Message = {notify, Log},
+  broadcast_nodes(Nodes, OID, Message),
+  broadcast(Rest, Nodes);
+broadcast([], _Nodes)->
+  ok.
+
+broadcast_nodes([{Node, Size}|Rest], OID, Message)->
+  Worker = ?WORKER(OID, Size),
+  if
+    node()=:=Node ->
+      Worker ! Message;
+    true ->
+      ecall:send({Worker, Node}, Message)
+  end,
+  broadcast_nodes(Rest, OID, Message);
+broadcast_nodes([], _OID, _Message)->
   ok.
 
 %%=================================================================
@@ -213,20 +250,9 @@ handle_call(#subscribe{} = Subscription, _From, State0) ->
       ?LOGERROR("add object subscription error: ~p, stack ~p",[E,S]),
       {reply, {error, E}, State0}
   end;
-handle_call(Request, _From, State) ->
-  ?LOGWARNING("unexpected call request ~p", [Request]),
-  {noreply, State}.
-
-handle_cast({notify, Log}, State0) ->
-  ?LOGDEBUG("notify ~p",[Log]),
-  try
-    State = notify(Log, State0),
-    {noreply, State}
-  catch
-    _:E:S->
-      ?LOGERROR("notify error: log ~p, error ~p, stack ~p",[Log,E,S]),
-      {noreply, State0}
-  end;
+handle_call(Request, From, State) ->
+  ?LOGWARNING("unexpected call request ~p from ~p", [Request, From]),
+  {reply, {error, {unexpected_call, Request}}, State}.
 
 handle_cast({unsubscribe, Client, SubsID}, State0) ->
   ?LOGDEBUG("unsubscribe ~p ~p",[Client, SubsID]),
@@ -294,9 +320,31 @@ handle_cast({global_reset, Tag, Version}, State0) ->
       {noreply, State0}
   end;
 
+handle_cast(verify, State0) ->
+  ?LOGDEBUG("verify subscription object state"),
+  try
+    State = verify_state(State0),
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("subscription object verification error: ~p, stack ~p",[E,S]),
+      {noreply, State0}
+  end;
+
 handle_cast(Request,State) ->
   ?LOGWARNING("unexpected cast request ~p", [Request]),
   {noreply, State}.
+
+handle_info({notify, Log}, State0) ->
+  ?LOGDEBUG("notify ~p",[Log]),
+  try
+    State = notify(Log, State0),
+    {noreply, State}
+  catch
+    _:E:S->
+      ?LOGERROR("notify error: log ~p, error ~p, stack ~p",[Log,E,S]),
+      {noreply, State0}
+  end;
 
 handle_info(global_sync, State0) ->
   State =
@@ -413,6 +461,7 @@ destroy_client(
 add_query(
     Ref,
     Subscription = #subscribe{
+      dbs = DBs,
       conditions = Conditions,
       deps = Fields,
       params = #{
@@ -428,6 +477,7 @@ add_query(
   Set = init_query_set(maps:get(Ref, Queries0, undefined), Subscription, Set0),
 
   Query0 = #query{
+    dbs = DBs,
     conditions = Conditions,
     fields = Fields,
     clients = #{},
@@ -2065,3 +2115,236 @@ delete_object_from_clients(
     State0,
     ObjectClients
   ).
+
+%%===================================================================
+%%  Verification
+%%===================================================================
+verify_state(State)->
+  State1 = verify_queries(State),
+  verify_objects(State1).
+
+%--------------------------------------------------------------------
+% Verify queries
+%--------------------------------------------------------------------
+verify_queries(State0 = #state{queries = Queries})->
+  Worker = worker_name(),
+  maps:fold(
+    fun
+      (Ref, #query{}, State)->
+        verify_query(Worker, Ref, State);
+      (_Ref, _Query, State)->
+        State
+    end,
+    State0,
+    Queries
+  ).
+
+worker_name()->
+  Self = self(),
+  [N] = [N || N <- ecomet_subscription_pool:get_workers(), whereis(?NAME(N)) =:= Self],
+  ?NAME(N).
+
+verify_query(
+    WorkerName,
+    Ref,
+    State0 = #state{
+      queries = Queries
+    }
+)->
+  try
+    #query{
+      dbs = DBs,
+      conditions = Conditions,
+      set = Set
+    } = maps:get(Ref, Queries),
+
+    ActualSet0 = ecomet_query:system(DBs, rs, Conditions),
+    ActualOIDs = resultset_oids(ActualSet0, WorkerName),
+    StateOIDs = resultset_oids(Set),
+    AddOIDs = ActualOIDs -- StateOIDs,
+    DelOIDs = StateOIDs -- ActualOIDs,
+    State1 = verify_query_add(Ref, AddOIDs, State0),
+    verify_query_delete(Ref, DelOIDs, State1)
+  catch
+    _:E:S->
+      ?LOGERROR("subscription object verification query ~p error: ~p, stack ~p",[Ref,E,S]),
+      State0
+  end.
+
+resultset_oids(RS)->
+  lists:reverse(ecomet_resultset:foldl(
+    fun(OID, Acc)-> [OID|Acc] end,
+    [],
+    RS
+  )).
+
+resultset_oids(RS, WorkerName)->
+  lists:reverse(ecomet_resultset:foldl(
+    fun(OID, Acc)->
+      case ?WORKER(OID) of
+        WorkerName ->
+          [OID|Acc];
+        _->
+          Acc
+      end
+    end,
+    [],
+    RS
+  )).
+
+verify_query_add(Ref, AddOIDs, State0)->
+  lists:foldl(
+    fun(OID, State)->
+      verify_query_add_oid(Ref, OID, State)
+    end,
+    State0,
+    AddOIDs
+  ).
+
+verify_query_add_oid(
+    Ref,
+    OID,
+    State0 = #state{
+      queries = Queries0,
+      objects = Objects0
+    }
+)->
+  try
+    Query0 = #query{set = Set0} = maps:get(Ref, Queries0),
+    Object = ecomet_object:construct(OID),
+    ActualFields = ecomet_object:read_all(Object),
+    Set = ecomet_resultset:add_oid(OID, Set0),
+    Query = Query0#query{set = Set},
+    Objects = add_queries_to_object(#{Ref => Query}, OID, ActualFields, Objects0),
+    State = State0#state{
+      queries = Queries0#{Ref => Query},
+      objects = Objects
+    },
+    ?LOGINFO("subscription object verification add object ~p to query ~p",[OID,Ref]),
+    queries_notify(
+      [Ref],
+      #{
+        oid => OID,
+        self => undefined,
+        action => create,
+        fields => ActualFields
+      },
+      State
+    ),
+    State
+  catch
+    _:E:S->
+      ?LOGERROR(
+        "subscription object verification query ~p add object ~p error: ~p, stack ~p",
+        [Ref,OID,E,S]
+      ),
+      State0
+  end.
+
+verify_query_delete(Ref, DelOIDs, State0)->
+  lists:foldl(
+    fun(OID, State)->
+      verify_query_delete_oid(Ref, OID, State)
+    end,
+    State0,
+    DelOIDs
+  ).
+
+verify_query_delete_oid(
+    Ref,
+    OID,
+    State0 = #state{
+      queries = Queries0,
+      objects = Objects0
+    }
+)->
+  try
+    Query0 = #query{set = Set0} = maps:get(Ref, Queries0),
+    queries_notify(
+      [Ref],
+      #{oid => OID, self => undefined, action => delete},
+      State0
+    ),
+    Set = ecomet_resultset:remove_oid(OID, Set0),
+    Query = Query0#query{set = Set},
+    Objects = remove_queries_from_object(#{Ref => Query0}, OID, Objects0),
+    ?LOGINFO("subscription object verification remove object ~p from query ~p",[OID,Ref]),
+    State0#state{
+      queries = Queries0#{Ref => Query},
+      objects = Objects
+    }
+  catch
+    _:E:S->
+      ?LOGERROR(
+        "subscription object verification query ~p delete object ~p error: ~p, stack ~p",
+        [Ref,OID,E,S]
+      ),
+      State0
+  end.
+
+%--------------------------------------------------------------------
+% Verify objects
+%--------------------------------------------------------------------
+verify_objects(State0 = #state{objects = Objects})->
+  maps:fold(
+    fun(OID, Object, State)->
+      try
+        verify_object_state(OID, Object, State)
+      catch
+        _:E:S->
+          ?LOGERROR("subscription object verification object ~p error: ~p, stack ~p",[OID,E,S]),
+          State
+      end
+    end,
+    State0,
+    Objects
+  ).
+
+verify_object_state(
+    OID,
+    #object{
+      instance = Object,
+      fields = Fields
+    },
+    State0
+)->
+  case ecomet_object:exists(OID) of
+    true ->
+      verify_object_fields(OID, Object, Fields, State0);
+    _->
+      ?LOGINFO("subscription object verification delete object ~p",[OID]),
+      notify(#{oid => OID, self => undefined, action => delete}, State0)
+  end.
+
+verify_object_fields(OID, Object, Fields, State0)->
+  ActualFields = ecomet_object:read_fields(Object, maps:keys(Fields)),
+  ChangedFields =
+    maps:fold(
+      fun(Field, ActualValue, Acc)->
+        case maps:get(Field, Fields) of
+          ActualValue ->
+            Acc;
+          _StaleValue ->
+            Acc#{
+              Field => ActualValue
+            }
+        end
+      end,
+      #{},
+      ActualFields
+    ),
+  case map_size(ChangedFields) of
+    0 ->
+      State0;
+    _->
+      ?LOGINFO(
+        "subscription object verification update object ~p fields ~p",
+        [OID, maps:keys(ChangedFields)]
+      ),
+      notify(#{
+        oid => OID,
+        self => undefined,
+        action => light_update,
+        fields => ChangedFields
+      }, State0)
+  end.

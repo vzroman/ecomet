@@ -21,15 +21,6 @@ start_link() ->
 
 init([]) ->
 
-  NodesServer = #{
-    id=>ecomet_subscription_nodes,
-    start=>{ecomet_subscription_nodes,start_link,[_IsActive = true]},
-    restart=>permanent,
-    shutdown=> brutal_kill,
-    type=>worker,
-    modules=>[ecomet_subscription_nodes]
-  },
-
   Pool = #{
     id=>ecomet_subscription_pool,
     start=>{ecomet_subscription_pool,start_link,[]},
@@ -37,6 +28,15 @@ init([]) ->
     shutdown=> infinity,
     type=>supervisor,
     modules=>[ecomet_subscription_pool]
+  },
+
+  NodesServer = #{
+    id=>ecomet_subscription_nodes,
+    start=>{ecomet_subscription_nodes,start_link,[_IsActive = true]},
+    restart=>permanent,
+    shutdown=> brutal_kill,
+    type=>worker,
+    modules=>[ecomet_subscription_nodes]
   },
 
   QueryServer = #{
@@ -56,8 +56,8 @@ init([]) ->
 
   {ok, {Supervisor,
     [
-      NodesServer,
       Pool,
+      NodesServer,
       QueryServer
     ]
   }}.
