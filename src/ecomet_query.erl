@@ -67,7 +67,8 @@
   groups_page/2,
   compare_rows/3,
   sort_leafs/3,
-  compile_map_reduce/3
+  compile_map_reduce/3,
+  compile_subscribe_read/2
 ]).
 
 -endif.
