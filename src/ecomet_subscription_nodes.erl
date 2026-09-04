@@ -121,7 +121,7 @@ handle_info({Ref, leave, ?MODULE, PIDs}, #state{
 
   {noreply, State};
 
-handle_info({split_brain, Node}, State) ->
+handle_info({'$zaya_subscriptions$','@schema@',{split_brain, Node},_Node,_PID}, State) ->
   ?LOGWARNING(
     "split brain event from ~p, verify subscriptions in ~p ms",
     [Node, ?SPLIT_BRAIN_VERIFY_DELAY_MS]
@@ -131,6 +131,8 @@ handle_info({split_brain, Node}, State) ->
     self(),
     split_brain_verify
   ),
+  {noreply, State};
+handle_info({'$zaya_subscriptions$','@schema@',_Other,_Node,_PID}, State) ->
   {noreply, State};
 
 handle_info(split_brain_verify, State) ->
