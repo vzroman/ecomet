@@ -224,7 +224,7 @@ global_reset(Tag, Version)->
 %%        OTP
 %%=================================================================
 start_link(N)->
-  gen_server:start_link({local,?NAME(N)}, ?MODULE, [], []).
+  gen_server:start_link({local,?NAME(N)}, ?MODULE, [], [{spawn_opt,[{message_queue_data, off_heap}]}]).
 
 
 init([]) ->
