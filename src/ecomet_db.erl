@@ -553,7 +553,7 @@ commit(Ref, Module, Data , Delete , _IndexLog = none) ->
 %%-----------------Write commit with index (no delete)----------------------------------
 commit(Ref, Module, Data, _Delete = none, IndexLog) ->
 
-  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
+  {ok, LockRef} = elock:lock(?LOCKS, Ref, [node()]),
   try
     case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
       { IndexWrite, IndexDel } when length( IndexDel ) > 0 ->
@@ -562,13 +562,13 @@ commit(Ref, Module, Data, _Delete = none, IndexLog) ->
         Module:write( Ref, Data ++ IndexWrite)
     end
   after
-    Unlock()
+    elock:unlock(LockRef)
   end;
 
 %%-----------------Delete commit with index (no write)----------------------------------
 commit(Ref, Module, _Data = none, Delete, IndexLog) ->
 
-  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
+  {ok, LockRef} = elock:lock(?LOCKS, Ref, [node()]),
   try
     case ecomet_index:prepare_write(Module, Ref, IndexLog ) of
       { IndexWrite, IndexDel } when length( IndexWrite ) > 0 ->
@@ -577,11 +577,11 @@ commit(Ref, Module, _Data = none, Delete, IndexLog) ->
         Module:delete( Ref, Delete ++ IndexDel)
     end
   after
-    Unlock()
+    elock:unlock(LockRef)
   end;
 
 commit(Ref, Module, Data, Delete, IndexLog)->
-  {ok, Unlock} = elock:lock(?LOCKS, Ref, _IsShared = false, _Timeout = infinity),
+  {ok, LockRef} = elock:lock(?LOCKS, Ref, [node()]),
 
   try
     { IndexWrite, IndexDel } = ecomet_index:prepare_write(Module, Ref, IndexLog ),
@@ -594,7 +594,7 @@ commit(Ref, Module, Data, Delete, IndexLog)->
         Module:commit( Ref, Data ++ IndexWrite, Delete ++ IndexDel)
     end
   after
-    Unlock()
+    elock:unlock(LockRef)
   end.
 
 two_phase_commit(#ref{tlog = TLog, storages = Storages, name = Name} = Ref, Write, Delete, Index)->

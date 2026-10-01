@@ -238,10 +238,18 @@
 %%=================================================================
 %%	SCHEMA API
 %%=================================================================
+% The release function must be called by the process that acquired the lock.
+-spec lock() -> fun(() -> ok).
 lock()->
-  case elock:lock(?LOCKS, ?schema_lock ,_IsShared = false, _Timeout = infinity, zaya:db_available_nodes(?SCHEMA)) of
-    {ok,Unlock} -> Unlock;
-    {error, deadlock}-> lock();
+  lock(zaya:db_available_nodes(?SCHEMA)).
+
+lock([])->
+  % Preserve the no-op lock when no schema nodes are available.
+  fun()-> ok end;
+lock(Nodes)->
+  case elock:lock(?LOCKS, ?schema_lock, Nodes) of
+    {ok, LockRef} -> fun()-> elock:unlock(LockRef) end;
+    {error, {deadlock, _Lock}}-> lock();
     {error, Error}-> throw({schema_lock_error, Error})
   end.
 
