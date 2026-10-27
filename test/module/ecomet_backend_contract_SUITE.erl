@@ -20,6 +20,8 @@
 -include_lib("ecomet.hrl").
 -include_lib("ecomet_test.hrl").
 
+-define(SCHEMA, 'ECOMET_SCHEMA').
+
 -record(key, {type, storage, key}).
 -record(ref, {name, storages, tlog = undefined}).
 -record(commit, {write, delete, index}).
@@ -38,9 +40,14 @@
   db_prepare_rollback_routes_boolean_indexes_through_ecomet_index/1,
   db_commit_can_apply_prepared_mixed_rollback/1,
   db_commit_can_apply_prepared_delete_with_index_rollback/1,
+  db_index_commit_releases_lock_on_error/1,
   db_commit_logs_original_ops_before_protected_storage_commit/1,
   db_commit_skips_log_for_single_storage_commit/1,
-  db_open_replays_pending_tlog_entries/1
+  db_open_replays_pending_tlog_entries/1,
+  schema_lock_releases_lock/1,
+  schema_lock_without_available_nodes/1,
+  schema_lock_retries_deadlock/1,
+  schema_lock_wraps_error/1
 ]).
 
 %% Test backend API
@@ -65,9 +72,14 @@ all()->
     db_prepare_rollback_routes_boolean_indexes_through_ecomet_index,
     db_commit_can_apply_prepared_mixed_rollback,
     db_commit_can_apply_prepared_delete_with_index_rollback,
+    db_index_commit_releases_lock_on_error,
     db_commit_logs_original_ops_before_protected_storage_commit,
     db_commit_skips_log_for_single_storage_commit,
-    db_open_replays_pending_tlog_entries
+    db_open_replays_pending_tlog_entries,
+    schema_lock_releases_lock,
+    schema_lock_without_available_nodes,
+    schema_lock_retries_deadlock,
+    schema_lock_wraps_error
   ].
 
 groups()->
@@ -195,6 +207,32 @@ db_commit_can_apply_prepared_delete_with_index_rollback(_Config)->
     [_ | _] = find(RamRef, #{})
   end).
 
+-spec db_index_commit_releases_lock_on_error(list()) -> ok.
+db_index_commit_releases_lock_on_error(_Config)->
+  with_ref(fun(Ref = #ref{storages = #{ram := {_, RamRef}}})->
+    meck:new(ecomet_index),
+    meck:expect(ecomet_index, prepare_write, fun(?MODULE, RamRef0, _IndexLog)->
+      ?assertEqual(RamRef, RamRef0),
+      ?assertEqual({error, timeout}, lock_from_other_process(RamRef)),
+      error(index_prepare_failed)
+    end),
+    DataKey = #key{type = ram, storage = ?DATA, key = item},
+    IndexKey = {{<<"field">>, <<"value">>, simple}, [idl, 1, 0, 1]},
+    IndexWrite = {#key{type = ram, storage = ?INDEX, key = IndexKey}, true},
+    try
+      lists:foreach(fun({Write, Delete})->
+        ?assertError(index_prepare_failed, ecomet_db:commit(Ref, Write, Delete)),
+        ?assertEqual(ok, lock_from_other_process(RamRef))
+      end, [
+        {[{DataKey, new_value}, IndexWrite], []},
+        {[IndexWrite], [DataKey]},
+        {[{DataKey, new_value}, IndexWrite], [DataKey]}
+      ])
+    after
+      meck:unload(ecomet_index)
+    end
+  end).
+
 db_commit_logs_original_ops_before_protected_storage_commit(_Config)->
   with_ref(fun(#ref{storages = Storages})->
     with_tlog_mock(fun()->
@@ -292,6 +330,94 @@ db_open_replays_pending_tlog_entries(Config)->
     ),
     ok = ecomet_db:close(Ref)
   end).
+
+-spec schema_lock_releases_lock(list()) -> ok.
+schema_lock_releases_lock(_Config)->
+  with_schema_nodes([node()], fun()->
+    Unlock = ecomet_schema:lock(),
+    try
+      ?assertEqual({error, timeout}, lock_from_other_process({transform, ?SCHEMA}))
+    after
+      ok = Unlock()
+    end,
+    ?assertEqual(ok, lock_from_other_process({transform, ?SCHEMA}))
+  end).
+
+-spec schema_lock_without_available_nodes(list()) -> ok.
+schema_lock_without_available_nodes(_Config)->
+  with_schema_nodes([], fun()->
+    Unlock = ecomet_schema:lock(),
+    ?assertEqual(ok, Unlock())
+  end).
+
+-spec schema_lock_retries_deadlock(list()) -> ok.
+schema_lock_retries_deadlock(_Config)->
+  with_schema_nodes([node()], fun()->
+    Nodes = [node(), 'schema_peer@host'],
+    meck:expect(zaya, db_available_nodes, [?SCHEMA], meck:seq([[node()], Nodes])),
+    meck:new(elock),
+    LockRef = make_ref(),
+    Lock = {transform, ?SCHEMA},
+    meck:expect(elock, lock, 3, meck:seq([
+      {error, {deadlock, {?LOCKS, Lock, node()}}},
+      {ok, LockRef}
+    ])),
+    meck:expect(elock, unlock, [LockRef], ok),
+    try
+      Unlock = ecomet_schema:lock(),
+      ?assertEqual(1, meck:num_calls(elock, lock, [?LOCKS, Lock, [node()]])),
+      ?assertEqual(1, meck:num_calls(elock, lock, [?LOCKS, Lock, Nodes])),
+      ?assertEqual(0, meck:num_calls(elock, unlock, '_')),
+      ok = Unlock(),
+      ?assertEqual(1, meck:num_calls(elock, unlock, [LockRef]))
+    after
+      meck:unload(elock)
+    end
+  end).
+
+-spec schema_lock_wraps_error(list()) -> ok.
+schema_lock_wraps_error(_Config)->
+  with_schema_nodes([node()], fun()->
+    meck:new(elock),
+    Reason = {badrpc, nodedown},
+    meck:expect(elock, lock, 3, {error, Reason}),
+    try
+      ?assertThrow({schema_lock_error, Reason}, ecomet_schema:lock()),
+      ?assertEqual(1, meck:num_calls(elock, lock, '_'))
+    after
+      meck:unload(elock)
+    end
+  end).
+
+%% Lock checks run in another process because elock locks are reentrant.
+lock_from_other_process(Term)->
+  Parent = self(),
+  {Pid, Monitor} = spawn_monitor(fun()->
+    Result = case elock:lock(?LOCKS, Term, [node()], #{timeout => 100}) of
+      {ok, LockRef}-> elock:unlock(LockRef);
+      Error-> Error
+    end,
+    Parent ! {lock_result, self(), Result}
+  end),
+  receive
+    {lock_result, Pid, Result}->
+      erlang:demonitor(Monitor, [flush]),
+      Result;
+    {'DOWN', Monitor, process, Pid, Reason}->
+      ct:fail({lock_process_failed, Reason})
+  after 5000 ->
+    exit(Pid, kill),
+    erlang:demonitor(Monitor, [flush]),
+    ct:fail(lock_process_timeout)
+  end.
+
+with_schema_nodes(Nodes, Fun)->
+  meck:new(zaya),
+  meck:expect(zaya, db_available_nodes, [?SCHEMA], Nodes),
+  try Fun()
+  after
+    meck:unload(zaya)
+  end.
 
 with_ref(Fun)->
   RamRef = create_ref(),
