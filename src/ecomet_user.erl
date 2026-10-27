@@ -266,9 +266,9 @@ code_pass(Pass)->
 create_session(User,Info)->
   Context = get(?CONTEXT),
 
-  {ok,PID} = ecomet_session:start_link(User,Info),
+  ok = ecomet_session:start(User,Info),
 
-  put(?CONTEXT,Context#state{session = PID}),
+  put(?CONTEXT,Context#state{session = self()}),
   ok.
 
 set_context(User, Info)->
