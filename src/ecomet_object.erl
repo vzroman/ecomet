@@ -1185,6 +1185,27 @@ commit_update_full( #object{ oid = OID, pattern = P, db = DB }, Changes, ByStora
   % Update the index
   { Index, Tags } = ecomet_index:build_index(OID, IndexedFields, Index0 ),
 
+  {InitFields, InitTags} =
+    maps:fold(
+      fun(Type, Storage, {FAcc0, TAcc0})->
+        FAcc = maps:merge(maps:get(fields, Storage, #{}), FAcc0),
+        TAcc =
+          case Tags of
+            #{Type := {_Add, Other, _Del}} ->
+              if
+                TAcc0 =:= [] -> Other;
+                Other =:= [] -> TAcc0;
+                true -> Other ++ TAcc0
+              end;
+            _->
+              TAcc0
+          end,
+        {FAcc, TAcc}
+      end,
+      {#{}, []},
+      maps:without(maps:keys(ByStorageTypes), Storages)
+    ),
+
   %-----Commit changes---------------------------
   CommitAcc =  maps:fold(fun(Type, Fields, Acc)->
     commit_storage_update(#s_data{
@@ -1198,9 +1219,9 @@ commit_update_full( #object{ oid = OID, pattern = P, db = DB }, Changes, ByStora
     }, Acc )
   end, #full_update_acc{
     add_tags = ?EMPTY_SET,
-    other_tags = ?EMPTY_SET,
+    other_tags = ?NEW_SET(InitTags),
     del_tags = ?EMPTY_SET,
-    fields0 = #{}
+    fields0 = InitFields
   }, ByStorageTypes),
 
   #full_update_acc{

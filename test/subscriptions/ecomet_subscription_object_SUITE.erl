@@ -28,6 +28,7 @@
   object_delete_test/1,
   object_update_rights_test/1,
   query_subscribe_test/1,
+  query_cross_storage_test/1,
   query_additive_membership_test/1,
   query_simultaneous_add_overlap_refcount_test/1,
   query_multi_subscriptions_per_client_test/1,
@@ -133,6 +134,7 @@ groups()->
       [sequence],
       [
         query_subscribe_test,
+        query_cross_storage_test,
         query_additive_membership_test,
         query_simultaneous_add_overlap_refcount_test,
         query_multi_subscriptions_per_client_test,
@@ -210,6 +212,15 @@ init_per_suite(Config)->
     <<"parent_pattern">> => ?OID(<<"/root/.patterns/.object">>),
     <<"type">> => integer,
     <<"index">> => none
+  }),
+
+  ecomet:create_object(#{
+    <<".name">> => <<"f6">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.field">>),
+    <<".folder">> => P1,
+    <<"type">> => integer,
+    <<"storage">> => ram,
+    <<"index">> => [simple]
   }),
 
   F1 = ?OID(ecomet:create_object(#{
@@ -1976,6 +1987,96 @@ query_subscribe_test(Config)->
       } = S
 
     end || N <-ecomet_subscription_pool:get_workers() ],
+
+  ok.
+
+query_cross_storage_test(Config)->
+  P1 = ?GET(p1,Config),
+
+  ecomet:dirty_login(<<"system">>),
+
+  F = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"query_cross_storage_test">>,
+    <<".pattern">> => ?OID(<<"/root/.patterns/.folder">>),
+    <<".folder">> => ?OID(<<"/root">>)
+  })),
+
+  O = ?OID(ecomet:create_object(#{
+    <<".name">> => <<"object1">>,
+    <<".pattern">> => P1,
+    <<".folder">> => F,
+    <<"f1">> => <<"f1 value">>,
+    <<"f4">> => <<"f4 value">>
+  })),
+
+  Client = start_client(<<"system">>),
+  timer:sleep(100),
+
+  ok = ecomet_query:subscribe(
+    id1,
+    [root],
+    [<<"f1">>],
+    {'AND',[
+      {<<".folder">>,'=',F},
+      {<<"f4">>,':=',<<"f4 value">>},
+      {<<"f6">>,'=',1}
+    ]},
+    #{
+      stateless => false,
+      no_feedback => false,
+      client => Client
+    }
+  ),
+
+  ?assertEqual(
+    message_timeout,
+    from_client(Client)
+  ),
+
+  % RAM-only changes need the unchanged disc fields and tags for membership.
+  ecomet:edit_object(ecomet:open(O), #{<<"f6">> => 1}),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      create,
+      O,
+      #{
+        <<"f1">> => <<"f1 value">>
+      }
+    ),
+    from_client(Client)
+  ),
+
+  % Disc-only changes need the unchanged RAM tag to retain membership.
+  ecomet:edit_object(ecomet:open(O), #{<<"f1">> => <<"f1 value 2">>}),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      update,
+      O,
+      #{
+        <<"f1">> => <<"f1 value 2">>
+      }
+    ),
+    from_client(Client)
+  ),
+
+  ecomet:edit_object(ecomet:open(O), #{<<"f6">> => none}),
+
+  ?assertEqual(
+    ?SUBSCRIPTION(
+      id1,
+      delete,
+      O,
+      #{}
+    ),
+    from_client(Client)
+  ),
+
+  exit(Client, stop),
+  timer:sleep(100),
 
   ok.
 

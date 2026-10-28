@@ -139,7 +139,8 @@ nodes_split_brain_verifies_after_delay_test(_Config) ->
   {ok, Pid} = ecomet_subscription_nodes:start_link(false),
   ?assertEqual({schema_subscribe, Pid}, receive_schema_subscribe()),
 
-  Pid ! {split_brain, remote_node},
+  Pid ! {'$zaya_subscriptions$', '@schema@',
+    {split_brain, remote_node}, node(), self()},
   receive
     verify_called->
       error(verify_called_without_delay)
