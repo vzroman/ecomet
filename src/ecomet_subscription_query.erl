@@ -258,7 +258,7 @@ bitmap_search(Mask, TOldMask, TNewMask, And, Not) ->
 %%        OTP
 %%=================================================================
 start_link()->
-  gen_server:start_link({local,?MODULE}, ?MODULE, [], []).
+  gen_server:start_link({local,?MODULE}, ?MODULE, [], [{spawn_opt,[{message_queue_data, off_heap}]}]).
 
 
 init([]) ->
