@@ -83,7 +83,10 @@
 subscribe(Subscription=#subscribe{ })->
   case whereis(?MODULE) of
     PID when is_pid(PID) ->
-      gen_server:call(?MODULE, Subscription, ?CALL_TIMEOUT);
+      case gen_server:call(?MODULE, Subscription, ?CALL_TIMEOUT) of
+        ok -> ok;
+        {error, Error} -> throw(Error)
+      end;
     _->
       throw(subscriptions_off)
   end.

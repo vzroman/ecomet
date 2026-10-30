@@ -317,8 +317,8 @@ not_exists_test(_Config)->
 
   % add subscription to not existing object
   NotExistsOID = {3,99999999999},
-  ?assertEqual(
-    {error,{not_exists, NotExistsOID}},
+  ?assertThrow(
+    {not_exists, NotExistsOID},
     ecomet_subscription_object:subscribe(Subscribe0#subscribe{
       conditions = NotExistsOID
     })
@@ -327,8 +327,8 @@ not_exists_test(_Config)->
 
   % add subscription to invalid oid
   InvalidOID = {999999999999,3},
-  ?assertEqual(
-    {error,{not_exists, InvalidOID}},
+  ?assertThrow(
+    {not_exists, InvalidOID},
     ecomet_subscription_object:subscribe(Subscribe0#subscribe{
       conditions = InvalidOID
     })

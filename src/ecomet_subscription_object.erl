@@ -126,7 +126,10 @@ subscribe(
     0 ->
       throw(subscriptions_off);
     _->
-      gen_server:call(?WORKER(OID), Subscription, ?CALL_TIMEOUT)
+      case gen_server:call(?WORKER(OID), Subscription, ?CALL_TIMEOUT) of
+        ok -> ok;
+        {error, Error} -> throw(Error)
+      end
   end.
 
 unsubscribe(Client, SubsID)->

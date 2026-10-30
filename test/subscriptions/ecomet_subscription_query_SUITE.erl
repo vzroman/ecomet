@@ -232,8 +232,8 @@ transform_test(_Config) ->
   ?assertEqual(true, lists:member({process,Client2}, Monitors2)),
 
   %---------------Third subscription----------------------------
-  ?assertEqual(
-    {error,{not_unique_subscription, id1}},
+  ?assertThrow(
+    {not_unique_subscription, id1},
     ecomet_subscription_query:subscribe(Subscribe1#subscribe{
       client = Client2,
       conditions = {<<"f2">>,'=', value2}
