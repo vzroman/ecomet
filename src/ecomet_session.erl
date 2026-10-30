@@ -138,6 +138,7 @@ start_link()->
 
 -spec init([]) -> {ok, nostate}.
 init([])->
+  erlang:process_flag(message_queue_data, off_heap),
   % The monitor owns both tables and is the sole writer of session rows.
   ets:new(?SESSIONS,[named_table,protected,ordered_set,{keypos, #session.id}]),
   ets:new(?ECOMET_SESSION_TOKENS,[named_table,public,set]),
