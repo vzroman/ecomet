@@ -5,7 +5,7 @@
 -include("ecomet.hrl").
 -include("ecomet_subscription.hrl").
 
--define(CALL_TIMEOUT, 60000).
+-define(CALL_TIMEOUT, infinity).
 -define(S_INDEX,ecomet_subscriptions_index).
 -define(S_GLOBAL, ecomet_subscriptions_global).
 -define(GLOBAL_SNAPSHOT_VERSION, {snapshot, version}).

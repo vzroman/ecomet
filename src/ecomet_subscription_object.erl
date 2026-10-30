@@ -5,7 +5,7 @@
 -include("ecomet.hrl").
 -include("ecomet_subscription.hrl").
 
--define(CALL_TIMEOUT, 60000).
+-define(CALL_TIMEOUT, infinity).
 -define(NAME(N),list_to_atom("ecomet_subscription_object_"++integer_to_list(N))).
 -define(WORKER(OID, Size), ?NAME(erlang:phash2(OID, Size))).
 -define(WORKER(OID), ?WORKER(OID, ecomet_subscription_pool:get_size())).
